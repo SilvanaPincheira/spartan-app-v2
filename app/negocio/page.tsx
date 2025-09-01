@@ -9,7 +9,7 @@ const DEFAULT_CATALOG_URL =
 const DEFAULT_LOGO =
   "https://assets.jumpseller.com/store/spartan-de-chile/themes/317202/options/27648963/Logo-spartan-white.png?1600810625";
 const SUGGEST_ID = "catalog-suggest";
-const VIABILITY_THRESHOLD = 0.005; // 0,50%
+const VIABILITY_THRESHOLD = 0.50; // 50%
 
 /* ===================== HELPERS ===================== */
 function money(n: number) {
