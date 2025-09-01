@@ -1,3 +1,4 @@
+// app/comodatos/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -13,10 +14,8 @@ const DEFAULT_CATALOG_URL =
 const DEFAULT_SN_URL =
   "https://docs.google.com/spreadsheets/d/1kF0INEtwYDXhQCBPTVhU8NQI2URKoi99Hs43DTSO02I/edit?gid=161671364#gid=161671364";
 
-const VIABILITY_THRESHOLD = 0.005; // 0,50%
+const VIABILITY_THRESHOLD = 0.50; // 50%
 const SUGGEST_ID = "catalog-suggest";
-const DEFAULT_LOGO_URL = "/logo.png"; // si pones el archivo en /public/logo.png
-
 
 /* ===================== HELPERS ===================== */
 function money(n: number) {
@@ -44,6 +43,18 @@ function parseDateLike(d: any): Date | null {
   const t = Date.parse(s);
   return Number.isNaN(t) ? null : new Date(t);
 }
+function getDateFromRow(r: any): Date | null {
+  const cand =
+    r?.DocDate ??
+    r?.["Doc Date"] ??
+    r?.["Posting Date"] ??
+    r?.["PostingDate"] ??
+    r?.Fecha ??
+    r?.["Fecha Documento"] ??
+    r?.["Fecha Doc."] ??
+    r?.["Fecha Contabilización"];
+  return parseDateLike(cand);
+}
 function rango6Meses(base = new Date()) {
   const end = new Date(base.getFullYear(), base.getMonth() + 1, 1);
   const start = new Date(base.getFullYear(), base.getMonth() - 5, 1);
@@ -54,8 +65,6 @@ function useLocalStorage<T>(key: string, initial: T) {
     if (typeof window === "undefined") return initial;
     const raw = window.localStorage.getItem(key);
     return raw ? (JSON.parse(raw) as T) : initial;
-    const DEFAULT_LOGO_URL = "/logo.png"; // si pones el archivo en /public/logo.png
-
   });
   useEffect(() => {
     if (typeof window !== "undefined") window.localStorage.setItem(key, JSON.stringify(state));
@@ -181,10 +190,26 @@ function simpleNorm(s: string) {
     .toUpperCase();
 }
 function sanitizeRut(r: string) {
-  return (r || "").replace(/\./g, "").toUpperCase();
+  return (r || "").toString().replace(/[^0-9Kk]+/g, "").toUpperCase();
+}
+function formatRut(rSan: string) {
+  const s = sanitizeRut(rSan);
+  if (!s) return "";
+  const cuerpo = s.slice(0, -1);
+  const dv = s.slice(-1);
+  return `${cuerpo}-${dv}`;
+}
+function extractRutFromAny(s: string) {
+  const txt = String(s || "").trim();
+  const m = txt.match(/(\d{1,3}(?:\.\d{3})*|\d{7,9})-[0-9Kk]/);
+  const withDash = m ? m[0] : txt;
+  return sanitizeRut(withDash);
+}
+function normCode(s: string) {
+  return (s || "").toString().trim().toUpperCase();
 }
 
-/* === Imagen a dataURL para PDF (soporta data: URIs) === */
+/* === Imagen a dataURL para PDF === */
 async function fetchImageAsDataURL(url: string): Promise<{ dataUrl: string; format: "PNG" | "JPEG" } | null> {
   try {
     if (/^data:image\/(png|jpeg|jpg);base64,/i.test(url)) {
@@ -207,8 +232,6 @@ async function fetchImageAsDataURL(url: string): Promise<{ dataUrl: string; form
     return null;
   }
 }
-
-/* === NUEVO: obtener tamaño de imagen para mantener proporción === */
 async function getImageSize(dataUrl: string): Promise<{ w: number; h: number } | null> {
   return new Promise((resolve) => {
     const im = new Image();
@@ -222,6 +245,9 @@ async function getImageSize(dataUrl: string): Promise<{ w: number; h: number } |
 type VentasRow = {
   DocDate?: any;
   "Rut Cliente"?: string;
+  "RUT Cliente"?: string;
+  "RUT"?: string;
+  Rut?: string;
   "Nombre Cliente"?: string;
   ItemCode?: string;
   Dscription?: string;
@@ -233,7 +259,9 @@ type VentasRow = {
   "Comuna"?: string;
   "Ciudad"?: string;
   "Codigo Cliente"?: string;
+  "Código Cliente"?: string;
   "odigo liente"?: string;
+  CardCode?: string;
 };
 type ComodatoRow = {
   "Rut Cliente"?: string;
@@ -280,9 +308,15 @@ type ProposedItem = {
 };
 type ClienteOpt = { code: string; name: string; direccion: string; ejecutivo: string };
 
+/* Maestro por RUT con dirección por código */
+type ClientMaster = {
+  name: string;
+  ejecutivo: string;
+  codeToAddress: Record<string, string>;
+};
+
 /* ===================== COMPONENTE ===================== */
 export default function Page() {
-  // admin=1 para ver fuentes
   const [admin, setAdmin] = useState(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -303,7 +337,11 @@ export default function Page() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   });
   const [clienteCodigo, setClienteCodigo] = useState<string>("");
+
+  // RUT interno normalizado y texto del input
   const [rutFiltro, setRutFiltro] = useLocalStorage("cliente.rut", "");
+  const [rutInput, setRutInput] = useState<string>("");
+
   const [clienteNombre, setClienteNombre] = useState<string>("");
   const [clienteDireccion, setClienteDireccion] = useState<string>("");
   const [ejecutivoNombre, setEjecutivoNombre] = useState<string>("");
@@ -327,9 +365,16 @@ export default function Page() {
   const [showAllVentas, setShowAllVentas] = useState(false);
   const [showAllComodatos, setShowAllComodatos] = useState(false);
 
-  // Cache ventas y opciones de código-cliente por RUT
   const [ventasCache, setVentasCache] = useState<VentasRow[] | null>(null);
   const [clienteCodOptions, setClienteCodOptions] = useState<ClienteOpt[]>([]);
+
+  const [clientMasterByRut, setClientMasterByRut] = useState<Map<string, ClientMaster>>(new Map());
+  const [rutOptions, setRutOptions] = useState<{ rut: string; label: string }[]>([]);
+
+  // Mantener lo que se muestra en el input a partir del rutFiltro
+  useEffect(() => {
+    setRutInput(formatRut(rutFiltro));
+  }, [rutFiltro]);
 
   const viabilidadPct = totalVentaMes > 0 ? totalMgn3 / totalVentaMes : 0;
   const isViable = viabilidadPct >= VIABILITY_THRESHOLD;
@@ -387,7 +432,7 @@ export default function Page() {
     })();
   }, [catalogUrl]);
 
-  /* ---------- Helpers Propuestos ---------- */
+  /* ---------- Propuestos (tus cálculos intactos) ---------- */
   function addProposed() {
     const now = new Date();
     const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -418,78 +463,110 @@ export default function Page() {
     return rows;
   }
 
-  async function autofillByCodigoCliente(code: string) {
-    try {
-      const rows = await ensureVentasCache();
-      const codigoNorm = String(code || "").trim().toUpperCase();
-      if (!codigoNorm) return;
-      const hit =
-        rows.find((r) => String(r["Codigo Cliente"] ?? r["odigo liente"] ?? "").toString().trim().toUpperCase() === codigoNorm) ||
-        null;
-      if (!hit) return;
-      const rut = String(hit["Rut Cliente"] ?? "").trim();
-      const nom = String(hit["Nombre Cliente"] ?? "").trim();
-      const dirBase = String(hit["Direccion"] ?? "").trim();
-      const comuna = String(hit["Comuna"] ?? "").trim();
-      const ciudad = String(hit["Ciudad"] ?? "").trim();
-      const direccion = [dirBase, comuna, ciudad].filter(Boolean).join(", ");
-      const ej = String(hit["Èmpleado Ventas"] ?? hit["Empleado ventas"] ?? "").trim();
-      setRutFiltro(rut);
-      setClienteNombre(nom);
-      setClienteDireccion(direccion);
-      setEjecutivoNombre(ej);
-    } catch (e: any) {
-      setLoadError(e?.message ?? "No se pudo autocompletar por código");
-    }
-  }
+  /* ---------- Maestro por RUT (SN + respaldo Ventas) ---------- */
+  useEffect(() => {
+    (async () => {
+      try {
+        const map = new Map<string, ClientMaster>();
 
-  /* ---------- Opciones de Código cliente por RUT (usa Maestro SN y si no, Ventas 6M) ---------- */
+        // Maestro SN
+        const { id: snId, gid: snGid } = normalizeGoogleSheetUrl(snUrl || "");
+        if (snId) {
+          try {
+            const rows = await loadSheetSmart(snId, snGid, "Maestro SN");
+            for (const r of rows) {
+              const rut = sanitizeRut(String(r["RUT"] ?? r.Rut ?? r.rut ?? ""));
+              if (!rut) continue;
+
+              const code = normCode(String(r["CardCode"] ?? r.CardCode ?? ""));
+              const name = String(r["CardName"] ?? r.CardName ?? "").trim();
+              const dirBase = String(r["Dirección Despacho"] ?? r["Direccion Despacho"] ?? "").trim();
+              const comuna = String(r["Despacho Comuna"] ?? "").trim();
+              const ciudad = String(r["Despacho Ciudad"] ?? "").trim();
+              const address = [dirBase, comuna, ciudad].filter(Boolean).join(", ");
+              const ejecutivo = String(r["Empleado Ventas"] ?? r["Èmpleado Ventas"] ?? r["Empleado ventas"] ?? "").trim();
+
+              const prev = map.get(rut) ?? { name: name || "", ejecutivo: ejecutivo || "", codeToAddress: {} };
+              if (code) {
+                if (address && !prev.codeToAddress[code]) prev.codeToAddress[code] = address;
+                if (!prev.codeToAddress[code]) prev.codeToAddress[code] = "";
+              }
+              if (!prev.name && name) prev.name = name;
+              if (!prev.ejecutivo && ejecutivo) prev.ejecutivo = ejecutivo;
+              map.set(rut, prev);
+            }
+          } catch { /* respaldo con ventas */ }
+        }
+
+        // Respaldo Ventas
+        const { id: vId, gid: vGid } = normalizeGoogleSheetUrl(ventasUrl);
+        if (vId) {
+          try {
+            const vrows = (await loadSheetSmart(vId, vGid, "Ventas 6M")) as VentasRow[];
+            for (const r of vrows) {
+              const rut = sanitizeRut(String(r["Rut Cliente"] ?? r["RUT Cliente"] ?? r["RUT"] ?? r["Rut"] ?? ""));
+              if (!rut) continue;
+
+              const code = normCode(String(r["Codigo Cliente"] ?? r["Código Cliente"] ?? r["odigo liente"] ?? r["CardCode"] ?? ""));
+              const name = String(r["Nombre Cliente"] ?? "").trim();
+              const dirBase = String(r["Direccion"] ?? "").trim();
+              const comuna = String(r["Comuna"] ?? "").trim();
+              const ciudad = String(r["Ciudad"] ?? "").trim();
+              const address = [dirBase, comuna, ciudad].filter(Boolean).join(", ");
+              const ejecutivo = String(r["Èmpleado Ventas"] ?? r["Empleado ventas"] ?? "").trim();
+
+              const prev = map.get(rut) ?? { name: name || "", ejecutivo: ejecutivo || "", codeToAddress: {} };
+              if (code) {
+                if (address && !prev.codeToAddress[code]) prev.codeToAddress[code] = address;
+                if (!prev.codeToAddress[code]) prev.codeToAddress[code] = "";
+              }
+              if (!prev.name && name) prev.name = name;
+              if (!prev.ejecutivo && ejecutivo) prev.ejecutivo = ejecutivo;
+              map.set(rut, prev);
+            }
+          } catch {}
+        }
+
+        setClientMasterByRut(map);
+
+        const opts = Array.from(map.entries()).map(([rutSan, info]) => ({
+          rut: rutSan,
+          label: `${formatRut(rutSan)} — ${info.name || "S/NOMBRE"}`,
+        }));
+        opts.sort((a, b) => simpleNorm(a.label).localeCompare(simpleNorm(b.label)));
+        setRutOptions(opts);
+      } catch (e: any) {
+        setLoadError(e?.message ?? "No se pudo construir el maestro de clientes");
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snUrl, ventasUrl]);
+
+  /* ---------- Opciones de Código por RUT ---------- */
   async function recalcClienteCodOptions() {
     try {
-      if (!rutFiltro) {
+      const rutSan = sanitizeRut(rutFiltro);
+      if (!rutSan) {
         setClienteCodOptions([]);
         return;
       }
-      const rutSan = sanitizeRut(rutFiltro);
+      const hit = clientMasterByRut.get(rutSan);
+      const opts: ClienteOpt[] = [];
 
-      // 1) Maestro SN
-      let opts: ClienteOpt[] = [];
-      const { id: snId, gid: snGid } = normalizeGoogleSheetUrl(snUrl || "");
-      if (snId) {
-        try {
-          const rows = await loadSheetSmart(snId, snGid, "Maestro SN");
-          const map = new Map<string, ClienteOpt>();
-          for (const r of rows) {
-            const rv = sanitizeRut(String(r["RUT"] ?? r.Rut ?? r.rut ?? ""));
-            if (rutSan && rv !== rutSan) continue;
-
-            const code = String(r["CardCode"] ?? r.CardCode ?? "").trim().toUpperCase();
-            if (!code) continue;
-
-            const name = String(r["CardName"] ?? r.CardName ?? "").trim();
-            const dirBase = String(r["Direccion Despacho"] ?? r["Dirección Despacho"] ?? "").trim();
-            const comuna = String(r["Despacho Comuna"] ?? "").trim();
-            const ciudad = String(r["Despacho Ciudad"] ?? "").trim();
-            const direccion = [dirBase, comuna, ciudad].filter(Boolean).join(", ");
-            const ejecutivo = String(r["Empleado Ventas"] ?? r["Èmpleado Ventas"] ?? r["Empleado ventas"] ?? "").trim();
-
-            map.set(code, { code, name, direccion, ejecutivo });
-          }
-          opts = Array.from(map.values()).sort((a, b) => a.code.localeCompare(b.code));
-        } catch {
-          opts = [];
+      if (hit) {
+        for (const [code, addr] of Object.entries(hit.codeToAddress)) {
+          opts.push({ code, name: hit.name || "", direccion: addr || "", ejecutivo: hit.ejecutivo || "" });
         }
       }
 
-      // 2) Respaldo: Ventas 6M
       if (!opts.length) {
         const rows = await ensureVentasCache();
         const map = new Map<string, ClienteOpt>();
         for (const r of rows) {
-          const rv = sanitizeRut(String(r["Rut Cliente"] ?? ""));
-          if (rutSan && rv !== rutSan) continue;
+          const rv = sanitizeRut(String(r["Rut Cliente"] ?? r["RUT Cliente"] ?? r["RUT"] ?? r["Rut"] ?? ""));
+          if (rv !== rutSan) continue;
 
-          const code = String(r["Codigo Cliente"] ?? r["odigo liente"] ?? "").trim().toUpperCase();
+          const code = normCode(String(r["Codigo Cliente"] ?? r["Código Cliente"] ?? r["odigo liente"] ?? r["CardCode"] ?? ""));
           if (!code) continue;
 
           const name = String(r["Nombre Cliente"] ?? "").trim();
@@ -501,14 +578,16 @@ export default function Page() {
 
           map.set(code, { code, name, direccion, ejecutivo });
         }
-        opts = Array.from(map.values()).sort((a, b) => a.code.localeCompare(b.code));
+        map.forEach((v) => opts.push(v));
       }
 
+      opts.sort((a, b) => a.code.localeCompare(b.code));
       setClienteCodOptions(opts);
 
-      if (opts.length && !opts.some((o) => o.code === (clienteCodigo || "").toUpperCase())) {
-        setClienteCodigo(opts[0].code);
-        applyClienteOption(opts[0]);
+      const base = opts[0];
+      if (base) {
+        setClienteCodigo(base.code);
+        applyClienteOption(base);
       }
     } catch {
       setClienteCodOptions([]);
@@ -516,10 +595,7 @@ export default function Page() {
   }
 
   function applyClienteOption(optOrCode: string | ClienteOpt) {
-    const opt =
-      typeof optOrCode === "string"
-        ? clienteCodOptions.find((o) => o.code === optOrCode.toUpperCase())
-        : optOrCode;
+    const opt = typeof optOrCode === "string" ? clienteCodOptions.find((o) => o.code === optOrCode.toUpperCase()) : optOrCode;
     if (!opt) return;
     setClienteNombre(opt.name);
     setClienteDireccion(opt.direccion);
@@ -529,9 +605,9 @@ export default function Page() {
   useEffect(() => {
     recalcClienteCodOptions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rutFiltro, ventasCache, snUrl]);
+  }, [rutFiltro, ventasCache, snUrl, clientMasterByRut]);
 
-  /* ---------- Cargar histórico 6M + Comodatos ---------- */
+  /* ---------- Cargar histórico 6M (por RUT; respaldo por código) ---------- */
   async function cargarHistorico6M() {
     setLoadError("");
     try {
@@ -540,33 +616,43 @@ export default function Page() {
       const ventasRows = (await loadSheetSmart(vId, vGid, "Ventas 6M")) as VentasRow[];
       setVentasCache(ventasRows);
 
-      const { start, end } = rango6Meses(new Date());
-      const rutSan = sanitizeRut(rutFiltro);
+      const rutSan = sanitizeRut(extractRutFromAny(rutFiltro));
+      const codeSan = normCode(String(clienteCodigo || ""));
 
-      const ventasFiltradas = ventasRows.filter((r) => {
-        const fecha = parseDateLike(r.DocDate);
-        if (!fecha) return false;
-        if (rutSan) {
-          const rv = sanitizeRut(String(r["Rut Cliente"] ?? ""));
-          if (rv !== rutSan) return false;
-        }
-        return fecha >= start && fecha < end;
+      const ventasPorRutOCod = ventasRows.filter((r) => {
+        const rv = sanitizeRut(String(r["Rut Cliente"] ?? r["RUT Cliente"] ?? r["RUT"] ?? r["Rut"] ?? ""));
+        const cv = normCode(String(r["Codigo Cliente"] ?? r["Código Cliente"] ?? r["odigo liente"] ?? r["CardCode"] ?? ""));
+        return (rutSan && rv === rutSan) || (codeSan && cv === codeSan);
       });
 
-      // Datos cliente base
-      const ref = ventasFiltradas[0];
-      if (ref) {
-        setClienteNombre(String(ref["Nombre Cliente"] ?? ""));
-        const dirBase = String(ref["Direccion"] ?? "").trim();
-        const comuna = String(ref["Comuna"] ?? "").trim();
-        const ciudad = String(ref["Ciudad"] ?? "").trim();
-        setClienteDireccion([dirBase, comuna, ciudad].filter(Boolean).join(", "));
-        const ej = String(ref["Èmpleado Ventas"] ?? ref["Empleado ventas"] ?? "").trim();
-        setEjecutivoNombre(ej);
-        setClienteCodigo(String(ref["Codigo Cliente"] ?? ref["odigo liente"] ?? ""));
+      const { start, end } = rango6Meses(new Date());
+      let ventasFiltradas = ventasPorRutOCod.filter((r) => {
+        const fecha = getDateFromRow(r);
+        return !!fecha && fecha >= start && fecha < end;
+      });
+      if (!ventasFiltradas.length) ventasFiltradas = ventasPorRutOCod;
+
+      const master = clientMasterByRut.get(rutSan);
+      if (master) {
+        setClienteNombre(master.name || "");
+        setEjecutivoNombre(master.ejecutivo || "");
+        const firstEntry = Object.entries(master.codeToAddress)[0];
+        setClienteDireccion(firstEntry?.[1] || "");
+        setClienteCodigo(firstEntry?.[0] || "");
+      } else {
+        const ref = ventasFiltradas[0];
+        if (ref) {
+          setClienteNombre(String(ref["Nombre Cliente"] ?? ""));
+          const dirBase = String(ref["Direccion"] ?? "").trim();
+          const comuna = String(ref["Comuna"] ?? "").trim();
+          const ciudad = String(ref["Ciudad"] ?? "").trim();
+          setClienteDireccion([dirBase, comuna, ciudad].filter(Boolean).join(", "));
+          const ej = String(ref["Èmpleado Ventas"] ?? ref["Empleado ventas"] ?? "").trim();
+          setEjecutivoNombre(ej);
+          setClienteCodigo(normCode(String(ref["Codigo Cliente"] ?? ref["Código Cliente"] ?? ref["odigo liente"] ?? ref["CardCode"] ?? "")));
+        }
       }
 
-      // Agregado por producto (solo "PT")
       const agregados = new Map<string, HistRow>();
       for (const r of ventasFiltradas) {
         const rawCode = String(r.ItemCode ?? "").trim();
@@ -605,15 +691,10 @@ export default function Page() {
       const venta6mTotal = result.reduce((a, x) => a + x.venta6m, 0);
       const ventaMesProm = venta6mTotal / 6;
 
-      // Comodatos históricos
       const { id: cId, gid: cGid } = normalizeGoogleSheetUrl(comodatosUrl);
       if (!cId) throw new Error("URL de comodatos inválida.");
       const comodatos = (await loadSheetSmart(cId, cGid, "Comodatos")) as ComodatoRow[];
-      const comCliente = comodatos.filter((r) => {
-        if (!rutSan) return true;
-        const rc = sanitizeRut(String(r["Rut Cliente"] ?? ""));
-        return rc === rutSan;
-      });
+      const comCliente = comodatos.filter((r) => sanitizeRut(String(r["Rut Cliente"] ?? "")) === rutSan);
 
       const hoy = new Date();
       const contratoDefault = Math.max(1, Number(months || 1));
@@ -636,14 +717,8 @@ export default function Page() {
         return { code, name, total, contratoMeses: contratoDefault, cuotasRestantes, periodoTexto, valorCuota };
       });
 
-      // Propuestos
       const proposedWithTotals = proposed
-        .map((p) => ({
-          ...p,
-          qty: Math.max(0, Number(p.qty || 0)),
-          unit: Math.max(0, Number(p.unit || 0)),
-          contractMonths: Math.max(1, Number(p.contractMonths || months || 1)),
-        }))
+        .map((p) => ({ ...p, qty: Math.max(0, Number(p.qty || 0)), unit: Math.max(0, Number(p.unit || 0)), contractMonths: Math.max(1, Number(p.contractMonths || months || 1)) }))
         .map((p) => ({ ...p, total: p.qty * p.unit, monthlyFee: (p.qty * p.unit) / p.contractMonths }));
 
       const comodatoMensualHistorico = comodatosV.reduce((a, r) => a + r.valorCuota, 0);
@@ -676,60 +751,51 @@ export default function Page() {
       setComodatosView(comodatosV);
       setTotalVentaMes(sumVentaMes);
       setTotalMgn3(sumMgn3);
+
+      recalcClienteCodOptions();
     } catch (e: any) {
       setLoadError(e?.message ?? "Error cargando datos");
     }
   }
 
-  // Totales de cuota (propuestos)
+  // Totales de cuota
   const cuotaVigenteTotal = comodatosView.reduce((a, r) => a + r.valorCuota, 0);
   const cuotaSimuladaTotal = proposed.reduce((a, r) => a + (r.monthlyFee || 0), 0);
   const nuevaCuotaTotal = cuotaVigenteTotal + cuotaSimuladaTotal;
 
-  /* ---------- PDF (alineaciones + LOGO proporcional) ---------- */
+  /* ---------- PDF (misma lógica) ---------- */
   async function descargarPdf() {
     const { jsPDF } = await import("jspdf");
     const doc = new jsPDF({ unit: "pt", format: "a4" });
 
-    const BLUE = { r: 31, g: 78, b: 216 }; // #1f4ed8
+    const BLUE = { r: 31, g: 78, b: 216 };
     const GREEN = { r: 22, g: 163, b: 74 };
     const RED = { r: 220, g: 38, b: 38 };
 
     const W = doc.internal.pageSize.getWidth();
-    const M = 36; // margen
+    const M = 36;
     let y = 0;
 
-    // Header azul
     doc.setFillColor(BLUE.r, BLUE.g, BLUE.b);
     doc.rect(0, 0, W, 80, "F");
     y = 80;
 
-    // Logo proporcional + Título
-    let titleX = M + 140; // fallback si no hay logo
+    let titleX = M + 140;
     if (logoUrl) {
       const img = await fetchImageAsDataURL(logoUrl);
       if (img) {
         const dims = await getImageSize(img.dataUrl);
-        const MAX_W = 160;
-        const MAX_H = 40;
-        let drawW = 120;
-        let drawH = 40;
+        const MAX_W = 160, MAX_H = 40;
+        let drawW = 120, drawH = 40;
         if (dims) {
-          const ar = dims.w / dims.h;
-          const boxAr = MAX_W / MAX_H;
-          if (ar > boxAr) {
-            drawW = MAX_W;
-            drawH = MAX_W / ar;
-          } else {
-            drawH = MAX_H;
-            drawW = MAX_H * ar;
-          }
+          const ar = dims.w / dims.h, boxAr = MAX_W / MAX_H;
+          if (ar > boxAr) (drawW = MAX_W, drawH = MAX_W / ar);
+          else (drawH = MAX_H, drawW = MAX_H * ar);
         }
         doc.addImage(img.dataUrl, img.format, M, 20, drawW, drawH);
         titleX = M + drawW + 24;
       }
     }
-    // Título
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(18);
@@ -748,9 +814,7 @@ export default function Page() {
     };
 
     const drawKVTable = (rows: [string, string][]) => {
-      const col1 = 120; // etiqueta más angosta => valores más a la izquierda
-      const col2 = W - 2 * M - col1;
-      const rowH = 18;
+      const col1 = 120, col2 = W - 2 * M - col1, rowH = 18;
       doc.setDrawColor(230, 230, 230);
       doc.setLineWidth(0.5);
       rows.forEach(([k, v], idx) => {
@@ -767,7 +831,6 @@ export default function Page() {
     const drawSimpleTable = (headers: string[], rows: (string | number)[][]) => {
       const tableW = W - 2 * M;
       const widths = [0.18, 0.42, 0.14, 0.13, 0.13].map((p) => Math.floor(tableW * p));
-      // Header
       doc.setFillColor(BLUE.r, BLUE.g, BLUE.b);
       doc.setTextColor(255, 255, 255);
       doc.setFont("helvetica", "bold"); doc.setFontSize(10);
@@ -775,34 +838,27 @@ export default function Page() {
       doc.rect(M, y, tableW, th, "F");
       headers.forEach((h, i) => { doc.text(h, x + 6, y + 13); x += widths[i]; });
       y += th;
-      // Filas
       doc.setTextColor(0, 0, 0);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9);
       const rowH = 16;
       rows.forEach((r) => {
         let px = M;
-        r.forEach((cell, i) => {
-          const txt = typeof cell === "string" ? cell : String(cell ?? "");
-          doc.text(txt, px + 6, y + 12, { maxWidth: widths[i] - 12 });
-          px += widths[i];
-        });
+        r.forEach((cell, i) => { const txt = typeof cell === "string" ? cell : String(cell ?? ""); doc.text(txt, px + 6, y + 12, { maxWidth: widths[i] - 12 }); px += widths[i]; });
         y += rowH;
         if (y > 760) { doc.addPage(); y = 48; }
       });
       y += 8;
     };
 
-    // ===== Datos del cliente =====
     drawSectionHeader("Datos del cliente");
     drawKVTable([
       ["Fecha", `${fechaEval}`],
       ["Cliente", `${clienteNombre || "—"}`],
-      ["RUT", `${rutFiltro || "—"}`],
+      ["RUT", `${formatRut(rutFiltro) || "—"}`],
       ["Dirección", `${clienteDireccion || "—"}`],
       ["Ejecutivo", `${ejecutivoNombre || "—"}`],
     ]);
 
-    // ===== KPIs =====
     drawSectionHeader("KPIs");
     drawKVTable([
       ["Prom. venta mensual ", money(promVentaMensual6m)],
@@ -811,7 +867,6 @@ export default function Page() {
       ["% Comisión final", pct(commissionFinal6m)],
     ]);
 
-    // Estado
     const label = isViable ? "Viable" : "No viable";
     const color = isViable ? GREEN : RED;
     doc.setFillColor(color.r, color.g, color.b);
@@ -822,12 +877,9 @@ export default function Page() {
     doc.setTextColor(0, 0, 0);
     y += 42;
 
-    // ===== Evaluación en vivo =====
     drawSectionHeader("Evaluación en vivo — Nuevos equipos");
     const headers = ["Código", "Descripción", "Cantidad", "Valor unitario", "Valor total"];
-    const rows = (proposed.length ? proposed : []).map((p) => [
-      p.code || "", p.name || "", String(p.qty || 0), money(p.unit || 0), money(p.total || 0),
-    ]);
+    const rows = (proposed.length ? proposed : []).map((p) => [p.code || "", p.name || "", String(p.qty || 0), money(p.unit || 0), money(p.total || 0)]);
     drawSimpleTable(headers, rows);
 
     const fname = `Solicitud_Comodato_${(clienteNombre || "Cliente").replace(/[^A-Za-z0-9_-]+/g, "_")}_${fechaEval}.pdf`;
@@ -848,9 +900,10 @@ export default function Page() {
     });
   }
 
-  /* ------- Limpiar para nuevo cliente ------- */
+  /* ------- Limpiar ------- */
   function limpiarTodo() {
     setRutFiltro("");
+    setRutInput("");
     setClienteCodigo("");
     setClienteNombre("");
     setClienteDireccion("");
@@ -873,7 +926,6 @@ export default function Page() {
   /* ============= UI ============= */
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-      {/* Header solicitado tal cual */}
       <header className="sticky top-0 z-40 relative overflow-hidden">
         <div className="absolute inset-0 bg-[#1f4ed8]" />
         <div className="absolute inset-y-0 right-[-20%] w-[60%] rotate-[-8deg] bg-sky-400/60" />
@@ -885,17 +937,23 @@ export default function Page() {
         </div>
       </header>
 
-      {/* Datalist catálogo productos */}
       <datalist id={SUGGEST_ID}>
         {suggestions.map((o) => (
           <option key={o.code} value={o.code} label={`${o.code} — ${o.name}`} />
         ))}
       </datalist>
 
+      {/* Datalist de RUT/Nombre */}
+      <datalist id="rutList">
+        {rutOptions.map((o) => (
+          <option key={o.rut} value={o.label} />
+        ))}
+      </datalist>
+
       <main className="mx-auto max-w-7xl px-6 py-6">
         {loadError && <div className="mb-4 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">{loadError}</div>}
 
-        {/* Fuentes (solo admin=1) */}
+        {/* Fuentes (admin) */}
         {admin && (
           <section className="rounded-2xl border bg-white p-6 shadow-sm">
             <h2 className="mb-4 text-lg font-semibold text-[#2B6CFF]">⚙️ Fuentes (Google Sheets)</h2>
@@ -926,24 +984,21 @@ export default function Page() {
                 Logo (URL imagen o data:image/png;base64,...)
                 <input className="mt-1 w-full rounded border px-2 py-1" value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://.../logo.png o data:..." />
                 <label className="text-xs md:col-span-2">
-  Subir logo (evita CORS)
-  <input
-    type="file"
-    accept="image/*"
-    className="mt-1 block w-full text-sm"
-    onChange={(e) => {
-      const f = e.target.files?.[0];
-      if (!f) return;
-      const reader = new FileReader();
-      reader.onload = () => setLogoUrl(String(reader.result)); // guarda como data URL
-      reader.readAsDataURL(f);
-    }}
-  />
-  <span className="text-[11px] text-zinc-500">
-    Se guardará como Data URL para que siempre aparezca en el PDF.
-  </span>
-</label>
-
+                  Subir logo (evita CORS)
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="mt-1 block w-full text-sm"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (!f) return;
+                      const reader = new FileReader();
+                      reader.onload = () => setLogoUrl(String(reader.result));
+                      reader.readAsDataURL(f);
+                    }}
+                  />
+                  <span className="text-[11px] text-zinc-500">Se guardará como Data URL para que siempre aparezca en el PDF.</span>
+                </label>
               </label>
             </div>
           </section>
@@ -959,7 +1014,6 @@ export default function Page() {
               <input type="date" className="w-40 rounded border px-2 py-1" value={fechaEval} onChange={(e) => setFechaEval(e.target.value)} />
             </label>
 
-            {/* Código cliente — Dirección */}
             <label className="flex items-center gap-2">
               <span>Código cliente</span>
               {clienteCodOptions.length > 0 ? (
@@ -984,14 +1038,90 @@ export default function Page() {
                   placeholder="Ej: C01234"
                   value={clienteCodigo}
                   onChange={(e) => setClienteCodigo(e.target.value)}
-                  onBlur={(e) => autofillByCodigoCliente(e.target.value)}
                 />
               )}
             </label>
 
+            {/* RUT: acepta nombre o rut */}
             <label className="flex items-center gap-2">
               <span>RUT</span>
-              <input className="w-44 rounded border px-2 py-1" placeholder="Ej: 76.123.456-7" value={rutFiltro} onChange={(e) => setRutFiltro(e.target.value)} />
+              <input
+                list="rutList"
+                className="w-64 rounded border px-2 py-1"
+                placeholder="Escribe RUT o nombre…"
+                value={rutInput}
+                onChange={(e) => setRutInput(e.target.value)}
+                onBlur={(e) => {
+                  const val = e.target.value.trim();
+
+                  // 1) coincidencia exacta con datalist
+                  const picked = rutOptions.find((o) => val === o.label);
+                  if (picked) {
+                    setRutFiltro(picked.rut);
+                    const info = clientMasterByRut.get(picked.rut);
+                    if (info) {
+                      const first = Object.entries(info.codeToAddress)[0];
+                      setClienteNombre(info.name || "");
+                      setEjecutivoNombre(info.ejecutivo || "");
+                      setClienteDireccion(first?.[1] || "");
+                      setClienteCodOptions(
+                        Object.entries(info.codeToAddress).map(([code, addr]) => ({
+                          code, name: info.name || "", direccion: addr || "", ejecutivo: info.ejecutivo || ""
+                        }))
+                      );
+                      if (first?.[0]) setClienteCodigo(first[0]);
+                    }
+                    cargarHistorico6M();
+                    return;
+                  }
+
+                  // 2) búsqueda por nombre parcial
+                  const valNorm = simpleNorm(val);
+                  const byName = rutOptions.find((o) => simpleNorm(o.label).includes(valNorm));
+                  if (byName) {
+                    setRutFiltro(byName.rut);
+                    const info = clientMasterByRut.get(byName.rut);
+                    if (info) {
+                      const first = Object.entries(info.codeToAddress)[0];
+                      setClienteNombre(info.name || "");
+                      setEjecutivoNombre(info.ejecutivo || "");
+                      setClienteDireccion(first?.[1] || "");
+                      setClienteCodOptions(
+                        Object.entries(info.codeToAddress).map(([code, addr]) => ({
+                          code, name: info.name || "", direccion: addr || "", ejecutivo: info.ejecutivo || ""
+                        }))
+                      );
+                      if (first?.[0]) setClienteCodigo(first[0]);
+                    }
+                    cargarHistorico6M();
+                    return;
+                  }
+
+                  // 3) rut escrito manualmente
+                  const rutSan = sanitizeRut(extractRutFromAny(val));
+                  if (rutSan) {
+                    setRutFiltro(rutSan);
+                    const info = clientMasterByRut.get(rutSan);
+                    if (info) {
+                      const first = Object.entries(info.codeToAddress)[0];
+                      setClienteNombre(info.name || "");
+                      setEjecutivoNombre(info.ejecutivo || "");
+                      setClienteDireccion(first?.[1] || "");
+                      setClienteCodOptions(
+                        Object.entries(info.codeToAddress).map(([code, addr]) => ({
+                          code, name: info.name || "", direccion: addr || "", ejecutivo: info.ejecutivo || ""
+                        }))
+                      );
+                      if (first?.[0]) setClienteCodigo(first[0]);
+                    }
+                    cargarHistorico6M();
+                    return;
+                  }
+
+                  // si no matchea nada, dejamos lo que escribió
+                  setRutInput(val);
+                }}
+              />
             </label>
 
             <label className="flex items-center gap-2">
@@ -1019,7 +1149,15 @@ export default function Page() {
               <input type="number" step={0.001} className="w-24 rounded border px-2 py-1 text-right" value={commissionPct} onChange={(e) => setCommissionPct(Number(e.target.value))} />
             </label>
 
-            <button onClick={cargarHistorico6M} className="rounded bg-[#2B6CFF] px-3 py-2 text-xs font-semibold text-white hover:bg-[#1F5AE6]">
+            <button
+              onClick={() => {
+                const picked = rutOptions.find((o) => rutInput.trim() === o.label);
+                const rutSan = picked ? picked.rut : sanitizeRut(extractRutFromAny(rutInput || rutFiltro));
+                if (rutSan) setRutFiltro(rutSan);
+                cargarHistorico6M();
+              }}
+              className="rounded bg-[#2B6CFF] px-3 py-2 text-xs font-semibold text-white hover:bg-[#1F5AE6]"
+            >
               Buscar
             </button>
             <button onClick={limpiarTodo} className="rounded bg-zinc-200 px-3 py-2 text-xs hover:bg-zinc-300">
