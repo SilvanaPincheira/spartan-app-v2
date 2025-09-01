@@ -36,7 +36,7 @@ export default function HomeMenu() {
         const res = await fetch(url, { cache: "no-store" });
         const text = await res.text();
 
-        // La respuesta de gviz viene envuelta
+        // La respuesta de gviz viene envuelta en "google.visualization.Query.setResponse(...)"
         const json = JSON.parse(text.substring(47).slice(0, -2));
         const data: string[][] = json.table.rows.map((r: any) =>
           r.c.map((c: any) => (c ? c.v : "")),
@@ -82,7 +82,7 @@ export default function HomeMenu() {
     () => [
       {
         name: "Ventas",
-        value: totalVentas, // <- dataKey="value"
+        value: totalVentas,
         fill:
           totalVentas >= totalMeta
             ? "#4CAF50"
@@ -187,11 +187,10 @@ export default function HomeMenu() {
                 angleAxisId={0}
                 tick={false}
               />
-              {/* minAngle removido para compatibilidad de tipos */}
+              {/* Sin minAngle y sin clockWise para compatibilidad de tipos */}
               <RadialBar
                 dataKey="value"
-                background={{ fill: "#e5e7eb" }} // gris claro tailwind-zinc-200
-                clockWise
+                background={{ fill: "#e5e7eb" }}
                 cornerRadius={50}
               />
               <ReferenceLine
