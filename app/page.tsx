@@ -8,7 +8,6 @@ import {
   RadialBarChart,
   RadialBar,
   PolarAngleAxis,
-  ReferenceLine,
 } from "recharts";
 
 const LOGO_URL =
@@ -187,23 +186,21 @@ export default function HomeMenu() {
                 angleAxisId={0}
                 tick={false}
               />
-              {/* Sin minAngle y sin clockWise para compatibilidad de tipos */}
+              {/* RadialBar compatible con tu versión: sin minAngle y sin clockWise */}
               <RadialBar
                 dataKey="value"
                 background={{ fill: "#e5e7eb" }}
                 cornerRadius={50}
-              />
-              <ReferenceLine
-                angle={0}
-                value={totalMeta}
-                stroke="#1f4ed8"
-                strokeWidth={3}
               />
             </RadialBarChart>
 
             {/* Porcentaje en grande */}
             <p className="mt-4 text-3xl font-bold text-zinc-700">
               {progreso.toFixed(1)} %
+            </p>
+            {/* Meta como texto (en lugar de ReferenceLine con angle) */}
+            <p className="mt-1 text-sm text-zinc-500">
+              Meta: <b>{totalMeta.toLocaleString("es-CL")}</b>
             </p>
           </div>
         </section>
