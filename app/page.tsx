@@ -1,40 +1,48 @@
+// app/page.tsx
 "use client";
 
+import Image from "next/image";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
-import { RadialBarChart, RadialBar, PolarAngleAxis, ReferenceLine } from "recharts";
+import { useEffect, useMemo, useState } from "react";
+import {
+  RadialBarChart,
+  RadialBar,
+  PolarAngleAxis,
+  ReferenceLine,
+} from "recharts";
 
 const LOGO_URL =
   "https://assets.jumpseller.com/store/spartan-de-chile/themes/317202/options/27648963/Logo-spartan-white.png?1600810625";
 
-// Función para limpiar y convertir valores a número
-const parseNumber = (value: any) => {
-  if (!value) return 0;
-  return Number(value.toString().replace(/[^0-9.-]+/g, ""));
+// Limpia y convierte a número valores que pueden venir con separadores/moneda
+const parseNumber = (value: unknown) => {
+  if (value === null || value === undefined) return 0;
+  return Number(value.toString().replace(/[^0-9.-]+/g, "")) || 0;
 };
 
 export default function HomeMenu() {
   const search = useSearchParams();
   const isAdmin = (search.get("admin") || "") === "1";
 
-  const [data, setData] = useState<string[][]>([]);
+  const [rows, setRows] = useState<string[][]>([]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         const spreadsheetId = "1GASOV0vl85q5STfvDn5hdZFD0Mwcj2SzXM6IqvgI50A";
-        const gid = "1307924129"; // pestaña Metas
+        const gid = "1307924129"; // pestaña "Metas"
         const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:json&gid=${gid}`;
 
-        const res = await fetch(url);
+        const res = await fetch(url, { cache: "no-store" });
         const text = await res.text();
-        const json = JSON.parse(text.substr(47).slice(0, -2));
 
-        const rows = json.table.rows.map((r: any) =>
-          r.c.map((c: any) => (c ? c.v : ""))
+        // La respuesta de gviz viene envuelta
+        const json = JSON.parse(text.substring(47).slice(0, -2));
+        const data: string[][] = json.table.rows.map((r: any) =>
+          r.c.map((c: any) => (c ? c.v : "")),
         );
 
-        setData(rows);
+        setRows(data);
       } catch (err) {
         console.error("Error cargando Google Sheets:", err);
       }
@@ -44,15 +52,50 @@ export default function HomeMenu() {
   }, []);
 
   // Filtrar solo filas de Gerencia = FB (Food)
-  const foodData = data.filter((row) => row[1]?.toString().startsWith("FB"));
+  const foodData = useMemo(
+    () => rows.filter((row) => row[1]?.toString().startsWith("FB")),
+    [rows],
+  );
 
-  // Calcular indicadores
-  const totalMeta = foodData.reduce((sum, r) => sum + parseNumber(r[8]), 0); // Meta
-  const totalVentas = foodData.reduce((sum, r) => sum + parseNumber(r[6]), 0); // Ventas
-  const totalCumplimiento = foodData.reduce((sum, r) => sum + parseNumber(r[9]), 0); // Cumplimiento $
+  // Calcular indicadores (ajusta índices si tu hoja cambia)
+  const totalMeta = useMemo(
+    () => foodData.reduce((sum, r) => sum + parseNumber(r[8]), 0), // Meta
+    [foodData],
+  );
+  const totalVentas = useMemo(
+    () => foodData.reduce((sum, r) => sum + parseNumber(r[6]), 0), // Ventas
+    [foodData],
+  );
+  const totalCumplimiento = useMemo(
+    () => foodData.reduce((sum, r) => sum + parseNumber(r[9]), 0), // Cumplimiento $
+    [foodData],
+  );
 
-  // Porcentaje de cumplimiento
-  const progreso = totalMeta > 0 ? (totalVentas / totalMeta) * 100 : 0;
+  // Porcentaje de cumplimiento (0..100)
+  const progreso = useMemo(
+    () => (totalMeta > 0 ? (totalVentas / totalMeta) * 100 : 0),
+    [totalMeta, totalVentas],
+  );
+
+  // Datos para el RadialBarChart
+  const gaugeData = useMemo(
+    () => [
+      {
+        name: "Ventas",
+        value: totalVentas, // <- dataKey="value"
+        fill:
+          totalVentas >= totalMeta
+            ? "#4CAF50"
+            : totalVentas >= totalMeta * 0.8
+            ? "#F9D423"
+            : "#FF4E50",
+      },
+    ],
+    [totalMeta, totalVentas],
+  );
+
+  // Evitar dominio [0, 0] en el eje si la meta es 0
+  const domainMax = totalMeta > 0 ? totalMeta : 1;
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
@@ -62,9 +105,12 @@ export default function HomeMenu() {
         <div className="absolute inset-y-0 right-[-20%] w-[60%] rotate-[-8deg] bg-sky-400/60" />
         <div className="relative mx-auto max-w-7xl px-6 py-8">
           <div className="flex items-center gap-4 md:gap-6">
-            <img
+            <Image
               src={LOGO_URL}
               alt="Spartan"
+              width={200}
+              height={60}
+              unoptimized
               className="h-12 w-auto md:h-28 object-contain drop-shadow-sm"
             />
             <div className="min-w-0">
@@ -131,24 +177,13 @@ export default function HomeMenu() {
               innerRadius="80%"
               outerRadius="100%"
               barSize={20}
-              data={[
-                {
-                  name: "Ventas",
-                  value: totalVentas,
-                  fill:
-                    totalVentas >= totalMeta
-                      ? "#4CAF50"
-                      : totalVentas >= totalMeta * 0.8
-                      ? "#F9D423"
-                      : "#FF4E50",
-                },
-              ]}
+              data={gaugeData}
               startAngle={180}
               endAngle={0}
             >
               <PolarAngleAxis
                 type="number"
-                domain={[0, totalMeta]}
+                domain={[0, domainMax]}
                 angleAxisId={0}
                 tick={false}
               />
@@ -161,7 +196,7 @@ export default function HomeMenu() {
               />
             </RadialBarChart>
 
-            {/* Mostrar porcentaje en grande */}
+            {/* Porcentaje en grande */}
             <p className="mt-4 text-3xl font-bold text-zinc-700">
               {progreso.toFixed(1)} %
             </p>
@@ -184,7 +219,7 @@ export default function HomeMenu() {
 
       {/* ===== Botón flotante WhatsApp ===== */}
       <a
-        href="https://wa.me/56075290961?text=Hola%20Silvana,%20necesito%20más%20información"
+        href="https://wa.me/56075290961?text=Hola%20Silvana,%20necesito%20m%C3%A1s%20informaci%C3%B3n"
         target="_blank"
         rel="noopener noreferrer"
         className="fixed bottom-6 right-6 bg-[#25D366] hover:bg-[#1ebe5b] text-white rounded-full p-4 shadow-lg print:hidden"
