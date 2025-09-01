@@ -187,7 +187,13 @@ export default function HomeMenu() {
                 angleAxisId={0}
                 tick={false}
               />
-              <RadialBar minAngle={15} background clockWise dataKey="value" />
+              {/* minAngle removido para compatibilidad de tipos */}
+              <RadialBar
+                dataKey="value"
+                background={{ fill: "#e5e7eb" }} // gris claro tailwind-zinc-200
+                clockWise
+                cornerRadius={50}
+              />
               <ReferenceLine
                 angle={0}
                 value={totalMeta}
