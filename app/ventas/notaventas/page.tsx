@@ -1,616 +1,653 @@
+// app/notaventa/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 
-/* =================== CONFIG =================== */
-const SHEETS = {
-  clientesCSV:
-    "https://docs.google.com/spreadsheets/d/1kF0INEtwYDXhQCBPTVhU8NQI2URKoi99Hs43DTSO02I/export?format=csv&gid=161671364",
-  catalogCSV:
-    "https://docs.google.com/spreadsheets/d/1UXVAxwzg-Kh7AWCPnPbxbEpzXnRPR2pDBKrRUFNZKZo/export?format=csv&gid=0",
-};
-
-const BRAND = {
-  name: "Spartan de Chile Ltda.",
-  rut: "76.333.980-7",
-  logo: "https://images.jumpseller.com/store/spartan-de-chile/store/logo/Spartan_Logo_-_copia.jpg?0",
-  website: "https://www.spartan.cl",
-  colors: { brandBlue: "#0B5FFF" },
-};
-
-/* =================== TIPOS =================== */
-type SheetRow = Record<string, string>;
-type QuoteItem = {
-  code?: string;
-  description: string;
-  kilos?: number;
-  qty: number;
-  unitPrice: number;
-  discountPct?: number;
-};
-type Party = {
-  name: string;
-  rut?: string;
-  address?: string;
-  clientCode?: string;
-  condicionPago?: string;
-  giro?: string;
-};
-type QuoteData = {
-  number: string;
-  dateISO: string;
-  validity: string;
-  client: Party;
-  issuer: Party & { paymentTerms?: string; contact?: string; email?: string; phone?: string };
-  items: QuoteItem[];
-  taxPct?: number;
-};
-
-/* =================== HELPERS =================== */
-const money = (n: number) =>
-  (n || 0).toLocaleString("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const normalize = (s: string) =>
-  (s || "").normalize("NFD").replace(/\p{Diacritic}+/gu, "").toLowerCase();
-function toNumber(v?: string): number {
-  return (
-    Number(
-      (v || "")
-        .replace(/[^0-9,.-]/g, "")
-        .replace(/\.(?=\d{3}(\D|$))/g, "")
-        .replace(/,/, ".")
-    ) || 0
-  );
+/* ===================== HELPERS ===================== */
+function normalize(s: string) {
+  return (s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
 }
-
-/* =================== PARSERS =================== */
-function parseCSV(text: string): SheetRow[] {
-  const rows = text.split(/\r?\n/).map((r) => r.split(","));
-  if (!rows.length) return [];
-  const header = rows[0];
-  return rows.slice(1).map((r) => {
-    const o: SheetRow = {};
-    header.forEach((h, i) => (o[h] = r[i] || ""));
-    return o;
+function num(x: unknown) {
+  const v = Number(x);
+  return Number.isFinite(v) ? v : 0;
+}
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+function money(n: number) {
+  return (n || 0).toLocaleString("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    maximumFractionDigits: 0,
   });
 }
 
-/* =================== FETCH =================== */
-async function fetchClientesAll(): Promise<SheetRow[]> {
-  try {
-    const r = await fetch(SHEETS.clientesCSV);
-    if (r.ok) return parseCSV(await r.text());
-  } catch {}
-  return [];
-}
-async function fetchCatalogCSV(): Promise<SheetRow[]> {
-  try {
-    const r = await fetch(SHEETS.catalogCSV);
-    if (r.ok) return parseCSV(await r.text());
-  } catch {}
-  return [];
+/* === CSV === */
+function parseCsv(text: string): Record<string, string>[] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let inQuotes = false;
+  const pushCell = () => (row.push(cell), (cell = ""));
+  const pushRow = () => {
+    if (row.length) rows.push(row);
+    row = [];
+  };
+  const s = (text || "").replace(/\r/g, "");
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (s[i + 1] === '"') {
+          cell += '"';
+          i++;
+        } else inQuotes = false;
+      } else cell += ch;
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ",") pushCell();
+      else if (ch === "\n") {
+        pushCell();
+        pushRow();
+      } else cell += ch;
+    }
+  }
+  if (cell.length || row.length) {
+    pushCell();
+    pushRow();
+  }
+  if (!rows.length) return [];
+  const headers = rows[0].map((h) => h.trim());
+  const out: Record<string, string>[] = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r || r.every((c) => c === "")) continue;
+    const obj: Record<string, string> = {};
+    headers.forEach((h, j) => (obj[h] = (r[j] ?? "").trim()));
+    out.push(obj);
+  }
+  return out;
 }
 
-/* =================== MAP =================== */
-function mapCliente(r: SheetRow): Party {
-  return {
-    name: r["CardName"] || "",
-    rut: r["RUT"] || "",
-    clientCode: r["CardCode"] || "",
-    address: [r["Direccion Despacho"], r["Despacho Comuna"], r["Despacho Ciudad"]]
-      .filter(Boolean)
-      .join(", "),
-    condicionPago: r["Condicion pago"] || "",
-    giro: r["Giro"] || "",
-  };
+async function fetchCsv(spreadsheetId: string, gid: string | number) {
+  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`CSV ${res.status}`);
+  const text = await res.text();
+  return parseCsv(text);
 }
-function mapCatalogItem(r: SheetRow): QuoteItem {
-  return {
-    code: r["code"] || "",
-    description: r["name"] || "",
-    kilos: toNumber(r["kilos"]),
-    qty: 1,
-    unitPrice: toNumber(r["price_list"]),
-    discountPct: 0,
-  };
+async function loadSheetSmart(spreadsheetId: string, gid: string | number, label: string) {
+  try {
+    return await fetchCsv(spreadsheetId, gid);
+  } catch {
+    throw new Error(`${label}: no se pudo leer`);
+  }
+}
+function normalizeGoogleSheetUrl(url: string) {
+  const m = (url || "").match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  const id = m ? m[1] : "";
+  let gid = "0";
+  const g = (url || "").match(/[?&#]gid=([0-9]+)/);
+  if (g) gid = g[1];
+  return { id, gid };
 }
 
-/* =================== DEFAULT =================== */
-const DEFAULT_QUOTE: QuoteData = {
-  number: "CTZ-2025-00001",
-  dateISO: todayISO(),
-  validity: "10 días",
-  client: { name: "" },
-  issuer: {
-    name: BRAND.name,
-    rut: BRAND.rut,
-    address: "Alameda 1001, Santiago",
-    paymentTerms: "30 días • Transferencia",
-    contact: "",
-    email: "",
-    phone: "",
-  },
-  items: [],
-  taxPct: 19,
+/* ===================== TIPOS ===================== */
+type Client = { nombre: string; rut: string; codigo: string; direccion: string };
+type Product = { code: string; name: string; price_list: number; kilos: number };
+type PrecioEspecial = { codigoSN: string; articulo: string; precio: number };
+type Line = {
+  code: string;
+  name: string;
+  kilos: number;
+  qty: number;
+  priceBase: number;
+  descuento: number; // 0..20 (deshabilitado si isEspecial)
+  precioVenta: number;
+  total: number;
+  isEspecial: boolean;
 };
 
-/* =================== COMPONENTE =================== */
-export default function CotizacionEjecutivaSheets() {
-  const [data, setData] = useState<QuoteData>(DEFAULT_QUOTE);
-  const [clientes, setClientes] = useState<SheetRow[]>([]);
-  const [catalogo, setCatalogo] = useState<SheetRow[]>([]);
-  const [rutToken, setRutToken] = useState("");
-  const [showSuggestions, setShowSuggestions] = useState(false);
+/* ===================== COMPONENTE ===================== */
+export default function NotaVentaPage() {
+  /* ---- CLIENTES ---- */
+  const [clients, setClients] = useState<Client[]>([]);
+  const [clientName, setClientName] = useState<string>("");
+  const [clientRut, setClientRut] = useState<string>("");
+  const [clientCode, setClientCode] = useState<string>("");
+  const [direccion, setDireccion] = useState<string>("");
 
+  /* ---- PRODUCTOS ---- */
+  const [productos, setProductos] = useState<Product[]>([]);
+  const [preciosEspeciales, setPreciosEspeciales] = useState<PrecioEspecial[]>([]);
+  const [lines, setLines] = useState<Line[]>([]);
+
+  /* ---- CORREO ---- */
+  const [emailEjecutivo, setEmailEjecutivo] = useState<string>("");
+
+  /* ---- UI ---- */
+  const [errorMsg, setErrorMsg] = useState<string>("");
+
+  // Cargar clientes
   useEffect(() => {
     (async () => {
-      setClientes(await fetchClientesAll());
-      setCatalogo(await fetchCatalogCSV());
-    })();
+      const { id, gid } = normalizeGoogleSheetUrl(
+        "https://docs.google.com/spreadsheets/d/1kF0INEtwYDXhQCBPTVhU8NQI2URKoi99Hs43DTSO02I/edit?gid=161671364#gid=161671364"
+      );
+      if (!id) return;
+      const rows = await loadSheetSmart(id, gid, "Clientes");
+      const list: Client[] = rows.map((r) => ({
+        nombre: String(r.CardName ?? r.Nombre ?? "").trim(),
+        rut: String(r.RUT ?? r.LicTradNum ?? "").trim(),
+        codigo: String(r.CardCode ?? "").trim(),
+        direccion: String(r["Dirección Despacho"] ?? r["Direccion Despacho"] ?? r.Address ?? "").trim(),
+      }));
+      setClients(list.filter((c) => c.nombre));
+    })().catch((e) => setErrorMsg(String(e)));
   }, []);
 
-  const totals = useMemo(() => {
-    const rows = data.items.map((it) => {
-      const precioVenta = (it.unitPrice || 0) * (1 - (it.discountPct || 0) / 100);
-      return { sub: (it.kilos || 0) * (it.qty || 0) * precioVenta };
-    });
-    const subtotal = rows.reduce((a, r) => a + r.sub, 0);
-    const tax = subtotal * ((data.taxPct ?? 19) / 100);
-    return { subtotal, tax, total: subtotal + tax };
-  }, [data]);
+  // Cargar productos
+  useEffect(() => {
+    (async () => {
+      const { id, gid } = normalizeGoogleSheetUrl(
+        "https://docs.google.com/spreadsheets/d/1UXVAxwzg-Kh7AWCPnPbxbEpzXnRPR2pDBKrRUFNZKZo/edit?gid=0#gid=0"
+      );
+      if (!id) return;
+      const rows = await loadSheetSmart(id, gid, "Productos");
+      const list: Product[] = rows.map((r) => ({
+        code: String((r as any).code ?? (r as any).Codigo ?? "").trim(),
+        name: String((r as any).name ?? (r as any).Producto ?? "").trim(),
+        price_list: num((r as any).price_list ?? (r as any)["Precio Lista"] ?? (r as any).Precio ?? 0),
+        kilos: num((r as any).kilos ?? 1),
+      }));
+      setProductos(list.filter((p) => p.code));
+    })().catch((e) => setErrorMsg(String(e)));
+  }, []);
 
-  function setItem(i: number, p: Partial<QuoteItem>) {
-    setData((s) => {
-      const n = { ...s };
-      n.items = [...s.items];
-      n.items[i] = { ...n.items[i], ...p };
+  // Cargar precios especiales
+  useEffect(() => {
+    (async () => {
+      const { id, gid } = normalizeGoogleSheetUrl(
+        "https://docs.google.com/spreadsheets/d/1UXVAxwzg-Kh7AWCPnPbxbEpzXnRPR2pDBKrRUFNZKZo/edit?gid=2117069636#gid=2117069636"
+      );
+      if (!id) return;
+      const rows = await loadSheetSmart(id, gid, "Precios especiales");
+      const list: PrecioEspecial[] = rows.map((r) => ({
+        codigoSN: String((r as any)["Código SN"] ?? "").trim(),
+        articulo: String((r as any)["Número de artículo"] ?? "").trim(),
+        precio: num((r as any)["Precio especial"] ?? 0),
+      }));
+      setPreciosEspeciales(list);
+    })().catch((e) => setErrorMsg(String(e)));
+  }, []);
+
+  /* ---- LOGICA ---- */
+  function addLine() {
+    setLines((old) => [
+      ...old,
+      { code: "", name: "", kilos: 1, qty: 1, priceBase: 0, descuento: 0, precioVenta: 0, total: 0, isEspecial: false },
+    ]);
+  }
+  function rmLine(i: number) {
+    setLines((old) => old.filter((_, idx) => idx !== i));
+  }
+  function fillFromCode(i: number, code: string) {
+    const prod = productos.find((p) => p.code === code);
+    if (!prod) return;
+    setLines((old) => {
+      const n = [...old];
+      const row = { ...(n[i] ?? n[0]) };
+      row.code = prod.code;
+      row.name = prod.name;
+      row.kilos = prod.kilos || 1;
+
+      // Precio base = especial si aplica
+      let precio = prod.price_list || 0;
+      let isEspecial = false;
+      if (clientCode) {
+        const pe = preciosEspeciales.find((p) => p.codigoSN === clientCode && p.articulo === prod.code);
+        if (pe) {
+          precio = pe.precio || 0;
+          isEspecial = true;
+        }
+      }
+      row.priceBase = precio;
+      row.isEspecial = isEspecial;
+
+      // Descuento (si no especial)
+      row.descuento = isEspecial ? 0 : clamp(num(row.descuento), 0, 20);
+
+      // Precio venta + total
+      const pVenta = isEspecial ? precio : precio * (1 - row.descuento / 100);
+      row.precioVenta = pVenta;
+      row.total = (num(row.qty) || 0) * (num(row.kilos) || 1) * pVenta;
+
+      n[i] = row;
       return n;
     });
   }
-  function addItem() {
-    setData((s) => ({
-      ...s,
-      items: [
-        ...s.items,
-        { code: "", description: "", kilos: 0, qty: 1, unitPrice: 0, discountPct: 0 },
-      ],
-    }));
-  }
-  function removeItem(i: number) {
-    setData((s) => ({ ...s, items: s.items.filter((_, j) => j !== i) }));
-  }
-  function printNow() {
-    window.print();
-  }
-  function clearCliente() {
-    setData((s) => ({ ...s, client: { name: "" } }));
-    setRutToken("");
+  function updateLine(i: number, field: keyof Line, value: unknown) {
+    setLines((old) => {
+      const n = [...old];
+      const current = n[i];
+      if (!current) return old;
+      const row: Line = { ...current, [field]: value } as Line;
+
+      // Normalizaciones
+      row.kilos = num(row.kilos) || 1;
+      row.qty = num(row.qty) || 0;
+      row.priceBase = num(row.priceBase) || 0;
+      row.descuento = row.isEspecial ? 0 : clamp(num(row.descuento), 0, 20);
+
+      const precio = row.priceBase;
+      const pVenta = row.isEspecial ? precio : precio * (1 - row.descuento / 100);
+      row.precioVenta = pVenta;
+      row.total = row.qty * row.kilos * pVenta;
+
+      n[i] = row;
+      return n;
+    });
   }
 
-  function handleSelectCliente(row: SheetRow) {
-    const picked = mapCliente(row);
-    setData((s) => ({ ...s, client: { ...s.client, ...picked } }));
-    setRutToken(`${picked.rut} — ${picked.name}`);
-    setShowSuggestions(false);
+  const subtotal = useMemo(() => {
+    const s = lines.reduce((a, r) => a + (Number.isFinite(r.total) ? r.total : 0), 0);
+    return Number.isFinite(s) ? s : 0;
+  }, [lines]);
+
+  function limpiarTodo() {
+    setClientName("");
+    setClientRut("");
+    setClientCode("");
+    setDireccion("");
+    setEmailEjecutivo("");
+    setLines([]);
+    setErrorMsg("");
   }
 
-  function autofillFromCatalog(i: number, token: string) {
-    const raw = token.trim();
-    const codeFromToken = raw.includes("—") ? raw.split("—")[0].trim() : raw;
-    const findRow =
-      catalogo.find((r) => normalize(r["code"] || "") === normalize(codeFromToken)) ||
-      catalogo.find((r) => normalize(r["name"] || "") === normalize(raw)) ||
-      catalogo.find((r) => normalize(r["code"] || "").startsWith(normalize(raw))) ||
-      catalogo.find((r) => normalize(r["name"] || "").startsWith(normalize(raw))) ||
-      catalogo.find(
-        (r) =>
-          normalize(r["code"] || "").includes(normalize(raw)) ||
-          normalize(r["name"] || "").includes(normalize(raw))
-      );
-    if (!findRow) return;
-    const item = mapCatalogItem(findRow);
-    setItem(i, { ...item, qty: data.items[i]?.qty ?? 1 });
+  /* ---- PDF ---- */
+  async function descargarPDF() {
+    setErrorMsg("");
+
+    // Validaciones mínimas
+    if (!clientName || !clientRut || !clientCode) {
+      setErrorMsg("Completa los datos del cliente (Nombre, RUT y Código).");
+      return;
+    }
+    if (lines.length === 0) {
+      setErrorMsg("Agrega al menos un producto antes de generar el PDF.");
+      return;
+    }
+
+    // Import dinámico para evitar SSR issues
+    const { jsPDF } = await import("jspdf");
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+
+    const W = doc.internal.pageSize.getWidth();
+    const H = doc.internal.pageSize.getHeight();
+    const M = 40;
+    const CONTENT_W = W - 2 * M;
+    let y = 0;
+
+    // Helper: salto de página
+    const ensureSpace = (need: number) => {
+      if (y + need <= H - 60) return;
+      doc.addPage();
+      y = 40;
+    };
+
+    // Encabezado degradado
+    const gradSteps = 20;
+    for (let i = 0; i < gradSteps; i++) {
+      const t = i / (gradSteps - 1);
+      const r = Math.round(31 + (47 - 31) * t);
+      const g = Math.round(78 + (178 - 78) * t);
+      const b = Math.round(216 + (255 - 216) * t);
+      doc.setFillColor(r, g, b);
+      doc.rect((W / gradSteps) * i, 0, W / gradSteps + 1, 80, "F");
+    }
+
+    // Logo (best-effort)
+    try {
+      const logoUrl =
+        "https://assets.jumpseller.com/store/spartan-de-chile/themes/317202/options/27648963/Logo-spartan-white.png";
+      const res = await fetch(logoUrl);
+      const blob = await res.blob();
+      const base64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.readAsDataURL(blob);
+      });
+      doc.addImage(base64, "PNG", M, 15, 120, 40);
+    } catch {
+      // si falla, seguimos sin abortar
+    }
+
+    // Título
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(20);
+    doc.setTextColor(255, 255, 255);
+    doc.text("NOTA DE VENTA", W / 2, 45, { align: "center" });
+
+    y = 100;
+    doc.setTextColor(0, 0, 0);
+
+    // Datos Cliente
+    doc.setFontSize(11);
+    const datosCliente = [
+      `Cliente: ${clientName || "-"}`,
+      `RUT: ${clientRut || "-"}`,
+      `Código: ${clientCode || "-"}`,
+      `Dirección: ${direccion || "-"}`,
+    ];
+    datosCliente.forEach((txt) => {
+      ensureSpace(16);
+      doc.text(txt, M, y);
+      y += 16;
+    });
+
+    y += 8;
+
+    // Tabla Productos
+    const headers = ["Código", "Descripción", "Kg", "Cant", "Precio", "Total"];
+    const colWidths = [80, 220, 50, 50, 80, 80] as const;
+    const headerBg = { r: 31, g: 78, b: 216 };
+    const colX = (idx: number) => M + colWidths.slice(0, idx).reduce((a, b) => a + b, 0);
+    const colRight = (idx: number) => colX(idx) + colWidths[idx];
+
+    // Header
+    ensureSpace(28);
+    doc.setFillColor(headerBg.r, headerBg.g, headerBg.b);
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.rect(M, y, CONTENT_W, 20, "F");
+    headers.forEach((h, i) => {
+      const xAnchor = i >= 2 ? colRight(i) - 6 : colX(i) + 6;
+      doc.text(h, xAnchor, y + 14, { align: i >= 2 ? "right" : "left" });
+    });
+    y += 22;
+
+    // Filas
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(10);
+
+    const baseRowHeight = 20;
+    for (const r of lines) {
+      // Descripción multilínea
+      const maxDescWidth = colWidths[1] - 12;
+      const descLines = doc.splitTextToSize(String(r.name || ""), maxDescWidth);
+      const neededHeight = Math.max(baseRowHeight, 14 + (descLines.length - 1) * 12);
+
+      ensureSpace(neededHeight + 2);
+
+      // Código
+      doc.text(String(r.code || ""), colX(0) + 6, y + 14);
+      // Descripción
+      let dy = 0;
+      descLines.forEach((ln: string) => {
+        doc.text(ln, colX(1) + 6, y + 14 + dy);
+        dy += 12;
+      });
+      // Kg (right)
+      doc.text(String(r.kilos ?? ""), colRight(2) - 6, y + 14, { align: "right" });
+      // Cant (right)
+      doc.text(String(r.qty ?? ""), colRight(3) - 6, y + 14, { align: "right" });
+      // Precio (right)
+      doc.text(money(r.precioVenta), colRight(4) - 6, y + 14, { align: "right" });
+      // Total (right)
+      doc.text(money(r.total), colRight(5) - 6, y + 14, { align: "right" });
+
+      // línea separadora
+      y += neededHeight;
+      doc.setDrawColor(230);
+      doc.line(M, y, M + CONTENT_W, y);
+      y += 2;
+    }
+
+    y += 10;
+
+    // Totales
+    const neto = subtotal;
+    const iva = neto * 0.19;
+    const total = neto + iva;
+    const boxW = 220;
+    const boxX = W - M - boxW;
+
+    ensureSpace(84);
+    doc.setFillColor(245, 246, 250);
+    doc.roundedRect(boxX, y, boxW, 78, 6, 6, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text(`Neto: ${money(neto)}`, boxX + boxW - 10, y + 22, { align: "right" });
+    doc.text(`IVA (19%): ${money(iva)}`, boxX + boxW - 10, y + 40, { align: "right" });
+    doc.text(`TOTAL: ${money(total)}`, boxX + boxW - 10, y + 58, { align: "right" });
+
+    // Pie
+    doc.setFontSize(10);
+    doc.text("Ejecutivo de Ventas:", M, H - 60);
+    doc.text(emailEjecutivo || "__________________", M + 140, H - 60);
+
+    doc.save("NotaVenta.pdf");
   }
 
-  const filteredClientes = useMemo(() => {
-    if (!rutToken) return [];
-    const normQ = normalize(rutToken);
-    return clientes
-      .filter((r) => {
-        const rut = normalize(r["RUT"] || "");
-        const name = normalize(r["CardName"] || "");
-        return rut.includes(normQ) || name.includes(normQ);
-      })
-      .slice(0, 50);
-  }, [rutToken, clientes]);
+  function enviarEmail() {
+    const destinatarios = [emailEjecutivo, "silvana.pincheira@spartan.cl"]
+      .filter((x) => (x || "").trim().length > 0)
+      .join(",");
+    const subject = encodeURIComponent("Nota de Venta");
+    const body = encodeURIComponent("Adjunto la Nota de Venta generada.");
+    window.location.href = `mailto:${destinatarios}?subject=${subject}&body=${body}`;
+  }
 
+  /* ===================== UI ===================== */
   return (
-    <>
-      {/* SOLO imprimiremos #printArea */}
-      <div id="printArea" className="p-6 text-[13px] bg-white relative min-h-screen">
-        {/* Encabezado */}
-        <header className="border-b pb-2 mb-4 flex justify-between items-center">
-          <img src={BRAND.logo} alt="Logo" className="h-16" />
-          <h1 className="text-blue-700 font-bold text-xl">COTIZACIÓN</h1>
-          <div className="text-xs text-right bg-zinc-100 p-2 rounded">
-            <div>N° {data.number}</div>
-            <div>{data.dateISO}</div>
-            <div>{data.validity}</div>
-          </div>
-        </header>
+    <div className="min-h-screen bg-zinc-50 p-6">
+      <h1 className="text-xl font-bold text-[#2B6CFF] mb-4">📝 Nota de Venta</h1>
 
-        {/* Cliente y Emisor */}
-        <section className="grid grid-cols-2 gap-6 border-b pb-4 mb-4">
-          {/* Cliente */}
-          <Card title="Cliente">
-            <div className="relative mb-2">
-              <input
-                placeholder="Escriba RUT o Nombre..."
-                value={rutToken}
-                onChange={(e) => {
-                  setRutToken(e.target.value);
-                  setShowSuggestions(true);
-                }}
-                onFocus={() => setShowSuggestions(true)}
-                className="w-full border px-2 py-1"
-              />
-              <button
-                onClick={clearCliente}
-                className="absolute right-1 top-1 text-xs bg-red-100 border px-1"
-              >
-                X
-              </button>
-              {showSuggestions && filteredClientes.length > 0 && (
-                <ul className="absolute z-10 bg-white border w-full max-h-64 overflow-y-auto text-xs">
-                  {filteredClientes.map((r, i) => (
-                    <li
-                      key={i}
-                      className="px-2 py-1 hover:bg-blue-100 cursor-pointer"
-                      onClick={() => handleSelectCliente(r)}
-                    >
-                      {r["RUT"]} — {r["CardName"]}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            <Field label="Razón Social">
-              <input
-                value={data.client.name || ""}
-                onChange={(e) =>
-                  setData((s) => ({ ...s, client: { ...s.client, name: e.target.value } }))
-                }
-                className="w-full border px-2 py-1"
-              />
-            </Field>
-            <Field label="Código Cliente">
-              <input
-                value={data.client.clientCode || ""}
-                onChange={(e) =>
-                  setData((s) => ({
-                    ...s,
-                    client: { ...s.client, clientCode: e.target.value },
-                  }))
-                }
-                className="w-full border px-2 py-1"
-              />
-            </Field>
-            <Field label="Dirección">
-              <textarea
-                value={data.client.address || ""}
-                onChange={(e) =>
-                  setData((s) => ({
-                    ...s,
-                    client: { ...s.client, address: e.target.value },
-                  }))
-                }
-                className="w-full border px-2 py-1"
-              />
-            </Field>
-            <Field label="Condición Pago">
-              <input
-                value={data.client.condicionPago || ""}
-                onChange={(e) =>
-                  setData((s) => ({
-                    ...s,
-                    client: { ...s.client, condicionPago: e.target.value },
-                  }))
-                }
-                className="w-full border px-2 py-1"
-              />
-            </Field>
-            <Field label="Giro">
-              <input
-                value={data.client.giro || ""}
-                onChange={(e) =>
-                  setData((s) => ({ ...s, client: { ...s.client, giro: e.target.value } }))
-                }
-                className="w-full border px-2 py-1"
-              />
-            </Field>
-          </Card>
+      {errorMsg && (
+        <div className="mb-3 rounded bg-red-50 text-red-700 px-3 py-2 text-sm border border-red-200">
+          {errorMsg}
+        </div>
+      )}
 
-          {/* Emisor */}
-          <Card title="Emisor">
-            <Field label="Empresa">{data.issuer.name}</Field>
-            <Field label="RUT">{data.issuer.rut}</Field>
-            <Field label="Dirección">{data.issuer.address}</Field>
-            <Field label="Ejecutivo">
-              <input
-                value={data.issuer.contact || ""}
-                onChange={(e) =>
-                  setData((s) => ({
-                    ...s,
-                    issuer: { ...s.issuer, contact: e.target.value },
-                  }))
+      {/* Cliente */}
+      <section className="bg-white shadow p-4 rounded mb-4">
+        <h2 className="font-semibold text-[#2B6CFF] mb-2">Cliente</h2>
+        <div className="grid grid-cols-2 gap-2 text-sm">
+          <label className="flex flex-col gap-1">
+            Nombre
+            <input
+              className="w-full border rounded px-2 py-1"
+              value={clientName}
+              onChange={(e) => {
+                const val = e.target.value;
+                setClientName(val);
+                const row = clients.find((c) => normalize(c.nombre) === normalize(val));
+                if (row) {
+                  setClientRut(row.rut || "");
+                  setClientCode("");
+                  setDireccion("");
                 }
-                className="w-full border px-2 py-1"
-              />
-            </Field>
-            <Field label="Email">
-              <input
-                type="email"
-                value={data.issuer.email || ""}
-                onChange={(e) =>
-                  setData((s) => ({
-                    ...s,
-                    issuer: { ...s.issuer, email: e.target.value },
-                  }))
-                }
-                className="w-full border px-2 py-1"
-              />
-            </Field>
-            <Field label="Celular">
-              <input
-                value={data.issuer.phone || ""}
-                onChange={(e) =>
-                  setData((s) => ({
-                    ...s,
-                    issuer: { ...s.issuer, phone: e.target.value },
-                  }))
-                }
-                className="w-full border px-2 py-1"
-              />
-            </Field>
-            <Field label="Forma de Pago">
-              <input
-                value={data.issuer.paymentTerms || ""}
-                onChange={(e) =>
-                  setData((s) => ({
-                    ...s,
-                    issuer: { ...s.issuer, paymentTerms: e.target.value },
-                  }))
-                }
-                className="w-full border px-2 py-1"
-              />
-            </Field>
-          </Card>
-        </section>
+              }}
+              list="clientesList"
+            />
+            <datalist id="clientesList">
+              {clients.map((c, i) => (
+                <option key={`${c.codigo}-${i}`} value={c.nombre} />
+              ))}
+            </datalist>
+          </label>
 
-        {/* Intro Productos */}
-        <p className="mb-2 text-sm">
-          De acuerdo a lo solicitado, tenemos el agrado de cotizar algunos de los
-          productos que Spartan de Chile Ltda., fabrica y distribuye en el país, y/o
-          maquinaria / accesorios de limpieza industrial.
-        </p>
+          <label className="flex flex-col gap-1">
+            RUT
+            <input className="w-full border rounded px-2 py-1" value={clientRut} readOnly />
+          </label>
 
-        {/* Productos */}
-        <section>
-          <h2 className="bg-blue-700 text-white px-3 py-1 rounded text-sm font-semibold mb-2 print:-webkit-print-color-adjust: exact">
-            📦 Productos Cotizados
-          </h2>
-          <button
-            onClick={addItem}
-            className="bg-blue-600 text-white px-2 rounded mb-2 print:hidden"
-          >
+          <label className="flex flex-col gap-1">
+            Código Cliente
+            <select
+              className="w-full border rounded px-2 py-1"
+              value={clientCode}
+              onChange={(e) => {
+                const val = e.target.value;
+                setClientCode(val);
+                const row = clients.find((c) => c.codigo === val);
+                if (row) {
+                  setClientRut(row.rut || "");
+                  setDireccion(row.direccion || "");
+                }
+              }}
+            >
+              <option value="">Seleccione…</option>
+              {clients
+                .filter((c) => normalize(c.nombre) === normalize(clientName))
+                .map((c) => (
+                  <option key={c.codigo} value={c.codigo}>
+                    {c.codigo} — {c.direccion}
+                  </option>
+                ))}
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-1">
+            Dirección
+            <input className="w-full border rounded px-2 py-1" value={direccion} readOnly />
+          </label>
+        </div>
+      </section>
+
+      {/* Productos */}
+      <section className="bg-white shadow p-4 rounded mb-4">
+        <div className="flex justify-between mb-2">
+          <h2 className="font-semibold text-[#2B6CFF]">Productos</h2>
+          <button className="bg-zinc-200 px-2 py-1 rounded text-sm" onClick={addLine}>
             + Ítem
           </button>
-          <table className="w-full text-xs border border-collapse">
-            <thead className="bg-blue-600 text-white print:-webkit-print-color-adjust: exact">
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm border">
+            <thead className="bg-zinc-100">
               <tr>
-                <th>Código</th>
-                <th>Descripción</th>
-                <th>Kilos</th>
-                <th>Cantidad</th>
-                <th>$/Kg</th>
-                <th style={{ width: "60px" }}>Desc %</th>
-                <th>Precio Venta</th>
-                <th>Total</th>
-                <th className="print:hidden"></th>
+                <th className="px-2 py-1 text-left">Código</th>
+                <th className="px-2 py-1 text-left">Descripción</th>
+                <th className="px-2 py-1 text-right">Kg</th>
+                <th className="px-2 py-1 text-right">Cantidad</th>
+                <th className="px-2 py-1 text-right">Precio base</th>
+                <th className="px-2 py-1 text-right">% Desc</th>
+                <th className="px-2 py-1 text-right">Precio venta</th>
+                <th className="px-2 py-1 text-right">Total</th>
+                <th />
               </tr>
             </thead>
             <tbody>
-              {data.items.map((it, i) => {
-                const precioVenta = (it.unitPrice || 0) * (1 - (it.discountPct || 0) / 100);
-                const sub = (it.kilos || 0) * (it.qty || 0) * precioVenta;
-                return (
-                  <tr key={i} className="border-b text-blue-800">
-                    <td>
-                      <input
-                        value={it.code || ""}
-                        list="catalog-list"
-                        onChange={(e) => setItem(i, { code: e.target.value })}
-                        onBlur={(e) => autofillFromCatalog(i, e.target.value)}
-                        className="border px-1 w-24"
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={it.description}
-                        onChange={(e) => setItem(i, { description: e.target.value })}
-                        onBlur={(e) => autofillFromCatalog(i, e.target.value)}
-                        className="border px-1 w-full"
-                      />
-                    </td>
-                    <td>{it.kilos}</td>
-                    <td>
-                      <input
-                        type="number"
-                        value={it.qty}
-                        onChange={(e) => setItem(i, { qty: Number(e.target.value) })}
-                        className="border px-1 w-16 text-right"
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="number"
-                        value={it.unitPrice}
-                        onChange={(e) => setItem(i, { unitPrice: Number(e.target.value) })}
-                        className="border px-1 w-20 text-right"
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="number"
-                        value={it.discountPct ?? 0}
-                        onChange={(e) => setItem(i, { discountPct: Number(e.target.value) })}
-                        className="border px-1 w-14 text-right"
-                      />
-                    </td>
-                    <td>{money(precioVenta)}</td>
-                    <td>{money(sub)}</td>
-                    <td className="print:hidden">
-                      <button onClick={() => removeItem(i)}>❌</button>
-                    </td>
-                  </tr>
-                );
-              })}
+              {lines.map((r, i) => (
+                <tr key={i} className="border-t">
+                  <td className="px-2 py-1">
+                    <input
+                      className="w-32 border rounded px-1"
+                      value={r.code}
+                      onChange={(e) => updateLine(i, "code", e.target.value)}
+                      onBlur={(e) => fillFromCode(i, e.target.value)}
+                      list="productosList"
+                    />
+                    <datalist id="productosList">
+                      {productos.map((p) => (
+                        <option key={p.code} value={p.code}>
+                          {p.code} — {p.name}
+                        </option>
+                      ))}
+                    </datalist>
+                  </td>
+                  <td className="px-2 py-1">{r.name}</td>
+                  <td className="px-2 py-1 text-right">
+                    <input
+                      type="number"
+                      className="w-16 border rounded text-right"
+                      value={r.kilos}
+                      onChange={(e) => updateLine(i, "kilos", num(e.target.value))}
+                      min={0}
+                      step="any"
+                    />
+                  </td>
+                  <td className="px-2 py-1 text-right">
+                    <input
+                      type="number"
+                      className="w-16 border rounded text-right"
+                      value={r.qty}
+                      onChange={(e) => updateLine(i, "qty", num(e.target.value))}
+                      min={0}
+                      step="any"
+                    />
+                  </td>
+                  <td className="px-2 py-1 text-right">{money(r.priceBase)}</td>
+                  <td className="px-2 py-1 text-right">
+                    <input
+                      type="number"
+                      className="w-16 border rounded text-right"
+                      value={r.descuento}
+                      onChange={(e) => updateLine(i, "descuento", num(e.target.value))}
+                      disabled={r.isEspecial}
+                      min={0}
+                      max={20}
+                      step="any"
+                    />
+                  </td>
+                  <td className="px-2 py-1 text-right">{money(r.precioVenta)}</td>
+                  <td className="px-2 py-1 text-right">{money(r.total)}</td>
+                  <td className="px-2 py-1">
+                    <button className="text-red-600 text-xs" onClick={() => rmLine(i)}>
+                      Eliminar
+                    </button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
+            {lines.length > 0 && (
+              <tfoot>
+                <tr className="font-semibold bg-zinc-50">
+                  <td colSpan={7} className="text-right px-2 py-1">
+                    TOTAL
+                  </td>
+                  <td className="text-right px-2 py-1">{money(subtotal)}</td>
+                  <td />
+                </tr>
+              </tfoot>
+            )}
           </table>
-          <datalist id="catalog-list">
-            {catalogo.map((r, i) => (
-              <option key={i} value={`${r["code"]} — ${r["name"]}`} />
-            ))}
-          </datalist>
-        </section>
+        </div>
+      </section>
 
-        {/* Totales */}
-        <section className="mt-4">
-          <div className="p-3 rounded bg-blue-50 border border-blue-200 w-64 ml-auto">
-            <div className="flex justify-between">
-              <span>Subtotal</span>
-              <span>{money(totals.subtotal)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>IVA</span>
-              <span>{money(totals.tax)}</span>
-            </div>
-            <div className="flex justify-between font-bold text-blue-800">
-              <span>Total</span>
-              <span>{money(totals.total)}</span>
-            </div>
-          </div>
-        </section>
+      {/* Correo */}
+      <section className="bg-white shadow p-4 rounded mb-4">
+        <h2 className="font-semibold text-[#2B6CFF] mb-2">📧 Envío</h2>
+        <label className="flex flex-col gap-1">
+          Correo Ejecutivo
+          <input
+            type="email"
+            className="w-full border rounded px-2 py-1"
+            value={emailEjecutivo}
+            onChange={(e) => setEmailEjecutivo(e.target.value)}
+          />
+        </label>
+      </section>
 
-        {/* Datos de Transferencia */}
-        <section id="transferencia" className="mt-6 p-3 border rounded bg-zinc-50 text-xs relative">
-          <div className="absolute top-2 right-2">
-            <img
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(
-                BRAND.website
-              )}`}
-              alt="QR Spartan"
-              className="border"
-            />
-          </div>
-          <h3 className="font-semibold text-blue-700 mb-2">Datos de Transferencia</h3>
-          <p>Banco: Crédito e Inversiones</p>
-          <p>Titular: Spartan de Chile Ltda.</p>
-          <p>RUT: 76.333.980-7</p>
-          <p>N° Cuenta: 25067894</p>
-          <p>Tipo de cuenta: Cta. Cte.</p>
-          <p>Email comprobantes: horacio.pavez@spartan.cl</p>
-        </section>
-
-        {/* Footer */}
-        <footer className="mt-6 flex justify-between text-sm text-zinc-500">
-          <div className="w-64 text-center border-t pt-1">Firma y timbre</div>
-          <button onClick={printNow} className="border px-3 py-1 print:hidden">
-            Imprimir / PDF
-          </button>
-        </footer>
+      {/* Botones */}
+      <div className="flex gap-2">
+        <button className="bg-zinc-200 px-3 py-1 rounded" onClick={descargarPDF}>
+          📄 Descargar PDF
+        </button>
+        <button className="bg-blue-500 text-white px-3 py-1 rounded" onClick={enviarEmail}>
+          ✉️ Enviar por Email
+        </button>
+        <button className="bg-zinc-200 px-3 py-1 rounded" onClick={limpiarTodo}>
+          🧹 Limpiar
+        </button>
       </div>
-
-      {/* Botón lateral Volver al Panel (oculto en impresión) */}
-      <Link
-        href="/"
-        className="fixed top-1/2 right-0 -translate-y-1/2 rounded-l bg-blue-600 text-white px-3 py-2 text-sm shadow-lg hover:bg-blue-700 print:hidden"
-      >
-        ⟵ Volver
-      </Link>
-
-      <style jsx>{`
-        /* Hacer que los colores de Tailwind se impriman fieles */
-        :global(html), :global(body), :global(#printArea) {
-          -webkit-print-color-adjust: exact;
-          print-color-adjust: exact;
-        }
-
-        /* --------- MODO IMPRESIÓN --------- */
-        @media print {
-          /* Imprimir SOLO el área designada */
-          body * {
-            visibility: hidden !important;
-          }
-          #printArea, #printArea * {
-            visibility: visible !important;
-          }
-          #printArea {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-          }
-
-          /* Ocultar elementos de UI */
-          .print\\:hidden {
-            display: none !important;
-          }
-
-          /* Página tamaño Carta (Letter) con márgenes cómodos */
-          @page {
-            size: Letter;
-            margin: 12mm;
-          }
-
-          /* Evitar cortes feos */
-          header, footer, table, section, h1, h2, h3, .card {
-            break-inside: avoid;
-          }
-
-          /* Asegurar fondo/colores en encabezados y thead */
-          thead, .bg-blue-600, .bg-blue-700 {
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-
-          /* Mantener la caja de transferencia al final si hay espacio */
-          #transferencia {
-            break-inside: avoid;
-          }
-        }
-      `}</style>
-    </>
-  );
-}
-
-/* Helpers */
-function Card({ title, children }: { title: string; children: any }) {
-  return (
-    <div className="card border rounded p-2 bg-white">
-      <h3 className="text-blue-700 font-semibold border-b mb-1 text-xs uppercase">
-        {title}
-      </h3>
-      <div className="space-y-1 text-[12px]">{children}</div>
-    </div>
-  );
-}
-function Field({ label, children }: { label: string; children: any }) {
-  return (
-    <div className="grid grid-cols-[140px_1fr] items-start gap-2 mb-1">
-      <div className="text-[11px] uppercase text-zinc-500">{label}</div>
-      <div>{children}</div>
     </div>
   );
 }
