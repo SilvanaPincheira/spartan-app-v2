@@ -1,4 +1,4 @@
-// app/notaventa/page.tsx
+// app/ventas/notaventas/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -132,6 +132,26 @@ export default function NotaVentaPage() {
   /* ---- UI ---- */
   const [errorMsg, setErrorMsg] = useState<string>("");
 
+  /* ---- DOC INFO: N° NV ---- */
+  const [numeroNV, setNumeroNV] = useState<string>("");
+
+  // Genera correlativo local por año (persistente en este navegador)
+  function generarNumeroNV(): string {
+    if (typeof window === "undefined") return "";
+    const year = new Date().getFullYear();
+    const key = `nv.counter.${year}`;
+    const last = Number(window.localStorage.getItem(key) || "0");
+    const next = last + 1;
+    window.localStorage.setItem(key, String(next));
+    return `NV-${year}-${String(next).padStart(5, "0")}`;
+  }
+
+  // Asignar número al cargar
+  useEffect(() => {
+    setNumeroNV(generarNumeroNV());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Cargar clientes
   useEffect(() => {
     (async () => {
@@ -185,7 +205,7 @@ export default function NotaVentaPage() {
     })().catch((e) => setErrorMsg(String(e)));
   }, []);
 
-  /* ---- LOGICA ---- */
+  /* ---- LÓGICA DE LÍNEAS (NO CAMBIADA) ---- */
   function addLine() {
     setLines((old) => [
       ...old,
@@ -258,6 +278,7 @@ export default function NotaVentaPage() {
     return Number.isFinite(s) ? s : 0;
   }, [lines]);
 
+  /* ---- ACCIONES ---- */
   function limpiarTodo() {
     setClientName("");
     setClientRut("");
@@ -266,388 +287,260 @@ export default function NotaVentaPage() {
     setEmailEjecutivo("");
     setLines([]);
     setErrorMsg("");
+    // nuevo correlativo
+    setNumeroNV(generarNumeroNV());
   }
 
-  /* ---- PDF ---- */
-  async function descargarPDF() {
-    setErrorMsg("");
-
-    // Validaciones mínimas
-    if (!clientName || !clientRut || !clientCode) {
-      setErrorMsg("Completa los datos del cliente (Nombre, RUT y Código).");
-      return;
-    }
-    if (lines.length === 0) {
-      setErrorMsg("Agrega al menos un producto antes de generar el PDF.");
-      return;
-    }
-
-    // Import dinámico para evitar SSR issues
-    const { jsPDF } = await import("jspdf");
-    const doc = new jsPDF({ unit: "pt", format: "a4" });
-
-    const W = doc.internal.pageSize.getWidth();
-    const H = doc.internal.pageSize.getHeight();
-    const M = 40;
-    const CONTENT_W = W - 2 * M;
-    let y = 0;
-
-    // Helper: salto de página
-    const ensureSpace = (need: number) => {
-      if (y + need <= H - 60) return;
-      doc.addPage();
-      y = 40;
-    };
-
-    // Encabezado degradado
-    const gradSteps = 20;
-    for (let i = 0; i < gradSteps; i++) {
-      const t = i / (gradSteps - 1);
-      const r = Math.round(31 + (47 - 31) * t);
-      const g = Math.round(78 + (178 - 78) * t);
-      const b = Math.round(216 + (255 - 216) * t);
-      doc.setFillColor(r, g, b);
-      doc.rect((W / gradSteps) * i, 0, W / gradSteps + 1, 80, "F");
-    }
-
-    // Logo (best-effort)
-    try {
-      const logoUrl =
-        "https://assets.jumpseller.com/store/spartan-de-chile/themes/317202/options/27648963/Logo-spartan-white.png";
-      const res = await fetch(logoUrl);
-      const blob = await res.blob();
-      const base64 = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.readAsDataURL(blob);
-      });
-      doc.addImage(base64, "PNG", M, 15, 120, 40);
-    } catch {
-      // si falla, seguimos sin abortar
-    }
-
-    // Título
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(20);
-    doc.setTextColor(255, 255, 255);
-    doc.text("NOTA DE VENTA", W / 2, 45, { align: "center" });
-
-    y = 100;
-    doc.setTextColor(0, 0, 0);
-
-    // Datos Cliente
-    doc.setFontSize(11);
-    const datosCliente = [
-      `Cliente: ${clientName || "-"}`,
-      `RUT: ${clientRut || "-"}`,
-      `Código: ${clientCode || "-"}`,
-      `Dirección: ${direccion || "-"}`,
-    ];
-    datosCliente.forEach((txt) => {
-      ensureSpace(16);
-      doc.text(txt, M, y);
-      y += 16;
-    });
-
-    y += 8;
-
-    // Tabla Productos
-    const headers = ["Código", "Descripción", "Kg", "Cant", "Precio", "Total"];
-    const colWidths = [80, 220, 50, 50, 80, 80] as const;
-    const headerBg = { r: 31, g: 78, b: 216 };
-    const colX = (idx: number) => M + colWidths.slice(0, idx).reduce((a, b) => a + b, 0);
-    const colRight = (idx: number) => colX(idx) + colWidths[idx];
-
-    // Header
-    ensureSpace(28);
-    doc.setFillColor(headerBg.r, headerBg.g, headerBg.b);
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold");
-    doc.rect(M, y, CONTENT_W, 20, "F");
-    headers.forEach((h, i) => {
-      const xAnchor = i >= 2 ? colRight(i) - 6 : colX(i) + 6;
-      doc.text(h, xAnchor, y + 14, { align: i >= 2 ? "right" : "left" });
-    });
-    y += 22;
-
-    // Filas
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(0, 0, 0);
-    doc.setFontSize(10);
-
-    const baseRowHeight = 20;
-    for (const r of lines) {
-      // Descripción multilínea
-      const maxDescWidth = colWidths[1] - 12;
-      const descLines = doc.splitTextToSize(String(r.name || ""), maxDescWidth);
-      const neededHeight = Math.max(baseRowHeight, 14 + (descLines.length - 1) * 12);
-
-      ensureSpace(neededHeight + 2);
-
-      // Código
-      doc.text(String(r.code || ""), colX(0) + 6, y + 14);
-      // Descripción
-      let dy = 0;
-      descLines.forEach((ln: string) => {
-        doc.text(ln, colX(1) + 6, y + 14 + dy);
-        dy += 12;
-      });
-      // Kg (right)
-      doc.text(String(r.kilos ?? ""), colRight(2) - 6, y + 14, { align: "right" });
-      // Cant (right)
-      doc.text(String(r.qty ?? ""), colRight(3) - 6, y + 14, { align: "right" });
-      // Precio (right)
-      doc.text(money(r.precioVenta), colRight(4) - 6, y + 14, { align: "right" });
-      // Total (right)
-      doc.text(money(r.total), colRight(5) - 6, y + 14, { align: "right" });
-
-      // línea separadora
-      y += neededHeight;
-      doc.setDrawColor(230);
-      doc.line(M, y, M + CONTENT_W, y);
-      y += 2;
-    }
-
-    y += 10;
-
-    // Totales
-    const neto = subtotal;
-    const iva = neto * 0.19;
-    const total = neto + iva;
-    const boxW = 220;
-    const boxX = W - M - boxW;
-
-    ensureSpace(84);
-    doc.setFillColor(245, 246, 250);
-    doc.roundedRect(boxX, y, boxW, 78, 6, 6, "F");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.text(`Neto: ${money(neto)}`, boxX + boxW - 10, y + 22, { align: "right" });
-    doc.text(`IVA (19%): ${money(iva)}`, boxX + boxW - 10, y + 40, { align: "right" });
-    doc.text(`TOTAL: ${money(total)}`, boxX + boxW - 10, y + 58, { align: "right" });
-
-    // Pie
-    doc.setFontSize(10);
-    doc.text("Ejecutivo de Ventas:", M, H - 60);
-    doc.text(emailEjecutivo || "__________________", M + 140, H - 60);
-
-    doc.save("NotaVenta.pdf");
+  function imprimir() {
+    window.print();
   }
 
   function enviarEmail() {
     const destinatarios = [emailEjecutivo, "silvana.pincheira@spartan.cl"]
       .filter((x) => (x || "").trim().length > 0)
       .join(",");
-    const subject = encodeURIComponent("Nota de Venta");
-    const body = encodeURIComponent("Adjunto la Nota de Venta generada.");
+    const subject = encodeURIComponent(`Nota de Venta ${numeroNV}`);
+    const body = encodeURIComponent(`Adjunto la Nota de Venta ${numeroNV} generada.`);
     window.location.href = `mailto:${destinatarios}?subject=${subject}&body=${body}`;
   }
 
   /* ===================== UI ===================== */
   return (
-    <div className="min-h-screen bg-zinc-50 p-6">
-      <h1 className="text-xl font-bold text-[#2B6CFF] mb-4">📝 Nota de Venta</h1>
-
-      {errorMsg && (
-        <div className="mb-3 rounded bg-red-50 text-red-700 px-3 py-2 text-sm border border-red-200">
-          {errorMsg}
-        </div>
-      )}
-
-      {/* Cliente */}
-      <section className="bg-white shadow p-4 rounded mb-4">
-        <h2 className="font-semibold text-[#2B6CFF] mb-2">Cliente</h2>
-        <div className="grid grid-cols-2 gap-2 text-sm">
-          <label className="flex flex-col gap-1">
-            Nombre
-            <input
-              className="w-full border rounded px-2 py-1"
-              value={clientName}
-              onChange={(e) => {
-                const val = e.target.value;
-                setClientName(val);
-                const row = clients.find((c) => normalize(c.nombre) === normalize(val));
-                if (row) {
-                  setClientRut(row.rut || "");
-                  setClientCode("");
-                  setDireccion("");
-                }
-              }}
-              list="clientesList"
+    <>
+      <div id="printArea" className="min-h-screen bg-white p-6 text-[12px]">
+        {/* Encabezado con logo + número */}
+        <header className="mb-4 flex items-center justify-between border-b pb-2">
+          <div className="flex items-center gap-3">
+            <img
+              src="https://images.jumpseller.com/store/spartan-de-chile/store/logo/Spartan_Logo_-_copia.jpg?0"
+              alt="Spartan"
+              className="h-12 w-auto"
             />
-            <datalist id="clientesList">
-              {clients.map((c, i) => (
-                <option key={`${c.codigo}-${i}`} value={c.nombre} />
-              ))}
-            </datalist>
-          </label>
+            <h1 className="text-lg font-bold text-[#2B6CFF]">📝 Nota de Venta</h1>
+          </div>
+          <div className="text-[11px] bg-zinc-100 px-3 py-2 rounded text-right">
+            <div><b>N°</b> {numeroNV || "—"}</div>
+            <div>{new Date().toLocaleDateString("es-CL")}</div>
+          </div>
+        </header>
 
-          <label className="flex flex-col gap-1">
-            RUT
-            <input className="w-full border rounded px-2 py-1" value={clientRut} readOnly />
-          </label>
+        {errorMsg && (
+          <div className="mb-3 rounded bg-red-50 text-red-700 px-3 py-2 text-sm border border-red-200">
+            {errorMsg}
+          </div>
+        )}
 
-          <label className="flex flex-col gap-1">
-            Código Cliente
-            <select
-              className="w-full border rounded px-2 py-1"
-              value={clientCode}
-              onChange={(e) => {
-                const val = e.target.value;
-                setClientCode(val);
-                const row = clients.find((c) => c.codigo === val);
-                if (row) {
-                  setClientRut(row.rut || "");
-                  setDireccion(row.direccion || "");
-                }
-              }}
-            >
-              <option value="">Seleccione…</option>
-              {clients
-                .filter((c) => normalize(c.nombre) === normalize(clientName))
-                .map((c) => (
-                  <option key={c.codigo} value={c.codigo}>
-                    {c.codigo} — {c.direccion}
-                  </option>
+        {/* Cliente */}
+        <section className="bg-white shadow p-4 rounded mb-4">
+          <h2 className="font-semibold text-[#2B6CFF] mb-2">Cliente</h2>
+          <div className="grid grid-cols-2 gap-2 text-[12px]">
+            <label className="flex flex-col gap-1">
+              Nombre
+              <input
+                className="w-full border rounded px-2 py-1"
+                value={clientName}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setClientName(val);
+                  const row = clients.find((c) => normalize(c.nombre) === normalize(val));
+                  if (row) {
+                    setClientRut(row.rut || "");
+                    setClientCode("");
+                    setDireccion("");
+                  }
+                }}
+                list="clientesList"
+              />
+              <datalist id="clientesList">
+                {clients.map((c, i) => (
+                  <option key={`${c.codigo}-${i}`} value={c.nombre} />
                 ))}
-            </select>
-          </label>
+              </datalist>
+            </label>
 
+            <label className="flex flex-col gap-1">
+              RUT
+              <input className="w-full border rounded px-2 py-1" value={clientRut} readOnly />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              Código Cliente
+              <select
+                className="w-full border rounded px-2 py-1"
+                value={clientCode}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setClientCode(val);
+                  const row = clients.find((c) => c.codigo === val);
+                  if (row) {
+                    setClientRut(row.rut || "");
+                    setDireccion(row.direccion || "");
+                  }
+                }}
+              >
+                <option value="">Seleccione…</option>
+                {clients
+                  .filter((c) => normalize(c.nombre) === normalize(clientName))
+                  .map((c) => (
+                    <option key={c.codigo} value={c.codigo}>
+                      {c.codigo} — {c.direccion}
+                    </option>
+                  ))}
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-1">
+              Dirección
+              <input className="w-full border rounded px-2 py-1" value={direccion} readOnly />
+            </label>
+          </div>
+        </section>
+
+        {/* Productos */}
+        <section className="bg-white shadow p-4 rounded mb-4">
+          <div className="flex justify-between mb-2">
+            <h2 className="font-semibold text-[#2B6CFF]">Productos</h2>
+            <button className="bg-zinc-200 px-2 py-1 rounded text-xs" onClick={addLine}>
+              + Ítem
+            </button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-[11px] border">
+              <thead className="bg-zinc-100">
+                <tr>
+                  <th className="px-2 py-1 text-left">Código</th>
+                  <th className="px-2 py-1 text-left">Descripción</th>
+                  <th className="px-2 py-1 text-right">Kg</th>
+                  <th className="px-2 py-1 text-right">Cantidad</th>
+                  <th className="px-2 py-1 text-right">Precio base</th>
+                  <th className="px-2 py-1 text-right">% Desc</th>
+                  <th className="px-2 py-1 text-right">Precio venta</th>
+                  <th className="px-2 py-1 text-right">Total</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {lines.map((r, i) => (
+                  <tr key={i} className="border-t">
+                    <td className="px-2 py-1">
+                      <input
+                        className="w-32 border rounded px-1"
+                        value={r.code}
+                        onChange={(e) => updateLine(i, "code", e.target.value)}
+                        onBlur={(e) => fillFromCode(i, e.target.value)}
+                        list="productosList"
+                      />
+                      <datalist id="productosList">
+                        {productos.map((p) => (
+                          <option key={p.code} value={p.code}>
+                            {p.code} — {p.name}
+                          </option>
+                        ))}
+                      </datalist>
+                    </td>
+                    <td className="px-2 py-1">{r.name}</td>
+                    <td className="px-2 py-1 text-right">
+                      <input
+                        type="number"
+                        className="w-16 border rounded text-right"
+                        value={r.kilos}
+                        onChange={(e) => updateLine(i, "kilos", num(e.target.value))}
+                        min={0}
+                        step="any"
+                      />
+                    </td>
+                    <td className="px-2 py-1 text-right">
+                      <input
+                        type="number"
+                        className="w-16 border rounded text-right"
+                        value={r.qty}
+                        onChange={(e) => updateLine(i, "qty", num(e.target.value))}
+                        min={0}
+                        step="any"
+                      />
+                    </td>
+                    <td className="px-2 py-1 text-right">{money(r.priceBase)}</td>
+                    <td className="px-2 py-1 text-right">
+                      <input
+                        type="number"
+                        className="w-16 border rounded text-right"
+                        value={r.descuento}
+                        onChange={(e) => updateLine(i, "descuento", num(e.target.value))}
+                        disabled={r.isEspecial}
+                        min={0}
+                        max={20}
+                        step="any"
+                      />
+                    </td>
+                    <td className="px-2 py-1 text-right">{money(r.precioVenta)}</td>
+                    <td className="px-2 py-1 text-right">{money(r.total)}</td>
+                    <td className="px-2 py-1">
+                      <button className="text-red-600 text-xs" onClick={() => rmLine(i)}>
+                        Eliminar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              {lines.length > 0 && (
+                <tfoot>
+                  <tr className="font-semibold bg-zinc-50">
+                    <td colSpan={7} className="text-right px-2 py-1">
+                      TOTAL
+                    </td>
+                    <td className="text-right px-2 py-1">{money(subtotal)}</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </section>
+
+        {/* Correo */}
+        <section className="bg-white shadow p-4 rounded mb-4">
+          <h2 className="font-semibold text-[#2B6CFF] mb-2">📧 Envío</h2>
           <label className="flex flex-col gap-1">
-            Dirección
-            <input className="w-full border rounded px-2 py-1" value={direccion} readOnly />
+            Correo Ejecutivo
+            <input
+              type="email"
+              className="w-full border rounded px-2 py-1"
+              value={emailEjecutivo}
+              onChange={(e) => setEmailEjecutivo(e.target.value)}
+            />
           </label>
-        </div>
-      </section>
+        </section>
+      </div>
 
-      {/* Productos */}
-      <section className="bg-white shadow p-4 rounded mb-4">
-        <div className="flex justify-between mb-2">
-          <h2 className="font-semibold text-[#2B6CFF]">Productos</h2>
-          <button className="bg-zinc-200 px-2 py-1 rounded text-sm" onClick={addLine}>
-            + Ítem
-          </button>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm border">
-            <thead className="bg-zinc-100">
-              <tr>
-                <th className="px-2 py-1 text-left">Código</th>
-                <th className="px-2 py-1 text-left">Descripción</th>
-                <th className="px-2 py-1 text-right">Kg</th>
-                <th className="px-2 py-1 text-right">Cantidad</th>
-                <th className="px-2 py-1 text-right">Precio base</th>
-                <th className="px-2 py-1 text-right">% Desc</th>
-                <th className="px-2 py-1 text-right">Precio venta</th>
-                <th className="px-2 py-1 text-right">Total</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {lines.map((r, i) => (
-                <tr key={i} className="border-t">
-                  <td className="px-2 py-1">
-                    <input
-                      className="w-32 border rounded px-1"
-                      value={r.code}
-                      onChange={(e) => updateLine(i, "code", e.target.value)}
-                      onBlur={(e) => fillFromCode(i, e.target.value)}
-                      list="productosList"
-                    />
-                    <datalist id="productosList">
-                      {productos.map((p) => (
-                        <option key={p.code} value={p.code}>
-                          {p.code} — {p.name}
-                        </option>
-                      ))}
-                    </datalist>
-                  </td>
-                  <td className="px-2 py-1">{r.name}</td>
-                  <td className="px-2 py-1 text-right">
-                    <input
-                      type="number"
-                      className="w-16 border rounded text-right"
-                      value={r.kilos}
-                      onChange={(e) => updateLine(i, "kilos", num(e.target.value))}
-                      min={0}
-                      step="any"
-                    />
-                  </td>
-                  <td className="px-2 py-1 text-right">
-                    <input
-                      type="number"
-                      className="w-16 border rounded text-right"
-                      value={r.qty}
-                      onChange={(e) => updateLine(i, "qty", num(e.target.value))}
-                      min={0}
-                      step="any"
-                    />
-                  </td>
-                  <td className="px-2 py-1 text-right">{money(r.priceBase)}</td>
-                  <td className="px-2 py-1 text-right">
-                    <input
-                      type="number"
-                      className="w-16 border rounded text-right"
-                      value={r.descuento}
-                      onChange={(e) => updateLine(i, "descuento", num(e.target.value))}
-                      disabled={r.isEspecial}
-                      min={0}
-                      max={20}
-                      step="any"
-                    />
-                  </td>
-                  <td className="px-2 py-1 text-right">{money(r.precioVenta)}</td>
-                  <td className="px-2 py-1 text-right">{money(r.total)}</td>
-                  <td className="px-2 py-1">
-                    <button className="text-red-600 text-xs" onClick={() => rmLine(i)}>
-                      Eliminar
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            {lines.length > 0 && (
-              <tfoot>
-                <tr className="font-semibold bg-zinc-50">
-                  <td colSpan={7} className="text-right px-2 py-1">
-                    TOTAL
-                  </td>
-                  <td className="text-right px-2 py-1">{money(subtotal)}</td>
-                  <td />
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      </section>
-
-      {/* Correo */}
-      <section className="bg-white shadow p-4 rounded mb-4">
-        <h2 className="font-semibold text-[#2B6CFF] mb-2">📧 Envío</h2>
-        <label className="flex flex-col gap-1">
-          Correo Ejecutivo
-          <input
-            type="email"
-            className="w-full border rounded px-2 py-1"
-            value={emailEjecutivo}
-            onChange={(e) => setEmailEjecutivo(e.target.value)}
-          />
-        </label>
-      </section>
-
-      {/* Botones */}
-      <div className="flex gap-2">
-        <button className="bg-zinc-200 px-3 py-1 rounded" onClick={descargarPDF}>
-          📄 Descargar PDF
+      {/* Botones acción (ocultos al imprimir) */}
+      <div className="flex gap-2 print:hidden px-6 pb-8">
+        <button className="bg-zinc-200 px-3 py-1 rounded" onClick={imprimir}>
+          🖨️ Imprimir / PDF
         </button>
         <button className="bg-blue-500 text-white px-3 py-1 rounded" onClick={enviarEmail}>
           ✉️ Enviar por Email
         </button>
         <button className="bg-zinc-200 px-3 py-1 rounded" onClick={limpiarTodo}>
-          🧹 Limpiar
+          🧹 Nueva NV
         </button>
       </div>
-    </div>
+
+      {/* Estilos para imprimir idéntico */}
+      <style jsx>{`
+        :global(html), :global(body), :global(#printArea) {
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+        @media print {
+          body * { visibility: hidden !important; }
+          #printArea, #printArea * { visibility: visible !important; }
+          #printArea { position: absolute !important; left: 0; top: 0; width: 100% !important; }
+          .print\\:hidden { display: none !important; }
+          @page { size: A4; margin: 12mm; }
+          header, section, table, h1, h2 { break-inside: avoid; }
+          thead { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+      `}</style>
+    </>
   );
 }
