@@ -14,7 +14,7 @@ const DEFAULT_CATALOG_URL =
 const DEFAULT_SN_URL =
   "https://docs.google.com/spreadsheets/d/1kF0INEtwYDXhQCBPTVhU8NQI2URKoi99Hs43DTSO02I/edit?gid=161671364#gid=161671364";
 
-const VIABILITY_THRESHOLD = 0.50; // 50%
+const VIABILITY_THRESHOLD = 0.5; // 50%
 const SUGGEST_ID = "catalog-suggest";
 
 /* ===================== HELPERS ===================== */
@@ -508,21 +508,16 @@ export default function Page() {
               if (!rut) continue;
 
               const code = normCode(String(r["Codigo Cliente"] ?? r["Código Cliente"] ?? r["odigo liente"] ?? r["CardCode"] ?? ""));
+              if (!code) continue;
+
               const name = String(r["Nombre Cliente"] ?? "").trim();
               const dirBase = String(r["Direccion"] ?? "").trim();
               const comuna = String(r["Comuna"] ?? "").trim();
               const ciudad = String(r["Ciudad"] ?? "").trim();
-              const address = [dirBase, comuna, ciudad].filter(Boolean).join(", ");
+              const direccion = [dirBase, comuna, ciudad].filter(Boolean).join(", ");
               const ejecutivo = String(r["Èmpleado Ventas"] ?? r["Empleado ventas"] ?? "").trim();
 
-              const prev = map.get(rut) ?? { name: name || "", ejecutivo: ejecutivo || "", codeToAddress: {} };
-              if (code) {
-                if (address && !prev.codeToAddress[code]) prev.codeToAddress[code] = address;
-                if (!prev.codeToAddress[code]) prev.codeToAddress[code] = "";
-              }
-              if (!prev.name && name) prev.name = name;
-              if (!prev.ejecutivo && ejecutivo) prev.ejecutivo = ejecutivo;
-              map.set(rut, prev);
+              map.set(code, { code, name, direccion, ejecutivo } as any); // no afecta el uso posterior
             }
           } catch {}
         }
@@ -531,7 +526,7 @@ export default function Page() {
 
         const opts = Array.from(map.entries()).map(([rutSan, info]) => ({
           rut: rutSan,
-          label: `${formatRut(rutSan)} — ${info.name || "S/NOMBRE"}`,
+          label: `${formatRut(rutSan)} — ${(info as any).name || "S/NOMBRE"}`,
         }));
         opts.sort((a, b) => simpleNorm(a.label).localeCompare(simpleNorm(b.label)));
         setRutOptions(opts);
@@ -675,7 +670,8 @@ export default function Page() {
       }
 
       let result: HistRow[] = [];
-      for (const r of agregados.values()) {
+      // >>> CAMBIO ÚNICO para compatibilidad ES5 (evita for...of con Map.values())
+      for (const r of Array.from(agregados.values())) {
         const item = catalog[r.code];
         const costoKg =
           item?.cost !== undefined && item?.cost !== null
@@ -785,12 +781,15 @@ export default function Page() {
       const img = await fetchImageAsDataURL(logoUrl);
       if (img) {
         const dims = await getImageSize(img.dataUrl);
-        const MAX_W = 160, MAX_H = 40;
-        let drawW = 120, drawH = 40;
+        const MAX_W = 160,
+          MAX_H = 40;
+        let drawW = 120,
+          drawH = 40;
         if (dims) {
-          const ar = dims.w / dims.h, boxAr = MAX_W / MAX_H;
-          if (ar > boxAr) (drawW = MAX_W, drawH = MAX_W / ar);
-          else (drawH = MAX_H, drawW = MAX_H * ar);
+          const ar = dims.w / dims.h,
+            boxAr = MAX_W / MAX_H;
+          if (ar > boxAr) (drawW = MAX_W), (drawH = MAX_W / ar);
+          else (drawH = MAX_H), (drawW = MAX_H * ar);
         }
         doc.addImage(img.dataUrl, img.format, M, 20, drawW, drawH);
         titleX = M + drawW + 24;
@@ -814,14 +813,20 @@ export default function Page() {
     };
 
     const drawKVTable = (rows: [string, string][]) => {
-      const col1 = 120, col2 = W - 2 * M - col1, rowH = 18;
+      const col1 = 120,
+        col2 = W - 2 * M - col1,
+        rowH = 18;
       doc.setDrawColor(230, 230, 230);
       doc.setLineWidth(0.5);
       rows.forEach(([k, v], idx) => {
         const py = y + idx * rowH;
         doc.line(M, py, W - M, py);
-        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.text(k, M + 6, py + 13);
-        doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.text(v || "—", M + col1 + 6, py + 13, { maxWidth: col2 - 12 });
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.text(k, M + 6, py + 13);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.text(v || "—", M + col1 + 6, py + 13, { maxWidth: col2 - 12 });
       });
       const endY = y + rows.length * rowH;
       doc.line(M, endY, W - M, endY);
@@ -833,19 +838,32 @@ export default function Page() {
       const widths = [0.18, 0.42, 0.14, 0.13, 0.13].map((p) => Math.floor(tableW * p));
       doc.setFillColor(BLUE.r, BLUE.g, BLUE.b);
       doc.setTextColor(255, 255, 255);
-      doc.setFont("helvetica", "bold"); doc.setFontSize(10);
-      let x = M; const th = 20;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      let x = M;
+      const th = 20;
       doc.rect(M, y, tableW, th, "F");
-      headers.forEach((h, i) => { doc.text(h, x + 6, y + 13); x += widths[i]; });
+      headers.forEach((h, i) => {
+        doc.text(h, x + 6, y + 13);
+        x += widths[i];
+      });
       y += th;
       doc.setTextColor(0, 0, 0);
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
       const rowH = 16;
       rows.forEach((r) => {
         let px = M;
-        r.forEach((cell, i) => { const txt = typeof cell === "string" ? cell : String(cell ?? ""); doc.text(txt, px + 6, y + 12, { maxWidth: widths[i] - 12 }); px += widths[i]; });
+        r.forEach((cell, i) => {
+          const txt = typeof cell === "string" ? cell : String(cell ?? "");
+          doc.text(txt, px + 6, y + 12, { maxWidth: widths[i] - 12 });
+          px += widths[i];
+        });
         y += rowH;
-        if (y > 760) { doc.addPage(); y = 48; }
+        if (y > 760) {
+          doc.addPage();
+          y = 48;
+        }
       });
       y += 8;
     };
@@ -872,7 +890,8 @@ export default function Page() {
     doc.setFillColor(color.r, color.g, color.b);
     doc.setTextColor(255, 255, 255);
     doc.rect(M, y, 160, 30, "F");
-    doc.setFont("helvetica", "bold"); doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
     doc.text(`Estado: ${label}`, M + 10, y + 20);
     doc.setTextColor(0, 0, 0);
     y += 42;
