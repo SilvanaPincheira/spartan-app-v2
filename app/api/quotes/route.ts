@@ -1,53 +1,62 @@
+export const runtime = "nodejs";
+
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-// Cliente con la service_role key (seguro en backend, nunca en frontend)
 const supabase = createClient(
-  process.env.SUPABASE_URL as string,
-  process.env.SUPABASE_SERVICE_ROLE_KEY as string
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// ================== GET ==================
-// Leer todas las cotizaciones
-export async function GET() {
-  const { data, error } = await supabase
-    .from("quotes")
-    .select("*")
-    .order("created_at", { ascending: false });
+// GET /api/quotes?customer_id=&limit=&page=
+export async function GET(req: Request) {
+  try {
+    const url = new URL(req.url);
+    const customer_id = url.searchParams.get("customer_id") ?? "";
+    const limit = Math.max(1, Number(url.searchParams.get("limit") ?? 20));
+    const page  = Math.max(1, Number(url.searchParams.get("page") ?? 1));
+    const from = (page - 1) * limit;
+    const to   = from + limit - 1;
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    let q = supabase.from("quotes")
+      .select("*", { count: "exact" })
+      .order("created_at", { ascending: false })
+      .range(from, to);
+
+    if (customer_id) q = q.eq("customer_id", customer_id);
+
+    const { data, error, count } = await q;
+    if (error) throw error;
+
+    return NextResponse.json({ data, count });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
   }
-
-  return NextResponse.json({ data });
 }
 
-// ================== POST ==================
-// Crear una nueva cotización
+// POST /api/quotes
+// body: { customer_id, total, items, notes?, status? }
 export async function POST(req: Request) {
   try {
-    const body = await req.json(); // payload enviado desde frontend
-    const { cliente_id, total, items } = body;
+    const body = await req.json();
+
+    const payload = {
+      customer_id: body.customer_id ?? null,
+      total: Number(body.total ?? 0),
+      items: Array.isArray(body.items) ? body.items : [],
+      notes: (body.notes ?? "").toString(),
+      status: body.status ?? "draft",
+    };
 
     const { data, error } = await supabase
       .from("quotes")
-      .insert([
-        {
-          cliente_id,
-          total,
-          items, // asegúrate que tu columna sea jsonb en la tabla
-        },
-      ])
+      .insert([payload])
       .select()
       .single();
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-
-    return NextResponse.json({ data });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    if (error) throw error;
+    return NextResponse.json({ data }, { status: 201 });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 400 });
   }
 }
-
