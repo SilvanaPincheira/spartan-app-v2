@@ -1,37 +1,24 @@
-// app/api/customers/[id]/route.ts
 export const runtime = "nodejs";
-
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+type Params = { params: { id: string } };
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY!
-);
-
-// GET /api/customers/:id
-export async function GET(_: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, { params }: Params) {
   const { data, error } = await supabase.from("customers").select("*").eq("id", params.id).single();
-  return NextResponse.json({ data, error }, { status: error ? 404 : 200 });
+  if (error) return NextResponse.json({ error: error.message }, { status: 404 });
+  return NextResponse.json({ data });
 }
 
-// PATCH /api/customers/:id  (actualiza campos parciales)
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
-  try {
-    const patch = await req.json();
-    const allowed = ["rut","code","name","address","executive","active"];
-    const upd: Record<string, any> = {};
-    for (const k of allowed) if (patch[k] !== undefined) upd[k] = patch[k];
-
-    const { data, error } = await supabase.from("customers").update(upd).eq("id", params.id).select().single();
-    return NextResponse.json({ data, error }, { status: error ? 400 : 200 });
-  } catch (e:any) {
-    return NextResponse.json({ data:null, error: e.message }, { status: 500 });
-  }
+export async function PUT(req: Request, { params }: Params) {
+  const body = await req.json();
+  const { data, error } = await supabase.from("customers").update(body).eq("id", params.id).select().single();
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  return NextResponse.json({ data });
 }
 
-// DELETE /api/customers/:id
-export async function DELETE(_: Request, { params }: { params: { id: string } }) {
+export async function DELETE(_req: Request, { params }: Params) {
   const { error } = await supabase.from("customers").delete().eq("id", params.id);
-  return NextResponse.json({ ok: !error, error }, { status: error ? 400 : 200 });
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  return NextResponse.json({ ok: true });
 }
