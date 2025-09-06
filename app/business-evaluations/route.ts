@@ -1,3 +1,4 @@
+// app/api/business-evaluations/route.ts
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
@@ -5,7 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY! // backend-only
 );
 
 // GET /api/business-evaluations?customer_id=&limit=&page=
@@ -26,11 +27,11 @@ export async function GET(req: Request) {
     if (customer_id) q = q.eq("customer_id", customer_id);
 
     const { data, error, count } = await q;
-    if (error) throw error;
+    if (error) return NextResponse.json({ data: null, error: error.message }, { status: 500 });
 
-    return NextResponse.json({ data, count });
+    return NextResponse.json({ data, count, error: null });
   } catch (e:any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    return NextResponse.json({ data: null, error: e.message }, { status: 500 });
   }
 }
 
@@ -39,22 +40,34 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-
-    if (!body.evaluation_result || !['viable','no_viable'].includes(body.evaluation_result)) {
-      return NextResponse.json({ error: "evaluation_result debe ser 'viable' o 'no_viable'" }, { status: 400 });
+    if (!body.customer_id || !body.evaluation_result) {
+      return NextResponse.json(
+        { data: null, error: "customer_id y evaluation_result son obligatorios" },
+        { status: 400 }
+      );
+    }
+    if (!["viable","no_viable"].includes(body.evaluation_result)) {
+      return NextResponse.json(
+        { data: null, error: "evaluation_result debe ser 'viable' o 'no_viable'" },
+        { status: 400 }
+      );
     }
 
     const payload = {
-      customer_id: body.customer_id ?? null,
-      evaluation_result: body.evaluation_result,
-      notes: (body.notes ?? "").toString()
+      customer_id: body.customer_id as string,
+      evaluation_result: body.evaluation_result as "viable" | "no_viable",
+      notes: (body.notes ?? "").toString().trim(),
     };
 
-    const { data, error } = await supabase.from("business_evaluations").insert([payload]).select().single();
-    if (error) throw error;
+    const { data, error } = await supabase
+      .from("business_evaluations")
+      .insert([payload])
+      .select()
+      .single();
 
-    return NextResponse.json({ data }, { status: 201 });
+    if (error) return NextResponse.json({ data: null, error: error.message }, { status: 400 });
+    return NextResponse.json({ data, error: null }, { status: 201 });
   } catch (e:any) {
-    return NextResponse.json({ error: e.message }, { status: 400 });
+    return NextResponse.json({ data: null, error: e.message }, { status: 500 });
   }
 }
