@@ -13,7 +13,7 @@ type Params = { params: { id: string } };
 // GET /api/<table>/:id
 export async function GET(_req: Request, { params }: Params) {
   const { data, error } = await supabase
-    .from("<business_evaluations>")
+    .from("business_evaluations")
     .select("*")
     .eq("id", params.id)
     .single();
@@ -27,7 +27,7 @@ export async function PUT(req: Request, { params }: Params) {
   const body = await req.json();
 
   const { data, error } = await supabase
-    .from("<TABLE_NAME>")
+    .from("<business_evaluations>")
     .update(body)
     .eq("id", params.id)
     .select()
@@ -39,7 +39,7 @@ export async function PUT(req: Request, { params }: Params) {
 
 // DELETE /api/<table>/:id
 export async function DELETE(_req: Request, { params }: Params) {
-  const { error } = await supabase.from("<TABLE_NAME>").delete().eq("id", params.id);
+  const { error } = await supabase.from("business_evaluations").delete().eq("id", params.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ ok: true });
 }
