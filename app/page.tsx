@@ -4,11 +4,10 @@
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import {
-  RadialBarChart,
-  RadialBar,
-  PolarAngleAxis,
-} from "recharts";
+import { RadialBarChart, RadialBar, PolarAngleAxis } from "recharts";
+
+// 👇 Importa el formulario
+import CreateSalesNote from "./components/CreateSalesNote";
 
 const LOGO_URL =
   "https://assets.jumpseller.com/store/spartan-de-chile/themes/317202/options/27648963/Logo-spartan-white.png?1600810625";
@@ -203,6 +202,11 @@ export default function HomeMenu() {
               Meta: <b>{totalMeta.toLocaleString("es-CL")}</b>
             </p>
           </div>
+        </section>
+
+        {/* 👇 Sección para crear Notas de Venta */}
+        <section className="mt-10">
+          <CreateSalesNote />
         </section>
 
         {/* Accesos útiles solo admin */}
