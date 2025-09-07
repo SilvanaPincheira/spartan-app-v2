@@ -135,6 +135,12 @@ export default function NotaVentaPage() {
   /* ---- DOC INFO: N° NV ---- */
   const [numeroNV, setNumeroNV] = useState<string>("");
 
+  // ====== NUEVO: estados para guardar en Supabase ======
+  const [customerUUID, setCustomerUUID] = useState<string>(""); // UUID de cliente en Supabase
+  const [saving, setSaving] = useState<boolean>(false);
+  const [saveMsg, setSaveMsg] = useState<string>("");
+  const [saveErr, setSaveErr] = useState<string>("");
+
   // Genera correlativo local por año (persistente en este navegador)
   function generarNumeroNV(): string {
     if (typeof window === "undefined") return "";
@@ -278,7 +284,7 @@ export default function NotaVentaPage() {
     return Number.isFinite(s) ? s : 0;
   }, [lines]);
 
-  /* ---- ACCIONES ---- */
+  /* ---- ACCIONES EXISTENTES ---- */
   function limpiarTodo() {
     setClientName("");
     setClientRut("");
@@ -302,6 +308,50 @@ export default function NotaVentaPage() {
     const subject = encodeURIComponent(`Nota de Venta ${numeroNV}`);
     const body = encodeURIComponent(`Adjunto la Nota de Venta ${numeroNV} generada.`);
     window.location.href = `mailto:${destinatarios}?subject=${subject}&body=${body}`;
+  }
+
+  /* ====== NUEVO: GUARDAR EN SUPABASE ====== */
+  async function guardarEnSupabase() {
+    setSaveMsg("");
+    setSaveErr("");
+
+    if (!customerUUID.trim()) {
+      setSaveErr("Debes ingresar el UUID del cliente (Supabase).");
+      return;
+    }
+
+    const round = (n: number) => Math.round(n || 0);
+
+    const payload = {
+      customer_id: customerUUID.trim(),
+      note_date: new Date().toISOString().slice(0, 10),
+      related_quote: null,
+      subtotal: round(subtotal),
+      tax: 0,
+      total: round(subtotal),
+      total_amount: round(subtotal), // numeric
+      status: "draft" as const,
+      document_number: numeroNV || null,
+      pdf_url: null,
+      created_by: emailEjecutivo || null,
+      notes: `NV ${numeroNV} — ${clientName} (${clientCode})`,
+    };
+
+    try {
+      setSaving(true);
+      const res = await fetch("/api/sales-notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "No se pudo guardar en Supabase.");
+      setSaveMsg(`✅ Nota guardada en Supabase (id: ${json?.data?.id ?? "?"})`);
+    } catch (e: any) {
+      setSaveErr(e?.message || "Error desconocido al guardar.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   /* ===================== UI ===================== */
@@ -392,6 +442,20 @@ export default function NotaVentaPage() {
             <label className="flex flex-col gap-1">
               Dirección
               <input className="w-full border rounded px-2 py-1" value={direccion} readOnly />
+            </label>
+
+            {/* ====== NUEVO: UUID Cliente (Supabase) ====== */}
+            <label className="flex flex-col gap-1 md:col-span-2">
+              UUID Cliente (Supabase)
+              <input
+                className="w-full border rounded px-2 py-1"
+                placeholder="83d97533-83fb-4808-a480-0c2154ef3dbb"
+                value={customerUUID}
+                onChange={(e) => setCustomerUUID(e.target.value)}
+              />
+              <span className="text-[11px] text-zinc-500">
+                Pega aquí el UUID del cliente (tabla de clientes en Supabase). Requerido para guardar.
+              </span>
             </label>
           </div>
         </section>
@@ -510,20 +574,43 @@ export default function NotaVentaPage() {
             />
           </label>
         </section>
+
+        {/* ====== NUEVOS MENSAJES DE GUARDADO ====== */}
+        {saveMsg && (
+          <div className="mb-3 rounded bg-green-50 text-green-700 px-3 py-2 text-sm border border-green-200">
+            {saveMsg}
+          </div>
+        )}
+        {saveErr && (
+          <div className="mb-3 rounded bg-red-50 text-red-700 px-3 py-2 text-sm border border-red-200">
+            {saveErr}
+          </div>
+        )}
       </div>
 
       {/* Botones acción (ocultos al imprimir) */}
-      <div className="flex gap-2 print:hidden px-6 pb-8">
-        <button className="bg-zinc-200 px-3 py-1 rounded" onClick={imprimir}>
-          🖨️ Imprimir / PDF
-        </button>
-        <button className="bg-blue-500 text-white px-3 py-1 rounded" onClick={enviarEmail}>
-          ✉️ Enviar por Email
-        </button>
-        <button className="bg-zinc-200 px-3 py-1 rounded" onClick={limpiarTodo}>
-          🧹 Nueva NV
-        </button>
-      </div>
+<div className="flex flex-wrap gap-2 print:hidden px-6 pb-8">
+  <button className="bg-zinc-200 px-3 py-1 rounded" onClick={imprimir}>
+    🖨️ Imprimir / PDF
+  </button>
+
+  {/* NUEVO: Guardar en Supabase */}
+  <button
+    className={`px-3 py-1 rounded text-white ${saving ? "bg-zinc-400" : "bg-emerald-600 hover:bg-emerald-700"}`}
+    onClick={guardarEnSupabase}
+    disabled={saving}
+  >
+    {saving ? "Guardando..." : "💾 Guardar en Supabase"}
+  </button>
+
+  <button className="bg-blue-500 text-white px-3 py-1 rounded" onClick={enviarEmail}>
+    ✉️ Enviar por Email
+  </button>
+  <button className="bg-zinc-200 px-3 py-1 rounded" onClick={limpiarTodo}>
+    🧹 Nueva NV
+  </button>
+</div>
+
 
       {/* Estilos para imprimir idéntico */}
       <style jsx>{`
