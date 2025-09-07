@@ -405,7 +405,7 @@ export default function CotizacionEjecutivaSheets() {
                 <button
                   type="button"
                   onClick={activarClienteExistente}
-                  className={`px-3 py-1 text-xs ${clientMode === "existing" ? "bg-blue-600 text-white" : "bg-white"}`}
+                  className={`px-3 py-1 text-xs ${clientMode === "existing" ? "bg-blue-600 text-white" : "bg-white"} print:hidden`}
                   title="Buscar y seleccionar desde la lista"
                 >
                   Cliente existente
@@ -413,7 +413,7 @@ export default function CotizacionEjecutivaSheets() {
                 <button
                   type="button"
                   onClick={activarClienteNuevo}
-                  className={`px-3 py-1 text-xs border-l ${clientMode === "new" ? "bg-blue-600 text-white" : "bg-white"}`}
+                  className={`px-3 py-1 text-xs border-l ${clientMode === "new" ? "bg-blue-600 text-white" : "bg-white"} print:hidden`}
                   title="Ingresar un cliente nuevo manualmente"
                 >
                   Cliente nuevo
@@ -431,7 +431,7 @@ export default function CotizacionEjecutivaSheets() {
                     setShowSuggestions(v.trim().length >= 2 && clientMode === "existing");
                   }}
                   onFocus={() => clientMode === "existing" && setShowSuggestions(rutToken.trim().length >= 2)}
-                  className="w-full border px-2 py-1 disabled:bg-zinc-100"
+                  className="w-full border px-2 py-1 disabled:bg-zinc-100 print:hidden"
                 />
                 {clientMode === "existing" && showSuggestions && filteredClientes.length > 0 && (
                   <ul className="absolute z-50 bg-white border w-full max-h-64 overflow-y-auto text-xs shadow-lg">
@@ -450,7 +450,7 @@ export default function CotizacionEjecutivaSheets() {
 
               <button
                 onClick={clearCliente}
-                className="text-xs bg-red-100 border px-2 py-1 rounded"
+                className="text-xs bg-red-100 border px-2 py-1 rounded print:hidden"
                 title="Limpiar cliente"
               >
                 Limpiar
