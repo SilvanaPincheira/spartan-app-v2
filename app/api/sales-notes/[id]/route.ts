@@ -1,45 +1,67 @@
-// app/api/<table>/[id]/route.ts
+// app/api/sales-notes/[id]/route.ts
 export const runtime = "nodejs";
+
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // solo en backend
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-type Params = { params: { id: string } };
-
-// GET /api/<table>/:id
-export async function GET(_req: Request, { params }: Params) {
-  const { data, error } = await supabase
-    .from("sales_notes")
-    .select("*")
-    .eq("id", params.id)
-    .single();
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 404 });
-  return NextResponse.json({ data });
+// GET /api/sales-notes/:id
+export async function GET(_: Request, ctx: { params: { id: string } }) {
+  try {
+    const { id } = ctx.params;
+    const { data, error } = await supabase
+      .from("sales_notes")
+      .select("*")
+      .eq("id", id)
+      .single();
+    if (error) throw error;
+    return NextResponse.json({ data, error: null });
+  } catch (e: any) {
+    return NextResponse.json({ data: null, error: e.message }, { status: 404 });
+  }
 }
 
-// PUT /api/<table>/:id
-export async function PUT(req: Request, { params }: Params) {
-  const body = await req.json();
+// PATCH /api/sales-notes/:id
+// body: campos a actualizar (status, total_amount, notes, pdf_url, document_number, etc)
+export async function PATCH(req: Request, ctx: { params: { id: string } }) {
+  try {
+    const { id } = ctx.params;
+    const body = await req.json();
 
-  const { data, error } = await supabase
-    .from("<sales_notes>")
-    .update(body)
-    .eq("id", params.id)
-    .select()
-    .single();
+    const patch: Record<string, any> = {};
+    const allowed = [
+      "status",
+      "total_amount",
+      "subtotal",
+      "tax",
+      "total",
+      "notes",
+      "pdf_url",
+      "document_number",
+      "note_date",
+      "related_quote",
+    ];
+    for (const k of allowed) {
+      if (k in body) patch[k] = body[k];
+    }
+    if (Object.keys(patch).length === 0) {
+      return NextResponse.json({ error: "Sin cambios" }, { status: 400 });
+    }
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json({ data });
-}
+    const { data, error } = await supabase
+      .from("sales_notes")
+      .update(patch)
+      .eq("id", id)
+      .select()
+      .single();
 
-// DELETE /api/<table>/:id
-export async function DELETE(_req: Request, { params }: Params) {
-  const { error } = await supabase.from("sales_notes").delete().eq("id", params.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json({ ok: true });
+    if (error) throw error;
+    return NextResponse.json({ data, error: null });
+  } catch (e: any) {
+    return NextResponse.json({ data: null, error: e.message }, { status: 400 });
+  }
 }
