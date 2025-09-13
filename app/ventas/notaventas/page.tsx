@@ -105,8 +105,9 @@ type Line = {
   name: string;
   kilos: number;
   qty: number;
-  priceBase: number;
-  descuento: number; // 0..20 (deshabilitado si isEspecial)
+  priceBase: number;     // SIEMPRE lista 1 (de planilla)
+  especialPrice: number; // 0 si no aplica
+  descuento: number;     // 0..20 (deshabilitado si isEspecial)
   precioVenta: number;
   total: number;
   isEspecial: boolean;
@@ -126,22 +127,41 @@ export default function NotaVentaPage() {
   const [preciosEspeciales, setPreciosEspeciales] = useState<PrecioEspecial[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
 
+  /* ---- LISTA DE PRECIOS ---- */
+  const [listaSeleccionada, setListaSeleccionada] = useState<1 | 2 | 3>(1);
+
   /* ---- CORREO ---- */
   const [emailEjecutivo, setEmailEjecutivo] = useState<string>("");
 
   /* ---- UI ---- */
   const [errorMsg, setErrorMsg] = useState<string>("");
+  const [saveMsg, setSaveMsg] = useState<string>("");
+  const [saving, setSaving] = useState<boolean>(false);
 
   /* ---- DOC INFO: N° NV ---- */
   const [numeroNV, setNumeroNV] = useState<string>("");
 
-  // ====== NUEVO: estados para guardar en Supabase ======
-  const [customerUUID, setCustomerUUID] = useState<string>(""); // UUID de cliente en Supabase
-  const [saving, setSaving] = useState<boolean>(false);
-  const [saveMsg, setSaveMsg] = useState<string>("");
-  const [saveErr, setSaveErr] = useState<string>("");
+  /* ---- Supabase (UUID cliente obtenido automáticamente) ---- */
+  const [customerUUID, setCustomerUUID] = useState<string>("");
 
-  // Genera correlativo local por año (persistente en este navegador)
+  /* ====== API HELPERS ====== */
+  async function fetchCustomerUUID(rut: string, cardCode: string) {
+    try {
+      const res = await fetch("/api/clientes-sap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rut, cardCode }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "No se pudo buscar cliente en Supabase.");
+      return json?.data?.id || null;
+    } catch (e) {
+      console.error("Error buscando UUID:", e);
+      return null;
+    }
+  }
+
+  // Genera correlativo local por año
   function generarNumeroNV(): string {
     if (typeof window === "undefined") return "";
     const year = new Date().getFullYear();
@@ -155,7 +175,6 @@ export default function NotaVentaPage() {
   // Asignar número al cargar
   useEffect(() => {
     setNumeroNV(generarNumeroNV());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Cargar clientes
@@ -211,11 +230,44 @@ export default function NotaVentaPage() {
     })().catch((e) => setErrorMsg(String(e)));
   }, []);
 
-  /* ---- LÓGICA DE LÍNEAS (NO CAMBIADA) ---- */
+  /* ---- LÓGICA DE PRECIOS ---- */
+  function precioListaDesdeBase(baseLista1: number, lista: 1 | 2 | 3) {
+    if (lista === 1) return baseLista1;
+    if (lista === 2) return baseLista1 * 0.97;
+    return baseLista1 * 0.97 * 0.97;
+  }
+
+  function computeLine(row: Line): Line {
+    const out = { ...row };
+    // Si es especial, el precio venta NO cambia por lista ni descuento
+    if (out.isEspecial && out.especialPrice > 0) {
+      out.descuento = 0;
+      out.precioVenta = out.especialPrice;
+    } else {
+      const baseSegunLista = precioListaDesdeBase(out.priceBase, listaSeleccionada);
+      const desc = clamp(num(out.descuento), 0, 20);
+      out.precioVenta = baseSegunLista * (1 - desc / 100);
+    }
+    out.total = (num(out.qty) || 0) * (num(out.kilos) || 1) * (out.precioVenta || 0);
+    return out;
+  }
+
+  /* ---- LÍNEAS ---- */
   function addLine() {
     setLines((old) => [
       ...old,
-      { code: "", name: "", kilos: 1, qty: 1, priceBase: 0, descuento: 0, precioVenta: 0, total: 0, isEspecial: false },
+      {
+        code: "",
+        name: "",
+        kilos: 1,
+        qty: 1,
+        priceBase: 0,
+        especialPrice: 0,
+        descuento: 0,
+        precioVenta: 0,
+        total: 0,
+        isEspecial: false,
+      },
     ]);
   }
   function rmLine(i: number) {
@@ -227,32 +279,30 @@ export default function NotaVentaPage() {
     setLines((old) => {
       const n = [...old];
       const row = { ...(n[i] ?? n[0]) };
+
       row.code = prod.code;
       row.name = prod.name;
       row.kilos = prod.kilos || 1;
 
-      // Precio base = especial si aplica
-      let precio = prod.price_list || 0;
-      let isEspecial = false;
+      // Fijar always 1° lista como priceBase
+      row.priceBase = prod.price_list || 0;
+
+      // ¿Tiene precio especial?
+      let esp = 0;
+      let isEsp = false;
       if (clientCode) {
         const pe = preciosEspeciales.find((p) => p.codigoSN === clientCode && p.articulo === prod.code);
         if (pe) {
-          precio = pe.precio || 0;
-          isEspecial = true;
+          esp = pe.precio || 0;
+          isEsp = true;
         }
       }
-      row.priceBase = precio;
-      row.isEspecial = isEspecial;
+      row.especialPrice = esp;
+      row.isEspecial = isEsp;
+      row.descuento = isEsp ? 0 : clamp(num(row.descuento), 0, 20);
 
-      // Descuento (si no especial)
-      row.descuento = isEspecial ? 0 : clamp(num(row.descuento), 0, 20);
-
-      // Precio venta + total
-      const pVenta = isEspecial ? precio : precio * (1 - row.descuento / 100);
-      row.precioVenta = pVenta;
-      row.total = (num(row.qty) || 0) * (num(row.kilos) || 1) * pVenta;
-
-      n[i] = row;
+      const calc = computeLine(row);
+      n[i] = calc;
       return n;
     });
   }
@@ -267,24 +317,57 @@ export default function NotaVentaPage() {
       row.kilos = num(row.kilos) || 1;
       row.qty = num(row.qty) || 0;
       row.priceBase = num(row.priceBase) || 0;
+      row.especialPrice = num(row.especialPrice) || 0;
       row.descuento = row.isEspecial ? 0 : clamp(num(row.descuento), 0, 20);
 
-      const precio = row.priceBase;
-      const pVenta = row.isEspecial ? precio : precio * (1 - row.descuento / 100);
-      row.precioVenta = pVenta;
-      row.total = row.qty * row.kilos * pVenta;
-
-      n[i] = row;
+      n[i] = computeLine(row);
       return n;
     });
   }
+
+  // Recalcular todas las líneas al cambiar la lista
+  useEffect(() => {
+    setLines((old) => old.map((r) => computeLine(r)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listaSeleccionada]);
 
   const subtotal = useMemo(() => {
     const s = lines.reduce((a, r) => a + (Number.isFinite(r.total) ? r.total : 0), 0);
     return Number.isFinite(s) ? s : 0;
   }, [lines]);
 
-  /* ---- ACCIONES EXISTENTES ---- */
+  /* ---- CLIENTE: selección ---- */
+  function handleNombreChange(val: string) {
+    setClientName(val);
+    const row = clients.find((c) => normalize(c.nombre) === normalize(val));
+    // al cambiar nombre, se limpia código hasta que elijan sucursal
+    if (row) {
+      setClientRut(row.rut || "");
+      setClientCode("");
+      setDireccion("");
+      setCustomerUUID("");
+    } else {
+      setClientRut("");
+      setClientCode("");
+      setDireccion("");
+      setCustomerUUID("");
+    }
+  }
+
+  async function handleCodigoChange(val: string) {
+    setClientCode(val);
+    const row = clients.find((c) => c.codigo === val);
+    if (row) {
+      setClientRut(row.rut || "");
+      setDireccion(row.direccion || "");
+      // Buscar UUID en Supabase automáticamente
+      const uuid = await fetchCustomerUUID(row.rut, row.codigo);
+      if (uuid) setCustomerUUID(uuid);
+      else setCustomerUUID("");
+    }
+  }
+
+  /* ---- ACCIONES ---- */
   function limpiarTodo() {
     setClientName("");
     setClientRut("");
@@ -293,8 +376,10 @@ export default function NotaVentaPage() {
     setEmailEjecutivo("");
     setLines([]);
     setErrorMsg("");
-    // nuevo correlativo
+    setCustomerUUID("");
     setNumeroNV(generarNumeroNV());
+    setListaSeleccionada(1);
+    setSaveMsg("");
   }
 
   function imprimir() {
@@ -310,45 +395,72 @@ export default function NotaVentaPage() {
     window.location.href = `mailto:${destinatarios}?subject=${subject}&body=${body}`;
   }
 
-  /* ====== NUEVO: GUARDAR EN SUPABASE ====== */
+  /* ====== GUARDAR EN SUPABASE (cabecera + ítems) ====== */
   async function guardarEnSupabase() {
     setSaveMsg("");
-    setSaveErr("");
-
-    if (!customerUUID.trim()) {
-      setSaveErr("Debes ingresar el UUID del cliente (Supabase).");
-      return;
-    }
-
-    const round = (n: number) => Math.round(n || 0);
-
-    const payload = {
-      customer_id: customerUUID.trim(),
-      note_date: new Date().toISOString().slice(0, 10),
-      related_quote: null,
-      subtotal: round(subtotal),
-      tax: 0,
-      total: round(subtotal),
-      total_amount: round(subtotal), // numeric
-      status: "draft" as const,
-      document_number: numeroNV || null,
-      pdf_url: null,
-      created_by: emailEjecutivo || null,
-      notes: `NV ${numeroNV} — ${clientName} (${clientCode})`,
-    };
+    setErrorMsg("");
 
     try {
+      if (!customerUUID) {
+        throw new Error("No se pudo obtener el UUID del cliente. Selecciona Nombre y Código Cliente (sucursal).");
+      }
+      if (lines.length === 0) {
+        throw new Error("Agrega al menos un ítem antes de guardar.");
+      }
+
       setSaving(true);
-      const res = await fetch("/api/sales-notes", {
+
+      const round = (n: number) => Math.round(n || 0);
+
+      // 1) Cabecera
+      const payloadCab = {
+        customer_id: customerUUID,
+        note_date: new Date().toISOString().slice(0, 10),
+        related_quote: null,
+        subtotal: round(subtotal),
+        tax: 0,
+        total: round(subtotal),
+        total_amount: round(subtotal),
+        status: "draft" as const,
+        document_number: numeroNV || null,
+        pdf_url: null,
+        created_by: emailEjecutivo || null,
+        notes: `NV ${numeroNV} — ${clientName} (${clientCode})`,
+      };
+
+      const resCab = await fetch("/api/sales-notes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(payloadCab),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "No se pudo guardar en Supabase.");
-      setSaveMsg(`✅ Nota guardada en Supabase (id: ${json?.data?.id ?? "?"})`);
+      const jsonCab = await resCab.json();
+      if (!resCab.ok) throw new Error(jsonCab?.error || "No se pudo guardar la cabecera.");
+
+      const salesNoteId = jsonCab?.data?.id;
+      if (!salesNoteId) throw new Error("No se obtuvo el ID (uuid) de la nota de venta.");
+
+      // 2) Ítems (detalle)
+      const payloadItems = lines.map((r) => ({
+        sales_note_id: salesNoteId,
+        product_code: r.code,
+        description: r.name,
+        qty: r.qty,
+        unit_price: round(r.precioVenta), // precio venta según lista o especial
+        discount_pct: r.isEspecial ? 0 : r.descuento,
+        line_total: round(r.total),
+      }));
+
+      const resItems = await fetch("/api/sales-note-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payloadItems),
+      });
+      const jsonItems = await resItems.json();
+      if (!resItems.ok) throw new Error(jsonItems?.error || "No se pudieron guardar los ítems.");
+
+      setSaveMsg(`✅ Nota guardada (ID: ${salesNoteId}) con ${payloadItems.length} ítems.`);
     } catch (e: any) {
-      setSaveErr(e?.message || "Error desconocido al guardar.");
+      setErrorMsg(e?.message || "Error desconocido al guardar.");
     } finally {
       setSaving(false);
     }
@@ -358,7 +470,7 @@ export default function NotaVentaPage() {
   return (
     <>
       <div id="printArea" className="min-h-screen bg-white p-6 text-[12px]">
-        {/* Encabezado con logo + número */}
+        {/* Encabezado */}
         <header className="mb-4 flex items-center justify-between border-b pb-2">
           <div className="flex items-center gap-3">
             <img
@@ -379,6 +491,11 @@ export default function NotaVentaPage() {
             {errorMsg}
           </div>
         )}
+        {saveMsg && (
+          <div className="mb-3 rounded bg-green-50 text-green-700 px-3 py-2 text-sm border border-green-200">
+            {saveMsg}
+          </div>
+        )}
 
         {/* Cliente */}
         <section className="bg-white shadow p-4 rounded mb-4">
@@ -389,16 +506,7 @@ export default function NotaVentaPage() {
               <input
                 className="w-full border rounded px-2 py-1"
                 value={clientName}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setClientName(val);
-                  const row = clients.find((c) => normalize(c.nombre) === normalize(val));
-                  if (row) {
-                    setClientRut(row.rut || "");
-                    setClientCode("");
-                    setDireccion("");
-                  }
-                }}
+                onChange={(e) => handleNombreChange(e.target.value)}
                 list="clientesList"
               />
               <datalist id="clientesList">
@@ -418,15 +526,7 @@ export default function NotaVentaPage() {
               <select
                 className="w-full border rounded px-2 py-1"
                 value={clientCode}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setClientCode(val);
-                  const row = clients.find((c) => c.codigo === val);
-                  if (row) {
-                    setClientRut(row.rut || "");
-                    setDireccion(row.direccion || "");
-                  }
-                }}
+                onChange={(e) => handleCodigoChange(e.target.value)}
               >
                 <option value="">Seleccione…</option>
                 {clients
@@ -443,31 +543,41 @@ export default function NotaVentaPage() {
               Dirección
               <input className="w-full border rounded px-2 py-1" value={direccion} readOnly />
             </label>
-
-            {/* ====== NUEVO: UUID Cliente (Supabase) ====== */}
-            <label className="flex flex-col gap-1 md:col-span-2">
-              UUID Cliente (Supabase)
-              <input
-                className="w-full border rounded px-2 py-1"
-                placeholder="83d97533-83fb-4808-a480-0c2154ef3dbb"
-                value={customerUUID}
-                onChange={(e) => setCustomerUUID(e.target.value)}
-              />
-              <span className="text-[11px] text-zinc-500">
-                Pega aquí el UUID del cliente (tabla de clientes en Supabase). Requerido para guardar.
-              </span>
-            </label>
           </div>
         </section>
 
         {/* Productos */}
         <section className="bg-white shadow p-4 rounded mb-4">
-          <div className="flex justify-between mb-2">
+          <div className="flex justify-between mb-2 items-center">
             <h2 className="font-semibold text-[#2B6CFF]">Productos</h2>
-            <button className="bg-zinc-200 px-2 py-1 rounded text-xs" onClick={addLine}>
-              + Ítem
-            </button>
+
+            {/* Botones de Lista de precios */}
+            <div className="flex gap-2">
+              <button
+                className={`px-2 py-1 rounded text-xs ${listaSeleccionada === 1 ? "bg-blue-500 text-white" : "bg-zinc-200"}`}
+                onClick={() => setListaSeleccionada(1)}
+              >
+                1° Lista
+              </button>
+              <button
+                className={`px-2 py-1 rounded text-xs ${listaSeleccionada === 2 ? "bg-blue-500 text-white" : "bg-zinc-200"}`}
+                onClick={() => setListaSeleccionada(2)}
+              >
+                2° Lista
+              </button>
+              <button
+                className={`px-2 py-1 rounded text-xs ${listaSeleccionada === 3 ? "bg-blue-500 text-white" : "bg-zinc-200"}`}
+                onClick={() => setListaSeleccionada(3)}
+              >
+                3° Lista
+              </button>
+
+              <button className="bg-green-500 px-2 py-1 text-xs text-white rounded" onClick={addLine}>
+                + Ítem
+              </button>
+            </div>
           </div>
+
           <div className="overflow-x-auto">
             <table className="min-w-full text-[11px] border">
               <thead className="bg-zinc-100">
@@ -476,11 +586,12 @@ export default function NotaVentaPage() {
                   <th className="px-2 py-1 text-left">Descripción</th>
                   <th className="px-2 py-1 text-right">Kg</th>
                   <th className="px-2 py-1 text-right">Cantidad</th>
-                  <th className="px-2 py-1 text-right">Precio base</th>
+                  {/* Oculto en impresión */}
+                  <th className="px-2 py-1 text-right print:hidden">Precio base</th>
                   <th className="px-2 py-1 text-right">% Desc</th>
                   <th className="px-2 py-1 text-right">Precio venta</th>
                   <th className="px-2 py-1 text-right">Total</th>
-                  <th />
+                  <th className="print:hidden" />
                 </tr>
               </thead>
               <tbody>
@@ -523,7 +634,8 @@ export default function NotaVentaPage() {
                         step="any"
                       />
                     </td>
-                    <td className="px-2 py-1 text-right">{money(r.priceBase)}</td>
+                    {/* Precio Base oculto en impresión */}
+                    <td className="px-2 py-1 text-right print:hidden">{money(r.priceBase)}</td>
                     <td className="px-2 py-1 text-right">
                       <input
                         type="number"
@@ -538,7 +650,7 @@ export default function NotaVentaPage() {
                     </td>
                     <td className="px-2 py-1 text-right">{money(r.precioVenta)}</td>
                     <td className="px-2 py-1 text-right">{money(r.total)}</td>
-                    <td className="px-2 py-1">
+                    <td className="px-2 py-1 print:hidden">
                       <button className="text-red-600 text-xs" onClick={() => rmLine(i)}>
                         Eliminar
                       </button>
@@ -553,7 +665,7 @@ export default function NotaVentaPage() {
                       TOTAL
                     </td>
                     <td className="text-right px-2 py-1">{money(subtotal)}</td>
-                    <td />
+                    <td className="print:hidden" />
                   </tr>
                 </tfoot>
               )}
@@ -561,8 +673,8 @@ export default function NotaVentaPage() {
           </div>
         </section>
 
-        {/* Correo */}
-        <section className="bg-white shadow p-4 rounded mb-4">
+        {/* Correo (oculto en impresión) */}
+        <section className="bg-white shadow p-4 rounded mb-4 print:hidden">
           <h2 className="font-semibold text-[#2B6CFF] mb-2">📧 Envío</h2>
           <label className="flex flex-col gap-1">
             Correo Ejecutivo
@@ -574,45 +686,32 @@ export default function NotaVentaPage() {
             />
           </label>
         </section>
-
-        {/* ====== NUEVOS MENSAJES DE GUARDADO ====== */}
-        {saveMsg && (
-          <div className="mb-3 rounded bg-green-50 text-green-700 px-3 py-2 text-sm border border-green-200">
-            {saveMsg}
-          </div>
-        )}
-        {saveErr && (
-          <div className="mb-3 rounded bg-red-50 text-red-700 px-3 py-2 text-sm border border-red-200">
-            {saveErr}
-          </div>
-        )}
       </div>
 
       {/* Botones acción (ocultos al imprimir) */}
-<div className="flex flex-wrap gap-2 print:hidden px-6 pb-8">
-  <button className="bg-zinc-200 px-3 py-1 rounded" onClick={imprimir}>
-    🖨️ Imprimir / PDF
-  </button>
+      <div className="flex flex-wrap gap-2 print:hidden px-6 pb-8">
+        <button className="bg-zinc-200 px-3 py-1 rounded" onClick={imprimir}>
+          🖨️ Imprimir / PDF
+        </button>
 
-  {/* NUEVO: Guardar en Supabase */}
-  <button
-    className={`px-3 py-1 rounded text-white ${saving ? "bg-zinc-400" : "bg-emerald-600 hover:bg-emerald-700"}`}
-    onClick={guardarEnSupabase}
-    disabled={saving}
-  >
-    {saving ? "Guardando..." : "💾 Guardar en Supabase"}
-  </button>
+        <button
+          className={`px-3 py-1 rounded text-white ${saving ? "bg-zinc-400" : "bg-emerald-600 hover:bg-emerald-700"}`}
+          onClick={guardarEnSupabase}
+          disabled={saving}
+        >
+          {saving ? "Guardando..." : "💾 Guardar en Supabase"}
+        </button>
 
-  <button className="bg-blue-500 text-white px-3 py-1 rounded" onClick={enviarEmail}>
-    ✉️ Enviar por Email
-  </button>
-  <button className="bg-zinc-200 px-3 py-1 rounded" onClick={limpiarTodo}>
-    🧹 Nueva NV
-  </button>
-</div>
+        <button className="bg-blue-500 text-white px-3 py-1 rounded" onClick={enviarEmail}>
+          ✉️ Enviar por Email
+        </button>
 
+        <button className="bg-zinc-200 px-3 py-1 rounded" onClick={limpiarTodo}>
+          🧹 Nueva NV
+        </button>
+      </div>
 
-      {/* Estilos para imprimir idéntico */}
+      {/* Estilos para imprimir */}
       <style jsx>{`
         :global(html), :global(body), :global(#printArea) {
           -webkit-print-color-adjust: exact;
