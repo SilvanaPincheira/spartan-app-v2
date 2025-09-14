@@ -244,7 +244,11 @@ export default function NotaVentaPage() {
       out.descuento = 0;
       out.precioVenta = out.especialPrice;
     } else {
-      const baseSegunLista = precioListaDesdeBase(out.priceBase, listaSeleccionada);
+    let baseSegunLista = out.priceBase;
+    if (out.code?.startsWith("PT")) {
+      baseSegunLista = precioListaDesdeBase(out.priceBase, listaSeleccionada);
+    }
+      
       const desc = clamp(num(out.descuento), -20, 20);
       out.precioVenta = baseSegunLista * (1 - desc / 100);
     }
