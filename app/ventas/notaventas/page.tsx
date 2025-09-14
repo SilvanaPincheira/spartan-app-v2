@@ -318,7 +318,7 @@ export default function NotaVentaPage() {
       row.qty = num(row.qty) || 0;
       row.priceBase = num(row.priceBase) || 0;
       row.especialPrice = num(row.especialPrice) || 0;
-      row.descuento = row.isEspecial ? 0 : clamp(num(row.descuento), 0, 20);
+      row.descuento = row.isEspecial ? 0 : clamp(num(row.descuento), -20, 20);
 
       n[i] = computeLine(row);
       return n;
