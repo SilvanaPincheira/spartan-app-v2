@@ -111,7 +111,7 @@ export default function HomeMenu() {
       <main className="relative mx-auto max-w-7xl px-6 py-10">
         <section className="rounded-2xl border bg-white shadow-sm p-6">
           <h2 className="text-xl font-semibold text-[#2B6CFF] mb-4">
-            📊 Resumen Metas Agosto Área FOOD
+            📊 Resumen Metas Septiembre Área FOOD
           </h2>
           <p className="mb-4 text-sm text-zinc-600">
             KPIs consolidados solo de la Gerencia <b>FB</b>.
