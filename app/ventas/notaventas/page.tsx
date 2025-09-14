@@ -107,7 +107,7 @@ type Line = {
   qty: number;
   priceBase: number;     // SIEMPRE lista 1 (de planilla)
   especialPrice: number; // 0 si no aplica
-  descuento: number;     // 0..20 (deshabilitado si isEspecial)
+  descuento: number;     // -20..20
   precioVenta: number;
   total: number;
   isEspecial: boolean;
@@ -132,6 +132,9 @@ export default function NotaVentaPage() {
 
   /* ---- CORREO ---- */
   const [emailEjecutivo, setEmailEjecutivo] = useState<string>("");
+
+  /* ---- COMENTARIOS ---- */
+  const [comentarios, setComentarios] = useState<string>("");
 
   /* ---- UI ---- */
   const [errorMsg, setErrorMsg] = useState<string>("");
@@ -244,11 +247,10 @@ export default function NotaVentaPage() {
       out.descuento = 0;
       out.precioVenta = out.especialPrice;
     } else {
-    let baseSegunLista = out.priceBase;
-    if (out.code?.startsWith("PT")) {
-      baseSegunLista = precioListaDesdeBase(out.priceBase, listaSeleccionada);
-    }
-      
+      let baseSegunLista = out.priceBase;
+      if (out.code?.startsWith("PT")) {
+        baseSegunLista = precioListaDesdeBase(out.priceBase, listaSeleccionada);
+      }
       const desc = clamp(num(out.descuento), -20, 20);
       out.precioVenta = baseSegunLista * (1 - desc / 100);
     }
@@ -332,7 +334,6 @@ export default function NotaVentaPage() {
   // Recalcular todas las líneas al cambiar la lista
   useEffect(() => {
     setLines((old) => old.map((r) => computeLine(r)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listaSeleccionada]);
 
   const subtotal = useMemo(() => {
@@ -344,7 +345,6 @@ export default function NotaVentaPage() {
   function handleNombreChange(val: string) {
     setClientName(val);
     const row = clients.find((c) => normalize(c.nombre) === normalize(val));
-    // al cambiar nombre, se limpia código hasta que elijan sucursal
     if (row) {
       setClientRut(row.rut || "");
       setClientCode("");
@@ -364,7 +364,6 @@ export default function NotaVentaPage() {
     if (row) {
       setClientRut(row.rut || "");
       setDireccion(row.direccion || "");
-      // Buscar UUID en Supabase automáticamente
       const uuid = await fetchCustomerUUID(row.rut, row.codigo);
       if (uuid) setCustomerUUID(uuid);
       else setCustomerUUID("");
@@ -378,6 +377,7 @@ export default function NotaVentaPage() {
     setClientCode("");
     setDireccion("");
     setEmailEjecutivo("");
+    setComentarios("");
     setLines([]);
     setErrorMsg("");
     setCustomerUUID("");
@@ -397,77 +397,6 @@ export default function NotaVentaPage() {
     const subject = encodeURIComponent(`Nota de Venta ${numeroNV}`);
     const body = encodeURIComponent(`Adjunto la Nota de Venta ${numeroNV} generada.`);
     window.location.href = `mailto:${destinatarios}?subject=${subject}&body=${body}`;
-  }
-
-  /* ====== GUARDAR EN SUPABASE (cabecera + ítems) ====== */
-  async function guardarEnSupabase() {
-    setSaveMsg("");
-    setErrorMsg("");
-
-    try {
-      if (!customerUUID) {
-        throw new Error("No se pudo obtener el UUID del cliente. Selecciona Nombre y Código Cliente (sucursal).");
-      }
-      if (lines.length === 0) {
-        throw new Error("Agrega al menos un ítem antes de guardar.");
-      }
-
-      setSaving(true);
-
-      const round = (n: number) => Math.round(n || 0);
-
-      // 1) Cabecera
-      const payloadCab = {
-        customer_id: customerUUID,
-        note_date: new Date().toISOString().slice(0, 10),
-        related_quote: null,
-        subtotal: round(subtotal),
-        tax: 0,
-        total: round(subtotal),
-        total_amount: round(subtotal),
-        status: "draft" as const,
-        document_number: numeroNV || null,
-        pdf_url: null,
-        created_by: emailEjecutivo || null,
-        notes: `NV ${numeroNV} — ${clientName} (${clientCode})`,
-      };
-
-      const resCab = await fetch("/api/sales-notes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payloadCab),
-      });
-      const jsonCab = await resCab.json();
-      if (!resCab.ok) throw new Error(jsonCab?.error || "No se pudo guardar la cabecera.");
-
-      const salesNoteId = jsonCab?.data?.id;
-      if (!salesNoteId) throw new Error("No se obtuvo el ID (uuid) de la nota de venta.");
-
-      // 2) Ítems (detalle)
-      const payloadItems = lines.map((r) => ({
-        sales_note_id: salesNoteId,
-        product_code: r.code,
-        description: r.name,
-        qty: r.qty,
-        unit_price: round(r.precioVenta), // precio venta según lista o especial
-        discount_pct: r.isEspecial ? 0 : r.descuento,
-        line_total: round(r.total),
-      }));
-
-      const resItems = await fetch("/api/sales-note-items", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payloadItems),
-      });
-      const jsonItems = await resItems.json();
-      if (!resItems.ok) throw new Error(jsonItems?.error || "No se pudieron guardar los ítems.");
-
-      setSaveMsg(`✅ Nota guardada (ID: ${salesNoteId}) con ${payloadItems.length} ítems.`);
-    } catch (e: any) {
-      setErrorMsg(e?.message || "Error desconocido al guardar.");
-    } finally {
-      setSaving(false);
-    }
   }
 
   /* ===================== UI ===================== */
@@ -556,7 +485,7 @@ export default function NotaVentaPage() {
             <h2 className="font-semibold text-[#2B6CFF]">Productos</h2>
 
             {/* Botones de Lista de precios */}
-            <div className="flex gap-2">
+            <div className="flex gap-2 print:hidden">
               <button
                 className={`px-2 py-1 rounded text-xs ${listaSeleccionada === 1 ? "bg-blue-500 text-white" : "bg-zinc-200"}`}
                 onClick={() => setListaSeleccionada(1)}
@@ -590,7 +519,6 @@ export default function NotaVentaPage() {
                   <th className="px-2 py-1 text-left">Descripción</th>
                   <th className="px-2 py-1 text-right">Kg</th>
                   <th className="px-2 py-1 text-right">Cantidad</th>
-                  {/* Oculto en impresión */}
                   <th className="px-2 py-1 text-right print:hidden">Precio base</th>
                   <th className="px-2 py-1 text-right">% Desc</th>
                   <th className="px-2 py-1 text-right">Precio venta</th>
@@ -638,7 +566,6 @@ export default function NotaVentaPage() {
                         step="any"
                       />
                     </td>
-                    {/* Precio Base oculto en impresión */}
                     <td className="px-2 py-1 text-right print:hidden">{money(r.priceBase)}</td>
                     <td className="px-2 py-1 text-right">
                       <input
@@ -677,39 +604,47 @@ export default function NotaVentaPage() {
           </div>
         </section>
 
-        {/* Correo (oculto en impresión) */}
-        <section className="bg-white shadow p-4 rounded mb-4 print:hidden">
-          <h2 className="font-semibold text-[#2B6CFF] mb-2">📧 Envío</h2>
-          <label className="flex flex-col gap-1">
-            Correo Ejecutivo
-            <input
-              type="email"
-              className="w-full border rounded px-2 py-1"
-              value={emailEjecutivo}
-              onChange={(e) => setEmailEjecutivo(e.target.value)}
-            />
-          </label>
+        {/* Correo y comentarios */}
+        <section className="bg-white shadow p-4 rounded mb-4">
+          <h2 className="font-semibold text-[#2B6CFF] mb-2">📧 Envío y Comentarios</h2>
+          <div className="grid grid-cols-2 gap-2 text-[12px]">
+            <label className="flex flex-col gap-1">
+              Correo Ejecutivo
+              <input
+                type="email"
+                className="w-full border rounded px-2 py-1"
+                value={emailEjecutivo}
+                onChange={(e) => setEmailEjecutivo(e.target.value)}
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              Comentarios
+              <input
+                type="text"
+                className="w-full border rounded px-2 py-1"
+                value={comentarios}
+                onChange={(e) => setComentarios(e.target.value)}
+              />
+            </label>
+          </div>
         </section>
       </div>
 
-      {/* Botones acción (ocultos al imprimir) */}
+      {/* Botones acción */}
       <div className="flex flex-wrap gap-2 print:hidden px-6 pb-8">
         <button className="bg-zinc-200 px-3 py-1 rounded" onClick={imprimir}>
           🖨️ Imprimir / PDF
         </button>
-
         <button
           className={`px-3 py-1 rounded text-white ${saving ? "bg-zinc-400" : "bg-emerald-600 hover:bg-emerald-700"}`}
-          onClick={guardarEnSupabase}
+          onClick={() => { /* guardarEnSupabase(); */ }}
           disabled={saving}
         >
           {saving ? "Guardando..." : "💾 Guardar en Supabase"}
         </button>
-
         <button className="bg-blue-500 text-white px-3 py-1 rounded" onClick={enviarEmail}>
           ✉️ Enviar por Email
         </button>
-
         <button className="bg-zinc-200 px-3 py-1 rounded" onClick={limpiarTodo}>
           🧹 Nueva NV
         </button>
