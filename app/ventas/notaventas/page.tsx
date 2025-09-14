@@ -245,7 +245,7 @@ export default function NotaVentaPage() {
       out.precioVenta = out.especialPrice;
     } else {
       const baseSegunLista = precioListaDesdeBase(out.priceBase, listaSeleccionada);
-      const desc = clamp(num(out.descuento), 0, 20);
+      const desc = clamp(num(out.descuento), -20, 20);
       out.precioVenta = baseSegunLista * (1 - desc / 100);
     }
     out.total = (num(out.qty) || 0) * (num(out.kilos) || 1) * (out.precioVenta || 0);
@@ -299,7 +299,7 @@ export default function NotaVentaPage() {
       }
       row.especialPrice = esp;
       row.isEspecial = isEsp;
-      row.descuento = isEsp ? 0 : clamp(num(row.descuento), 0, 20);
+      row.descuento = isEsp ? 0 : clamp(num(row.descuento), -20, 20);
 
       const calc = computeLine(row);
       n[i] = calc;
