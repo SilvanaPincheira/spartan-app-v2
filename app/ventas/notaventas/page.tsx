@@ -643,7 +643,7 @@ export default function NotaVentaPage() {
                         value={r.descuento}
                         onChange={(e) => updateLine(i, "descuento", num(e.target.value))}
                         disabled={r.isEspecial}
-                        min={0}
+                        min={-20}
                         max={20}
                         step="any"
                       />
