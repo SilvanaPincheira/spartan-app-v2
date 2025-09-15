@@ -7,7 +7,7 @@ export default function MetasPage() {
           <iframe
             src="https://docs.google.com/spreadsheets/d/e/2PACX-1vQeg3EGhKOHiA9cRDqPioN5oaHZUOpDxB1olx-H6jkUIdBnyRvgEBJwe3IQeb3N7e9rnsQy4UnOQlk1/pubhtml?gid=1307997110&single=true"
             width="125%"   // compensamos el scale
-            height="1000"
+            height="900"
             style={{ border: "1px solid #ddd" }}
           />
         </div>

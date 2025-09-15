@@ -1,9 +1,33 @@
 // app/ventas/notaventas/page.tsx
+// -----------------------------------------------------------------------------
+// NOTA DE VENTA — PÁGINA COMPLETA (CLIENT COMPONENT)
+// -----------------------------------------------------------------------------
+// - Carga clientes, productos y precios especiales desde Google Sheets (CSV).
+// - Aplica 3 listas de precio SOLO a productos cuyo code comience con "PT".
+// - Soporta precio especial por cliente+artículo (anula descuento y listas).
+// - Permite agregar/eliminar ítems, calcular totales y mostrar en formato A4.
+// - Muestra Ejecutivo, Correo Ejecutivo y Comentarios también en impresión.
+// - Guarda la Nota de Venta en Google Sheets, una fila por ítem, a través de
+//   la API interna /api/save-to-sheets (para evitar CORS/CSP y top-level await).
+//
+//   BACKEND PARA GUARDAR (crear archivo):
+//   - /app/api/save-to-sheets/route.ts (POST)
+//   - Debe reenviar el payload al Apps Script WebApp que ESCRIBE en tu hoja.
+//   - Revisa que tu WebApp esté desplegada con "Cualquiera" y "Permitir anónimo".
+//
+//   FRONT: Este archivo no usa top-level await y no importa nada del server.
+//
+//   IMPRESIÓN (A4):
+//   - Se ocultan: botones de lista 1/2/3, columna "Precio base" y botón eliminar.
+//   - Se muestran: Ejecutivo, Correo Ejecutivo y Comentarios.
+// -----------------------------------------------------------------------------
+
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 
 /* ===================== HELPERS ===================== */
+// Normaliza strings (búsquedas/igualdades sin tildes/mayúsculas)
 function normalize(s: string) {
   return (s || "")
     .toLowerCase()
@@ -11,13 +35,19 @@ function normalize(s: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .trim();
 }
+
+// Convierte lo que venga a número (0 si NaN)
 function num(x: unknown) {
   const v = Number(x);
   return Number.isFinite(v) ? v : 0;
 }
+
+// Limita un número al rango [min, max]
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
+
+// Formato moneda CLP (sin decimales)
 function money(n: number) {
   return (n || 0).toLocaleString("es-CL", {
     style: "currency",
@@ -26,17 +56,20 @@ function money(n: number) {
   });
 }
 
-/* === CSV === */
+/* ===================== CSV PARSER (sin dependencias) ===================== */
+// parseCsv: admite comillas y saltos de línea correctos
 function parseCsv(text: string): Record<string, string>[] {
   const rows: string[][] = [];
   let row: string[] = [];
   let cell = "";
   let inQuotes = false;
+
   const pushCell = () => (row.push(cell), (cell = ""));
   const pushRow = () => {
     if (row.length) rows.push(row);
     row = [];
   };
+
   const s = (text || "").replace(/\r/g, "");
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
@@ -45,15 +78,23 @@ function parseCsv(text: string): Record<string, string>[] {
         if (s[i + 1] === '"') {
           cell += '"';
           i++;
-        } else inQuotes = false;
-      } else cell += ch;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cell += ch;
+      }
     } else {
-      if (ch === '"') inQuotes = true;
-      else if (ch === ",") pushCell();
-      else if (ch === "\n") {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ",") {
+        pushCell();
+      } else if (ch === "\n") {
         pushCell();
         pushRow();
-      } else cell += ch;
+      } else {
+        cell += ch;
+      }
     }
   }
   if (cell.length || row.length) {
@@ -61,6 +102,7 @@ function parseCsv(text: string): Record<string, string>[] {
     pushRow();
   }
   if (!rows.length) return [];
+
   const headers = rows[0].map((h) => h.trim());
   const out: Record<string, string>[] = [];
   for (let i = 1; i < rows.length; i++) {
@@ -73,6 +115,7 @@ function parseCsv(text: string): Record<string, string>[] {
   return out;
 }
 
+// fetchCsv: lee CSV de Google Sheets export (gid)
 async function fetchCsv(spreadsheetId: string, gid: string | number) {
   const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
   const res = await fetch(url, { cache: "no-store" });
@@ -80,6 +123,8 @@ async function fetchCsv(spreadsheetId: string, gid: string | number) {
   const text = await res.text();
   return parseCsv(text);
 }
+
+// loadSheetSmart: wrapper con label para error
 async function loadSheetSmart(spreadsheetId: string, gid: string | number, label: string) {
   try {
     return await fetchCsv(spreadsheetId, gid);
@@ -87,6 +132,8 @@ async function loadSheetSmart(spreadsheetId: string, gid: string | number, label
     throw new Error(`${label}: no se pudo leer`);
   }
 }
+
+// Extrae id y gid de una URL de Google Sheets
 function normalizeGoogleSheetUrl(url: string) {
   const m = (url || "").match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
   const id = m ? m[1] : "";
@@ -97,28 +144,38 @@ function normalizeGoogleSheetUrl(url: string) {
 }
 
 /* ===================== TIPOS ===================== */
-type Client = { nombre: string; rut: string; codigo: string; direccion: string };
-type Product = { code: string; name: string; price_list: number; kilos: number };
-type PrecioEspecial = { codigoSN: string; articulo: string; precio: number };
-type Line = {
-  code: string;
-  name: string;
-  kilos: number;
-  qty: number;
-  priceBase: number;     // SIEMPRE lista 1 (de planilla)
-  especialPrice: number; // 0 si no aplica
-  descuento: number;     // -20..20
-  precioVenta: number;
-  total: number;
-  isEspecial: boolean;
+type Client = {
+  nombre: string;
+  rut: string;
+  codigo: string;
+  ejecutivo: string;
+  direccion: string;
 };
 
-/* ===================== COMPONENTE ===================== */
+type Product = { code: string; name: string; price_list: number; kilos: number };
+
+type PrecioEspecial = { codigoSN: string; articulo: string; precio: number };
+
+type Line = {
+  code: string;          // código producto
+  name: string;          // descripción
+  kilos: number;         // kg por unidad
+  qty: number;           // cantidad
+  priceBase: number;     // lista 1 desde planilla (siempre)
+  especialPrice: number; // 0 si no aplica precio especial
+  descuento: number;     // -20..20 (%), ignorado si hay especial
+  precioVenta: number;   // cálculo final por unidad
+  total: number;         // qty * kilos * precioVenta
+  isEspecial: boolean;   // bandera de precio especial
+};
+
+/* ===================== COMPONENTE PRINCIPAL ===================== */
 export default function NotaVentaPage() {
   /* ---- CLIENTES ---- */
   const [clients, setClients] = useState<Client[]>([]);
   const [clientName, setClientName] = useState<string>("");
   const [clientRut, setClientRut] = useState<string>("");
+  const [ejecutivo, setEjecutivo] = useState<string>("");
   const [clientCode, setClientCode] = useState<string>("");
   const [direccion, setDireccion] = useState<string>("");
 
@@ -144,27 +201,8 @@ export default function NotaVentaPage() {
   /* ---- DOC INFO: N° NV ---- */
   const [numeroNV, setNumeroNV] = useState<string>("");
 
-  /* ---- Supabase (UUID cliente obtenido automáticamente) ---- */
-  const [customerUUID, setCustomerUUID] = useState<string>("");
-
-  /* ====== API HELPERS ====== */
-  async function fetchCustomerUUID(rut: string, cardCode: string) {
-    try {
-      const res = await fetch("/api/clientes-sap", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rut, cardCode }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "No se pudo buscar cliente en Supabase.");
-      return json?.data?.id || null;
-    } catch (e) {
-      console.error("Error buscando UUID:", e);
-      return null;
-    }
-  }
-
-  // Genera correlativo local por año
+  /* ===================== HELPERS INTERNOS ===================== */
+  // Genera correlativo local por año, persistido en localStorage (por navegador)
   function generarNumeroNV(): string {
     if (typeof window === "undefined") return "";
     const year = new Date().getFullYear();
@@ -175,12 +213,13 @@ export default function NotaVentaPage() {
     return `NV-${year}-${String(next).padStart(5, "0")}`;
   }
 
-  // Asignar número al cargar
+  /* ===================== EFECTOS INICIALES ===================== */
+  // Asigna número NV al cargar la página
   useEffect(() => {
     setNumeroNV(generarNumeroNV());
   }, []);
 
-  // Cargar clientes
+  // Carga clientes desde tu planilla (hoja Clientes)
   useEffect(() => {
     (async () => {
       const { id, gid } = normalizeGoogleSheetUrl(
@@ -191,6 +230,7 @@ export default function NotaVentaPage() {
       const list: Client[] = rows.map((r) => ({
         nombre: String(r.CardName ?? r.Nombre ?? "").trim(),
         rut: String(r.RUT ?? r.LicTradNum ?? "").trim(),
+        ejecutivo: String(r["Empleado Ventas"] ?? r["Empleado de Ventas"] ?? "").trim(),
         codigo: String(r.CardCode ?? "").trim(),
         direccion: String(r["Dirección Despacho"] ?? r["Direccion Despacho"] ?? r.Address ?? "").trim(),
       }));
@@ -198,7 +238,7 @@ export default function NotaVentaPage() {
     })().catch((e) => setErrorMsg(String(e)));
   }, []);
 
-  // Cargar productos
+  // Carga productos (hoja Productos)
   useEffect(() => {
     (async () => {
       const { id, gid } = normalizeGoogleSheetUrl(
@@ -216,7 +256,7 @@ export default function NotaVentaPage() {
     })().catch((e) => setErrorMsg(String(e)));
   }, []);
 
-  // Cargar precios especiales
+  // Carga precios especiales (hoja Precios especiales)
   useEffect(() => {
     (async () => {
       const { id, gid } = normalizeGoogleSheetUrl(
@@ -225,40 +265,45 @@ export default function NotaVentaPage() {
       if (!id) return;
       const rows = await loadSheetSmart(id, gid, "Precios especiales");
       const list: PrecioEspecial[] = rows.map((r) => ({
-        codigoSN: String((r as any)["Código SN"] ?? "").trim(),
-        articulo: String((r as any)["Número de artículo"] ?? "").trim(),
+        codigoSN: String((r as any)["Código SN"] ?? (r as any)["Codigo SN"] ?? "").trim(),
+        articulo: String((r as any)["Número de artículo"] ?? (r as any)["Numero de articulo"] ?? "").trim(),
         precio: num((r as any)["Precio especial"] ?? 0),
       }));
       setPreciosEspeciales(list);
     })().catch((e) => setErrorMsg(String(e)));
   }, []);
 
-  /* ---- LÓGICA DE PRECIOS ---- */
+  /* ===================== LÓGICA DE PRECIOS ===================== */
+  // Transformación por lista de precios, partiendo de la lista 1 (base)
   function precioListaDesdeBase(baseLista1: number, lista: 1 | 2 | 3) {
     if (lista === 1) return baseLista1;
-    if (lista === 2) return baseLista1 * 0.97;
-    return baseLista1 * 0.97 * 0.97;
+    if (lista === 2) return baseLista1 * 0.97;            // -3%
+    return baseLista1 * 0.97 * 0.97;                       // -3% adicional
   }
 
+  // Calcula una línea (precioVenta, total) según reglas:
+  // - Si es especial: ignora lista y descuento, usa precio especial.
+  // - Si no es especial: aplica lista SOLO si code inicia con "PT".
   function computeLine(row: Line): Line {
     const out = { ...row };
-    // Si es especial, el precio venta NO cambia por lista ni descuento
+
     if (out.isEspecial && out.especialPrice > 0) {
       out.descuento = 0;
       out.precioVenta = out.especialPrice;
     } else {
       let baseSegunLista = out.priceBase;
-      if (out.code?.startsWith("PT")) {
+      if ((out.code || "").toUpperCase().startsWith("PT")) {
         baseSegunLista = precioListaDesdeBase(out.priceBase, listaSeleccionada);
       }
       const desc = clamp(num(out.descuento), -20, 20);
       out.precioVenta = baseSegunLista * (1 - desc / 100);
     }
+
     out.total = (num(out.qty) || 0) * (num(out.kilos) || 1) * (out.precioVenta || 0);
     return out;
   }
 
-  /* ---- LÍNEAS ---- */
+  /* ===================== MANEJO DE LÍNEAS ===================== */
   function addLine() {
     setLines((old) => [
       ...old,
@@ -276,9 +321,12 @@ export default function NotaVentaPage() {
       },
     ]);
   }
+
   function rmLine(i: number) {
     setLines((old) => old.filter((_, idx) => idx !== i));
   }
+
+  // Completa la línea al salir del code (onBlur)
   function fillFromCode(i: number, code: string) {
     const prod = productos.find((p) => p.code === code);
     if (!prod) return;
@@ -289,15 +337,14 @@ export default function NotaVentaPage() {
       row.code = prod.code;
       row.name = prod.name;
       row.kilos = prod.kilos || 1;
-
-      // Fijar always 1° lista como priceBase
       row.priceBase = prod.price_list || 0;
 
-      // ¿Tiene precio especial?
       let esp = 0;
       let isEsp = false;
       if (clientCode) {
-        const pe = preciosEspeciales.find((p) => p.codigoSN === clientCode && p.articulo === prod.code);
+        const pe = preciosEspeciales.find(
+          (p) => p.codigoSN === clientCode && p.articulo === prod.code
+        );
         if (pe) {
           esp = pe.precio || 0;
           isEsp = true;
@@ -307,19 +354,19 @@ export default function NotaVentaPage() {
       row.isEspecial = isEsp;
       row.descuento = isEsp ? 0 : clamp(num(row.descuento), -20, 20);
 
-      const calc = computeLine(row);
-      n[i] = calc;
+      n[i] = computeLine(row);
       return n;
     });
   }
+
+  // Actualiza cualquier campo de la línea y recalcula
   function updateLine(i: number, field: keyof Line, value: unknown) {
     setLines((old) => {
       const n = [...old];
       const current = n[i];
       if (!current) return old;
-      const row: Line = { ...current, [field]: value } as Line;
 
-      // Normalizaciones
+      const row: Line = { ...current, [field]: value } as Line;
       row.kilos = num(row.kilos) || 1;
       row.qty = num(row.qty) || 0;
       row.priceBase = num(row.priceBase) || 0;
@@ -331,56 +378,58 @@ export default function NotaVentaPage() {
     });
   }
 
-  // Recalcular todas las líneas al cambiar la lista
+  // Recalcula todas las líneas al cambiar la lista seleccionada
   useEffect(() => {
     setLines((old) => old.map((r) => computeLine(r)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listaSeleccionada]);
 
+  // Subtotal de todas las líneas
   const subtotal = useMemo(() => {
     const s = lines.reduce((a, r) => a + (Number.isFinite(r.total) ? r.total : 0), 0);
     return Number.isFinite(s) ? s : 0;
   }, [lines]);
 
-  /* ---- CLIENTE: selección ---- */
+  /* ===================== CLIENTE: SELECCIÓN ===================== */
+  // Al escribir/seleccionar Nombre
   function handleNombreChange(val: string) {
     setClientName(val);
     const row = clients.find((c) => normalize(c.nombre) === normalize(val));
     if (row) {
       setClientRut(row.rut || "");
       setClientCode("");
+      setEjecutivo(row.ejecutivo || "");
       setDireccion("");
-      setCustomerUUID("");
     } else {
       setClientRut("");
       setClientCode("");
+      setEjecutivo("");
       setDireccion("");
-      setCustomerUUID("");
     }
   }
 
+  // Al elegir Código Cliente (sucursal)
   async function handleCodigoChange(val: string) {
     setClientCode(val);
     const row = clients.find((c) => c.codigo === val);
     if (row) {
       setClientRut(row.rut || "");
+      setEjecutivo(row.ejecutivo || "");
       setDireccion(row.direccion || "");
-      const uuid = await fetchCustomerUUID(row.rut, row.codigo);
-      if (uuid) setCustomerUUID(uuid);
-      else setCustomerUUID("");
     }
   }
 
-  /* ---- ACCIONES ---- */
+  /* ===================== ACCIONES ===================== */
   function limpiarTodo() {
     setClientName("");
     setClientRut("");
     setClientCode("");
+    setEjecutivo("");
     setDireccion("");
     setEmailEjecutivo("");
     setComentarios("");
     setLines([]);
     setErrorMsg("");
-    setCustomerUUID("");
     setNumeroNV(generarNumeroNV());
     setListaSeleccionada(1);
     setSaveMsg("");
@@ -399,11 +448,71 @@ export default function NotaVentaPage() {
     window.location.href = `mailto:${destinatarios}?subject=${subject}&body=${body}`;
   }
 
+  /* ===================== GUARDAR EN GOOGLE SHEETS ===================== */
+  // Guarda "una fila por ítem" en una sola pestaña (p.ej. "NV")
+  // via API interna /api/save-to-sheets (Next Route Handler)
+  async function guardarEnGoogleSheets() {
+    setSaveMsg("");
+    setErrorMsg("");
+  
+    try {
+      if (!clientName || !clientRut || !clientCode) {
+        throw new Error("Faltan datos del cliente (Nombre, RUT y Código Cliente).");
+      }
+      if (lines.length === 0) {
+        throw new Error("Agrega al menos un ítem antes de guardar.");
+      }
+  
+      setSaving(true);
+  
+      const fecha = new Date().toLocaleDateString("es-CL");
+  
+      const payload = lines.map((item) => ({
+        numeroNV,
+        fecha,
+        cliente: clientName,
+        rut: clientRut,
+        codigoCliente: clientCode,
+        ejecutivo,
+        direccion,
+        correoEjecutivo: emailEjecutivo,
+        comentarios,
+        subtotal,
+        total: subtotal,
+        codigo: item.code,
+        descripcion: item.name,
+        kilos: item.kilos,
+        cantidad: item.qty,
+        precioBase: Math.round(item.priceBase || 0),
+        descuento: item.isEspecial ? 0 : item.descuento,
+        precioVenta: Math.round(item.precioVenta || 0),
+        totalItem: Math.round(item.total || 0),
+      }));
+  
+      // 👇 ahora llama a tu API interna
+      const res = await fetch("/api/save-to-sheets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+  
+      if (!res.ok) throw new Error("Error al guardar en Google Sheets.");
+      const json = await res.json();
+      const rows = Number(json?.rows ?? payload.length) || payload.length;
+  
+      setSaveMsg(`✅ Nota de venta guardada con ${rows} ítem(s) en Google Sheets.`);
+    } catch (e: any) {
+      setErrorMsg(e?.message || "Error desconocido al guardar en Google Sheets.");
+    } finally {
+      setSaving(false);
+    }
+  }
+  
   /* ===================== UI ===================== */
   return (
     <>
       <div id="printArea" className="min-h-screen bg-white p-6 text-[12px]">
-        {/* Encabezado */}
+        {/* ===================== ENCABEZADO ===================== */}
         <header className="mb-4 flex items-center justify-between border-b pb-2">
           <div className="flex items-center gap-3">
             <img
@@ -414,26 +523,30 @@ export default function NotaVentaPage() {
             <h1 className="text-lg font-bold text-[#2B6CFF]">📝 Nota de Venta</h1>
           </div>
           <div className="text-[11px] bg-zinc-100 px-3 py-2 rounded text-right">
-            <div><b>N°</b> {numeroNV || "—"}</div>
+            <div>
+              <b>N°</b> {numeroNV || "—"}
+            </div>
             <div>{new Date().toLocaleDateString("es-CL")}</div>
           </div>
         </header>
 
+        {/* Mensajes */}
         {errorMsg && (
           <div className="mb-3 rounded bg-red-50 text-red-700 px-3 py-2 text-sm border border-red-200">
             {errorMsg}
           </div>
         )}
-        {saveMsg && (
+        {saveMsg && !errorMsg && (
           <div className="mb-3 rounded bg-green-50 text-green-700 px-3 py-2 text-sm border border-green-200">
             {saveMsg}
           </div>
         )}
 
-        {/* Cliente */}
+        {/* ===================== CLIENTE ===================== */}
         <section className="bg-white shadow p-4 rounded mb-4">
           <h2 className="font-semibold text-[#2B6CFF] mb-2">Cliente</h2>
           <div className="grid grid-cols-2 gap-2 text-[12px]">
+            {/* Nombre */}
             <label className="flex flex-col gap-1">
               Nombre
               <input
@@ -449,11 +562,13 @@ export default function NotaVentaPage() {
               </datalist>
             </label>
 
+            {/* RUT */}
             <label className="flex flex-col gap-1">
               RUT
               <input className="w-full border rounded px-2 py-1" value={clientRut} readOnly />
             </label>
 
+            {/* Código Cliente */}
             <label className="flex flex-col gap-1">
               Código Cliente
               <select
@@ -472,6 +587,13 @@ export default function NotaVentaPage() {
               </select>
             </label>
 
+            {/* Ejecutivo */}
+            <label className="flex flex-col gap-1">
+              Ejecutivo
+              <input className="w-full border rounded px-2 py-1" value={ejecutivo} readOnly />
+            </label>
+
+            {/* Dirección */}
             <label className="flex flex-col gap-1">
               Dirección
               <input className="w-full border rounded px-2 py-1" value={direccion} readOnly />
@@ -479,12 +601,12 @@ export default function NotaVentaPage() {
           </div>
         </section>
 
-        {/* Productos */}
+        {/* ===================== PRODUCTOS ===================== */}
         <section className="bg-white shadow p-4 rounded mb-4">
           <div className="flex justify-between mb-2 items-center">
             <h2 className="font-semibold text-[#2B6CFF]">Productos</h2>
 
-            {/* Botones de Lista de precios */}
+            {/* Botones Lista de precios (ocultos al imprimir) */}
             <div className="flex gap-2 print:hidden">
               <button
                 className={`px-2 py-1 rounded text-xs ${listaSeleccionada === 1 ? "bg-blue-500 text-white" : "bg-zinc-200"}`}
@@ -519,10 +641,12 @@ export default function NotaVentaPage() {
                   <th className="px-2 py-1 text-left">Descripción</th>
                   <th className="px-2 py-1 text-right">Kg</th>
                   <th className="px-2 py-1 text-right">Cantidad</th>
+                  {/* Oculto en impresión */}
                   <th className="px-2 py-1 text-right print:hidden">Precio base</th>
                   <th className="px-2 py-1 text-right">% Desc</th>
                   <th className="px-2 py-1 text-right">Precio venta</th>
                   <th className="px-2 py-1 text-right">Total</th>
+                  {/* botón eliminar oculto en impresión */}
                   <th className="print:hidden" />
                 </tr>
               </thead>
@@ -545,7 +669,9 @@ export default function NotaVentaPage() {
                         ))}
                       </datalist>
                     </td>
+
                     <td className="px-2 py-1">{r.name}</td>
+
                     <td className="px-2 py-1 text-right">
                       <input
                         type="number"
@@ -556,6 +682,7 @@ export default function NotaVentaPage() {
                         step="any"
                       />
                     </td>
+
                     <td className="px-2 py-1 text-right">
                       <input
                         type="number"
@@ -566,7 +693,10 @@ export default function NotaVentaPage() {
                         step="any"
                       />
                     </td>
+
+                    {/* Precio Base -> oculto al imprimir */}
                     <td className="px-2 py-1 text-right print:hidden">{money(r.priceBase)}</td>
+
                     <td className="px-2 py-1 text-right">
                       <input
                         type="number"
@@ -579,8 +709,11 @@ export default function NotaVentaPage() {
                         step="any"
                       />
                     </td>
+
                     <td className="px-2 py-1 text-right">{money(r.precioVenta)}</td>
                     <td className="px-2 py-1 text-right">{money(r.total)}</td>
+
+                    {/* Botón Eliminar -> oculto al imprimir */}
                     <td className="px-2 py-1 print:hidden">
                       <button className="text-red-600 text-xs" onClick={() => rmLine(i)}>
                         Eliminar
@@ -589,6 +722,7 @@ export default function NotaVentaPage() {
                   </tr>
                 ))}
               </tbody>
+
               {lines.length > 0 && (
                 <tfoot>
                   <tr className="font-semibold bg-zinc-50">
@@ -604,7 +738,7 @@ export default function NotaVentaPage() {
           </div>
         </section>
 
-        {/* Correo y comentarios */}
+        {/* ===================== ENVÍO Y COMENTARIOS (VISIBLE EN IMPRESIÓN) ===================== */}
         <section className="bg-white shadow p-4 rounded mb-4">
           <h2 className="font-semibold text-[#2B6CFF] mb-2">📧 Envío y Comentarios</h2>
           <div className="grid grid-cols-2 gap-2 text-[12px]">
@@ -630,42 +764,72 @@ export default function NotaVentaPage() {
         </section>
       </div>
 
-      {/* Botones acción */}
+      {/* ===================== BOTONES DE ACCIÓN (OCULTOS EN IMPRESIÓN) ===================== */}
       <div className="flex flex-wrap gap-2 print:hidden px-6 pb-8">
         <button className="bg-zinc-200 px-3 py-1 rounded" onClick={imprimir}>
           🖨️ Imprimir / PDF
         </button>
+
         <button
           className={`px-3 py-1 rounded text-white ${saving ? "bg-zinc-400" : "bg-emerald-600 hover:bg-emerald-700"}`}
-          onClick={() => { /* guardarEnSupabase(); */ }}
+          onClick={guardarEnGoogleSheets}
           disabled={saving}
         >
-          {saving ? "Guardando..." : "💾 Guardar en Supabase"}
+          {saving ? "Guardando..." : "💾 Guardar"}
         </button>
+
         <button className="bg-blue-500 text-white px-3 py-1 rounded" onClick={enviarEmail}>
           ✉️ Enviar por Email
         </button>
+
         <button className="bg-zinc-200 px-3 py-1 rounded" onClick={limpiarTodo}>
           🧹 Nueva NV
         </button>
       </div>
 
-      {/* Estilos para imprimir */}
+      {/* ===================== ESTILOS DE IMPRESIÓN ===================== */}
       <style jsx>{`
-        :global(html), :global(body), :global(#printArea) {
+        :global(html),
+        :global(body),
+        :global(#printArea) {
           -webkit-print-color-adjust: exact;
           print-color-adjust: exact;
         }
         @media print {
-          body * { visibility: hidden !important; }
-          #printArea, #printArea * { visibility: visible !important; }
-          #printArea { position: absolute !important; left: 0; top: 0; width: 100% !important; }
-          .print\\:hidden { display: none !important; }
-          @page { size: A4; margin: 12mm; }
-          header, section, table, h1, h2 { break-inside: avoid; }
-          thead { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          body * {
+            visibility: hidden !important;
+          }
+          #printArea,
+          #printArea * {
+            visibility: visible !important;
+          }
+          #printArea {
+            position: absolute !important;
+            left: 0;
+            top: 0;
+            width: 100% !important;
+          }
+          .print\\:hidden {
+            display: none !important;
+          }
+          @page {
+            size: A4;
+            margin: 12mm;
+          }
+          header,
+          section,
+          table,
+          h1,
+          h2 {
+            break-inside: avoid;
+          }
+          thead {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
         }
       `}</style>
     </>
   );
 }
+
