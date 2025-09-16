@@ -642,7 +642,9 @@ export default function NotaVentaPage() {
                   <th className="px-2 py-1 text-right">Kg</th>
                   <th className="px-2 py-1 text-right">Cantidad</th>
                   {/* Oculto en impresión */}
-                  <th className="px-2 py-1 text-right print:hidden">Precio base</th>
+                  <th className="hidden md:table-cell px-2 py-1 text-right print:hidden">
+  Precio base
+</th>
                   <th className="px-2 py-1 text-right">% Desc</th>
                   <th className="px-2 py-1 text-right">Precio venta</th>
                   <th className="px-2 py-1 text-right">Total</th>
