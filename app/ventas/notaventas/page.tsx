@@ -1,32 +1,28 @@
 // app/ventas/notaventas/page.tsx
 // -----------------------------------------------------------------------------
-// NOTA DE VENTA — PÁGINA COMPLETA (CLIENT COMPONENT)
+// NOTA DE VENTA — CLIENT COMPONENT (Next.js / React)
 // -----------------------------------------------------------------------------
-// - Carga clientes, productos y precios especiales desde Google Sheets (CSV).
-// - Aplica 3 listas de precio SOLO a productos cuyo code comience con "PT".
-// - Soporta precio especial por cliente+artículo (anula descuento y listas).
-// - Permite agregar/eliminar ítems, calcular totales y mostrar en formato A4.
-// - Muestra Ejecutivo, Correo Ejecutivo y Comentarios también en impresión.
-// - Guarda la Nota de Venta en Google Sheets, una fila por ítem, a través de
-//   la API interna /api/save-to-sheets (para evitar CORS/CSP y top-level await).
-//
-//   BACKEND PARA GUARDAR (crear archivo):
-//   - /app/api/save-to-sheets/route.ts (POST)
-//   - Debe reenviar el payload al Apps Script WebApp que ESCRIBE en tu hoja.
-//   - Revisa que tu WebApp esté desplegada con "Cualquiera" y "Permitir anónimo".
-//
-//   FRONT: Este archivo no usa top-level await y no importa nada del server.
-//
-//   IMPRESIÓN (A4):
-//   - Se ocultan: botones de lista 1/2/3, columna "Precio base" y botón eliminar.
-//   - Se muestran: Ejecutivo, Correo Ejecutivo y Comentarios.
+// ✔ Carga clientes, productos y precios especiales (CSV Google Sheets)
+// ✔ Listas 1/2/3 para códigos que comienzan con "PT"
+// ✔ Precio especial por cliente+artículo con VIGENCIA:
+//      - Vigente  -> se aplica y muestra “✅ Precio especial vigente”
+//      - Vencido  -> BLOQUEA la línea y muestra “❌ Precio especial vencido”
+// ✔ Columna “$ Presentación” (= Precio venta × Kg)
+// ✔ Guarda una fila por ítem (payload) vía /api/save-to-sheets
+// ✔ Impresión A4 profesional:
+//      - Datos del cliente en 2–3 campos por fila
+//      - Tabla limpia sin scroll con: Código | Descripción | Cant | Precio venta | $ Presentación | Total
+//      - Oculta en impresión: Kg, Precio base, % Desc, Acciones
+//      - Totales con borde superior y alineados a la derecha
 // -----------------------------------------------------------------------------
 
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 
-/* ===================== HELPERS ===================== */
+/* ============================================================================
+   [A] HELPERS GENERALES
+   ============================================================================ */
 // Normaliza strings (búsquedas/igualdades sin tildes/mayúsculas)
 function normalize(s: string) {
   return (s || "")
@@ -35,18 +31,15 @@ function normalize(s: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .trim();
 }
-
 // Convierte lo que venga a número (0 si NaN)
 function num(x: unknown) {
   const v = Number(x);
   return Number.isFinite(v) ? v : 0;
 }
-
 // Limita un número al rango [min, max]
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
-
 // Formato moneda CLP (sin decimales)
 function money(n: number) {
   return (n || 0).toLocaleString("es-CL", {
@@ -55,9 +48,30 @@ function money(n: number) {
     maximumFractionDigits: 0,
   });
 }
+// Parse fecha “dd-mm-aaaa” / “dd/mm/aaaa” / ISO
+function parseFecha(v?: string): Date | null {
+  const s = (v || "").trim();
+  if (!s) return null;
+  const iso = new Date(s);
+  if (!isNaN(iso.getTime())) return iso;
+  const m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (m) {
+    const d = Number(m[1]);
+    const mo = Number(m[2]) - 1;
+    const y = Number(m[3]);
+    const dt = new Date(y, mo, d, 0, 0, 0, 0);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+  return null;
+}
+function hoySinHora(): Date {
+  const t = new Date();
+  return new Date(t.getFullYear(), t.getMonth(), t.getDate());
+}
 
-/* ===================== CSV PARSER (sin dependencias) ===================== */
-// parseCsv: admite comillas y saltos de línea correctos
+/* ============================================================================
+   [B] LECTURA DE CSVs (Google Sheets) — sin dependencias
+   ============================================================================ */
 function parseCsv(text: string): Record<string, string>[] {
   const rows: string[][] = [];
   let row: string[] = [];
@@ -85,16 +99,12 @@ function parseCsv(text: string): Record<string, string>[] {
         cell += ch;
       }
     } else {
-      if (ch === '"') {
-        inQuotes = true;
-      } else if (ch === ",") {
-        pushCell();
-      } else if (ch === "\n") {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ",") pushCell();
+      else if (ch === "\n") {
         pushCell();
         pushRow();
-      } else {
-        cell += ch;
-      }
+      } else cell += ch;
     }
   }
   if (cell.length || row.length) {
@@ -102,7 +112,6 @@ function parseCsv(text: string): Record<string, string>[] {
     pushRow();
   }
   if (!rows.length) return [];
-
   const headers = rows[0].map((h) => h.trim());
   const out: Record<string, string>[] = [];
   for (let i = 1; i < rows.length; i++) {
@@ -114,8 +123,6 @@ function parseCsv(text: string): Record<string, string>[] {
   }
   return out;
 }
-
-// fetchCsv: lee CSV de Google Sheets export (gid)
 async function fetchCsv(spreadsheetId: string, gid: string | number) {
   const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
   const res = await fetch(url, { cache: "no-store" });
@@ -123,8 +130,6 @@ async function fetchCsv(spreadsheetId: string, gid: string | number) {
   const text = await res.text();
   return parseCsv(text);
 }
-
-// loadSheetSmart: wrapper con label para error
 async function loadSheetSmart(spreadsheetId: string, gid: string | number, label: string) {
   try {
     return await fetchCsv(spreadsheetId, gid);
@@ -132,8 +137,6 @@ async function loadSheetSmart(spreadsheetId: string, gid: string | number, label
     throw new Error(`${label}: no se pudo leer`);
   }
 }
-
-// Extrae id y gid de una URL de Google Sheets
 function normalizeGoogleSheetUrl(url: string) {
   const m = (url || "").match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
   const id = m ? m[1] : "";
@@ -143,66 +146,66 @@ function normalizeGoogleSheetUrl(url: string) {
   return { id, gid };
 }
 
-/* ===================== TIPOS ===================== */
+/* ============================================================================
+   [C] TIPOS
+   ============================================================================ */
 type Client = {
   nombre: string;
   rut: string;
   codigo: string;
   ejecutivo: string;
-  direccion: string;
+  direccion: string; // Dirección de despacho (readonly)
 };
-
 type Product = { code: string; name: string; price_list: number; kilos: number };
-
-type PrecioEspecial = { codigoSN: string; articulo: string; precio: number };
-
+type PrecioEspecial = {
+  codigoSN: string;
+  articulo: string;
+  precio: number;
+  vencimiento?: string;
+};
 type Line = {
-  code: string;          // código producto
-  name: string;          // descripción
-  kilos: number;         // kg por unidad
-  qty: number;           // cantidad
-  priceBase: number;     // lista 1 desde planilla (siempre)
-  especialPrice: number; // 0 si no aplica precio especial
-  descuento: number;     // -20..20 (%), ignorado si hay especial
-  precioVenta: number;   // cálculo final por unidad
-  total: number;         // qty * kilos * precioVenta
-  isEspecial: boolean;   // bandera de precio especial
+  code: string;
+  name: string;
+  kilos: number;
+  qty: number;
+  priceBase: number;
+  especialPrice: number;
+  descuento: number;
+  precioVenta: number;
+  total: number;
+  isEspecial: boolean;   // especial vigente (aplica)
+  isBloqueado: boolean;  // especial VENCIDO -> bloquea guardar
 };
 
-/* ===================== COMPONENTE PRINCIPAL ===================== */
+/* ============================================================================
+   [D] COMPONENTE PRINCIPAL
+   ============================================================================ */
 export default function NotaVentaPage() {
-  /* ---- CLIENTES ---- */
+  /* ----- Estado: Cliente ----- */
   const [clients, setClients] = useState<Client[]>([]);
-  const [clientName, setClientName] = useState<string>("");
-  const [clientRut, setClientRut] = useState<string>("");
-  const [ejecutivo, setEjecutivo] = useState<string>("");
-  const [clientCode, setClientCode] = useState<string>("");
-  const [direccion, setDireccion] = useState<string>("");
+  const [clientName, setClientName] = useState("");
+  const [clientRut, setClientRut] = useState("");
+  const [ejecutivo, setEjecutivo] = useState("");
+  const [clientCode, setClientCode] = useState("");
+  const [direccion, setDireccion] = useState("");
+  const [direccionNueva, setDireccionNueva] = useState("");
+  const [comuna, setComuna] = useState("");
 
-  /* ---- PRODUCTOS ---- */
+  /* ----- Estado: Productos/Precios ----- */
   const [productos, setProductos] = useState<Product[]>([]);
   const [preciosEspeciales, setPreciosEspeciales] = useState<PrecioEspecial[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
 
-  /* ---- LISTA DE PRECIOS ---- */
+  /* ----- Estado: Metadatos/UX ----- */
   const [listaSeleccionada, setListaSeleccionada] = useState<1 | 2 | 3>(1);
+  const [emailEjecutivo, setEmailEjecutivo] = useState("");
+  const [comentarios, setComentarios] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [saveMsg, setSaveMsg] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [numeroNV, setNumeroNV] = useState("");
 
-  /* ---- CORREO ---- */
-  const [emailEjecutivo, setEmailEjecutivo] = useState<string>("");
-
-  /* ---- COMENTARIOS ---- */
-  const [comentarios, setComentarios] = useState<string>("");
-
-  /* ---- UI ---- */
-  const [errorMsg, setErrorMsg] = useState<string>("");
-  const [saveMsg, setSaveMsg] = useState<string>("");
-  const [saving, setSaving] = useState<boolean>(false);
-
-  /* ---- DOC INFO: N° NV ---- */
-  const [numeroNV, setNumeroNV] = useState<string>("");
-
-  /* ===================== HELPERS INTERNOS ===================== */
-  // Genera correlativo local por año, persistido en localStorage (por navegador)
+  /* ----- Helpers internos ----- */
   function generarNumeroNV(): string {
     if (typeof window === "undefined") return "";
     const year = new Date().getFullYear();
@@ -212,14 +215,22 @@ export default function NotaVentaPage() {
     window.localStorage.setItem(key, String(next));
     return `NV-${year}-${String(next).padStart(5, "0")}`;
   }
+  function especialVigente(pe?: PrecioEspecial | null) {
+    if (!pe) return false;
+    if (!pe.vencimiento) return true;
+    const f = parseFecha(pe.vencimiento);
+    if (!f) return true;
+    // vigente si HOY ≤ fecha de vencimiento (día completo)
+    const fv = new Date(f.getFullYear(), f.getMonth(), f.getDate()).getTime();
+    return hoySinHora().getTime() <= fv;
+  }
 
-  /* ===================== EFECTOS INICIALES ===================== */
-  // Asigna número NV al cargar la página
-  useEffect(() => {
-    setNumeroNV(generarNumeroNV());
-  }, []);
+  /* ==========================================================================
+     [E] EFECTOS: Inicialización y carga de datos
+     ========================================================================== */
+  useEffect(() => setNumeroNV(generarNumeroNV()), []);
 
-  // Carga clientes desde tu planilla (hoja Clientes)
+  // Clientes
   useEffect(() => {
     (async () => {
       const { id, gid } = normalizeGoogleSheetUrl(
@@ -228,17 +239,17 @@ export default function NotaVentaPage() {
       if (!id) return;
       const rows = await loadSheetSmart(id, gid, "Clientes");
       const list: Client[] = rows.map((r) => ({
-        nombre: String(r.CardName ?? r.Nombre ?? "").trim(),
-        rut: String(r.RUT ?? r.LicTradNum ?? "").trim(),
-        ejecutivo: String(r["Empleado Ventas"] ?? r["Empleado de Ventas"] ?? "").trim(),
-        codigo: String(r.CardCode ?? "").trim(),
-        direccion: String(r["Dirección Despacho"] ?? r["Direccion Despacho"] ?? r.Address ?? "").trim(),
+        nombre: String((r as any).CardName ?? (r as any).Nombre ?? "").trim(),
+        rut: String((r as any).RUT ?? (r as any).LicTradNum ?? "").trim(),
+        ejecutivo: String((r as any)["Empleado Ventas"] ?? (r as any)["Empleado de Ventas"] ?? "").trim(),
+        codigo: String((r as any).CardCode ?? "").trim(),
+        direccion: String((r as any)["Dirección Despacho"] ?? (r as any)["Direccion Despacho"] ?? (r as any).Address ?? "").trim(),
       }));
       setClients(list.filter((c) => c.nombre));
     })().catch((e) => setErrorMsg(String(e)));
   }, []);
 
-  // Carga productos (hoja Productos)
+  // Productos
   useEffect(() => {
     (async () => {
       const { id, gid } = normalizeGoogleSheetUrl(
@@ -256,7 +267,7 @@ export default function NotaVentaPage() {
     })().catch((e) => setErrorMsg(String(e)));
   }, []);
 
-  // Carga precios especiales (hoja Precios especiales)
+  // Precios especiales
   useEffect(() => {
     (async () => {
       const { id, gid } = normalizeGoogleSheetUrl(
@@ -268,24 +279,30 @@ export default function NotaVentaPage() {
         codigoSN: String((r as any)["Código SN"] ?? (r as any)["Codigo SN"] ?? "").trim(),
         articulo: String((r as any)["Número de artículo"] ?? (r as any)["Numero de articulo"] ?? "").trim(),
         precio: num((r as any)["Precio especial"] ?? 0),
+        vencimiento: String((r as any).Vencimiento ?? (r as any)["Fecha Vencimiento"] ?? "").trim(),
       }));
       setPreciosEspeciales(list);
     })().catch((e) => setErrorMsg(String(e)));
   }, []);
 
-  /* ===================== LÓGICA DE PRECIOS ===================== */
-  // Transformación por lista de precios, partiendo de la lista 1 (base)
+  /* ==========================================================================
+     [F] LÓGICA DE PRECIOS
+     ========================================================================== */
   function precioListaDesdeBase(baseLista1: number, lista: 1 | 2 | 3) {
     if (lista === 1) return baseLista1;
-    if (lista === 2) return baseLista1 * 0.97;            // -3%
-    return baseLista1 * 0.97 * 0.97;                       // -3% adicional
+    if (lista === 2) return baseLista1 * 0.97; // -3%
+    return baseLista1 * 0.97 * 0.97;           // -3% adicional
   }
 
-  // Calcula una línea (precioVenta, total) según reglas:
-  // - Si es especial: ignora lista y descuento, usa precio especial.
-  // - Si no es especial: aplica lista SOLO si code inicia con "PT".
   function computeLine(row: Line): Line {
     const out = { ...row };
+
+    if (out.isBloqueado) {
+      // Si está bloqueado por especial vencido, lo dejamos en 0 para no sumar.
+      out.precioVenta = 0;
+      out.total = 0;
+      return out;
+    }
 
     if (out.isEspecial && out.especialPrice > 0) {
       out.descuento = 0;
@@ -303,7 +320,9 @@ export default function NotaVentaPage() {
     return out;
   }
 
-  /* ===================== MANEJO DE LÍNEAS ===================== */
+  /* ==========================================================================
+     [G] MANEJO DE LÍNEAS
+     ========================================================================== */
   function addLine() {
     setLines((old) => [
       ...old,
@@ -318,21 +337,21 @@ export default function NotaVentaPage() {
         precioVenta: 0,
         total: 0,
         isEspecial: false,
+        isBloqueado: false,
       },
     ]);
   }
-
   function rmLine(i: number) {
     setLines((old) => old.filter((_, idx) => idx !== i));
   }
 
-  // Completa la línea al salir del code (onBlur)
+  // Al salir del código, llenar datos y evaluar especial
   function fillFromCode(i: number, code: string) {
     const prod = productos.find((p) => p.code === code);
     if (!prod) return;
     setLines((old) => {
       const n = [...old];
-      const row = { ...(n[i] ?? n[0]) };
+      const row = { ...(n[i] ?? n[0]) } as Line;
 
       row.code = prod.code;
       row.name = prod.name;
@@ -341,17 +360,26 @@ export default function NotaVentaPage() {
 
       let esp = 0;
       let isEsp = false;
+      let bloqueado = false;
+
       if (clientCode) {
         const pe = preciosEspeciales.find(
           (p) => p.codigoSN === clientCode && p.articulo === prod.code
         );
         if (pe) {
-          esp = pe.precio || 0;
-          isEsp = true;
+          if (especialVigente(pe)) {
+            esp = pe.precio || 0;
+            isEsp = true;
+          } else {
+            // Precio especial existe pero está VENCIDO -> BLOQUEA la línea
+            bloqueado = true;
+          }
         }
       }
+
       row.especialPrice = esp;
       row.isEspecial = isEsp;
+      row.isBloqueado = bloqueado;
       row.descuento = isEsp ? 0 : clamp(num(row.descuento), -20, 20);
 
       n[i] = computeLine(row);
@@ -359,7 +387,7 @@ export default function NotaVentaPage() {
     });
   }
 
-  // Actualiza cualquier campo de la línea y recalcula
+  // Actualiza cualquier campo y recalcula
   function updateLine(i: number, field: keyof Line, value: unknown) {
     setLines((old) => {
       const n = [...old];
@@ -378,20 +406,21 @@ export default function NotaVentaPage() {
     });
   }
 
-  // Recalcula todas las líneas al cambiar la lista seleccionada
+  // Recalcula al cambiar lista
   useEffect(() => {
     setLines((old) => old.map((r) => computeLine(r)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listaSeleccionada]);
 
-  // Subtotal de todas las líneas
-  const subtotal = useMemo(() => {
-    const s = lines.reduce((a, r) => a + (Number.isFinite(r.total) ? r.total : 0), 0);
-    return Number.isFinite(s) ? s : 0;
-  }, [lines]);
+  // Subtotal
+  const subtotal = useMemo(
+    () => lines.reduce((a, r) => a + (Number.isFinite(r.total) ? r.total : 0), 0),
+    [lines]
+  );
 
-  /* ===================== CLIENTE: SELECCIÓN ===================== */
-  // Al escribir/seleccionar Nombre
+  /* ==========================================================================
+     [H] CLIENTE: eventos
+     ========================================================================== */
   function handleNombreChange(val: string) {
     setClientName(val);
     const row = clients.find((c) => normalize(c.nombre) === normalize(val));
@@ -400,16 +429,18 @@ export default function NotaVentaPage() {
       setClientCode("");
       setEjecutivo(row.ejecutivo || "");
       setDireccion("");
+      setDireccionNueva("");
+      setComuna("");
     } else {
       setClientRut("");
       setClientCode("");
       setEjecutivo("");
       setDireccion("");
+      setDireccionNueva("");
+      setComuna("");
     }
   }
-
-  // Al elegir Código Cliente (sucursal)
-  async function handleCodigoChange(val: string) {
+  function handleCodigoChange(val: string) {
     setClientCode(val);
     const row = clients.find((c) => c.codigo === val);
     if (row) {
@@ -419,13 +450,17 @@ export default function NotaVentaPage() {
     }
   }
 
-  /* ===================== ACCIONES ===================== */
+  /* ==========================================================================
+     [I] ACCIONES (imprimir/guardar/limpiar)
+     ========================================================================== */
   function limpiarTodo() {
     setClientName("");
     setClientRut("");
     setClientCode("");
     setEjecutivo("");
     setDireccion("");
+    setDireccionNueva("");
+    setComuna("");
     setEmailEjecutivo("");
     setComentarios("");
     setLines([]);
@@ -434,39 +469,22 @@ export default function NotaVentaPage() {
     setListaSeleccionada(1);
     setSaveMsg("");
   }
-
   function imprimir() {
     window.print();
   }
-
-  function enviarEmail() {
-    const destinatarios = [emailEjecutivo, "silvana.pincheira@spartan.cl"]
-      .filter((x) => (x || "").trim().length > 0)
-      .join(",");
-    const subject = encodeURIComponent(`Nota de Venta ${numeroNV}`);
-    const body = encodeURIComponent(`Adjunto la Nota de Venta ${numeroNV} generada.`);
-    window.location.href = `mailto:${destinatarios}?subject=${subject}&body=${body}`;
-  }
-
-  /* ===================== GUARDAR EN GOOGLE SHEETS ===================== */
-  // Guarda "una fila por ítem" en una sola pestaña (p.ej. "NV")
-  // via API interna /api/save-to-sheets (Next Route Handler)
   async function guardarEnGoogleSheets() {
     setSaveMsg("");
     setErrorMsg("");
-  
     try {
-      if (!clientName || !clientRut || !clientCode) {
+      if (!clientName || !clientRut || !clientCode)
         throw new Error("Faltan datos del cliente (Nombre, RUT y Código Cliente).");
-      }
-      if (lines.length === 0) {
-        throw new Error("Agrega al menos un ítem antes de guardar.");
-      }
-  
+      if (lines.length === 0) throw new Error("Agrega al menos un ítem antes de guardar.");
+      if (lines.some((l) => l.isBloqueado))
+        throw new Error("No puedes guardar: hay precios especiales vencidos en la tabla.");
+
       setSaving(true);
-  
       const fecha = new Date().toLocaleDateString("es-CL");
-  
+
       const payload = lines.map((item) => ({
         numeroNV,
         fecha,
@@ -474,7 +492,9 @@ export default function NotaVentaPage() {
         rut: clientRut,
         codigoCliente: clientCode,
         ejecutivo,
-        direccion,
+        direccionDespacho: direccion,
+        direccionNueva,
+        comuna,
         correoEjecutivo: emailEjecutivo,
         comentarios,
         subtotal,
@@ -486,20 +506,20 @@ export default function NotaVentaPage() {
         precioBase: Math.round(item.priceBase || 0),
         descuento: item.isEspecial ? 0 : item.descuento,
         precioVenta: Math.round(item.precioVenta || 0),
+        precioPresentacion: Math.round((item.precioVenta || 0) * (item.kilos || 1)),
         totalItem: Math.round(item.total || 0),
+        especialVigente: !!item.isEspecial,
+        especialBloqueado: !!item.isBloqueado,
       }));
-  
-      // 👇 ahora llama a tu API interna
+
       const res = await fetch("/api/save-to-sheets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-  
       if (!res.ok) throw new Error("Error al guardar en Google Sheets.");
       const json = await res.json();
       const rows = Number(json?.rows ?? payload.length) || payload.length;
-  
       setSaveMsg(`✅ Nota de venta guardada con ${rows} ítem(s) en Google Sheets.`);
     } catch (e: any) {
       setErrorMsg(e?.message || "Error desconocido al guardar en Google Sheets.");
@@ -507,12 +527,14 @@ export default function NotaVentaPage() {
       setSaving(false);
     }
   }
-  
-  /* ===================== UI ===================== */
+
+  /* ==========================================================================
+     [J] UI
+     ========================================================================== */
   return (
     <>
       <div id="printArea" className="min-h-screen bg-white p-6 text-[12px]">
-        {/* ===================== ENCABEZADO ===================== */}
+        {/* ===== ENCABEZADO ===== */}
         <header className="mb-4 flex items-center justify-between border-b pb-2">
           <div className="flex items-center gap-3">
             <img
@@ -530,25 +552,25 @@ export default function NotaVentaPage() {
           </div>
         </header>
 
-        {/* Mensajes */}
-        {errorMsg && (
+        {/* Mensajes globales */}
+        {!!errorMsg && (
           <div className="mb-3 rounded bg-red-50 text-red-700 px-3 py-2 text-sm border border-red-200">
             {errorMsg}
           </div>
         )}
-        {saveMsg && !errorMsg && (
+        {!!saveMsg && !errorMsg && (
           <div className="mb-3 rounded bg-green-50 text-green-700 px-3 py-2 text-sm border border-green-200">
             {saveMsg}
           </div>
         )}
 
-        {/* ===================== CLIENTE ===================== */}
+        {/* ===== CLIENTE ===== */}
         <section className="bg-white shadow p-4 rounded mb-4">
           <h2 className="font-semibold text-[#2B6CFF] mb-2">Cliente</h2>
-          <div className="grid grid-cols-2 gap-2 text-[12px]">
-            {/* Nombre */}
+          {/* Pantalla: 2 columnas — Impresión: 3 columnas */}
+          <div className="client-grid grid grid-cols-2 gap-2 text-[12px] print:grid-cols-3">
             <label className="flex flex-col gap-1">
-              Nombre
+              <span className="font-medium">Nombre</span>
               <input
                 className="w-full border rounded px-2 py-1"
                 value={clientName}
@@ -562,15 +584,13 @@ export default function NotaVentaPage() {
               </datalist>
             </label>
 
-            {/* RUT */}
             <label className="flex flex-col gap-1">
-              RUT
+              <span className="font-medium">RUT</span>
               <input className="w-full border rounded px-2 py-1" value={clientRut} readOnly />
             </label>
 
-            {/* Código Cliente */}
             <label className="flex flex-col gap-1">
-              Código Cliente
+              <span className="font-medium">Código Cliente</span>
               <select
                 className="w-full border rounded px-2 py-1"
                 value={clientCode}
@@ -587,165 +607,233 @@ export default function NotaVentaPage() {
               </select>
             </label>
 
-            {/* Ejecutivo */}
             <label className="flex flex-col gap-1">
-              Ejecutivo
+              <span className="font-medium">Ejecutivo</span>
               <input className="w-full border rounded px-2 py-1" value={ejecutivo} readOnly />
             </label>
 
-            {/* Dirección */}
-            <label className="flex flex-col gap-1">
-              Dirección
+            <label className="flex flex-col gap-1 print:col-span-2">
+              <span className="font-medium">Dirección de Despacho</span>
               <input className="w-full border rounded px-2 py-1" value={direccion} readOnly />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="font-medium">Dirección nueva</span>
+              <input
+                className="w-full border rounded px-2 py-1"
+                value={direccionNueva}
+                onChange={(e) => setDireccionNueva(e.target.value)}
+                placeholder="(Opcional)"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="font-medium">Comuna</span>
+              <input
+                className="w-full border rounded px-2 py-1"
+                value={comuna}
+                onChange={(e) => setComuna(e.target.value)}
+              />
             </label>
           </div>
         </section>
 
-        {/* ===================== PRODUCTOS ===================== */}
+        {/* ===== PRODUCTOS ===== */}
         <section className="bg-white shadow p-4 rounded mb-4">
           <div className="flex justify-between mb-2 items-center">
             <h2 className="font-semibold text-[#2B6CFF]">Productos</h2>
 
-            {/* Botones Lista de precios (ocultos al imprimir) */}
+            {/* Botones Lista (solo pantalla) */}
             <div className="flex gap-2 print:hidden">
-              <button
-                className={`px-2 py-1 rounded text-xs ${listaSeleccionada === 1 ? "bg-blue-500 text-white" : "bg-zinc-200"}`}
-                onClick={() => setListaSeleccionada(1)}
-              >
-                1° Lista
-              </button>
-              <button
-                className={`px-2 py-1 rounded text-xs ${listaSeleccionada === 2 ? "bg-blue-500 text-white" : "bg-zinc-200"}`}
-                onClick={() => setListaSeleccionada(2)}
-              >
-                2° Lista
-              </button>
-              <button
-                className={`px-2 py-1 rounded text-xs ${listaSeleccionada === 3 ? "bg-blue-500 text-white" : "bg-zinc-200"}`}
-                onClick={() => setListaSeleccionada(3)}
-              >
-                3° Lista
-              </button>
-
+              {[1, 2, 3].map((n) => (
+                <button
+                  key={n}
+                  className={`px-2 py-1 rounded text-xs ${
+                    listaSeleccionada === (n as 1 | 2 | 3) ? "bg-blue-500 text-white" : "bg-zinc-200"
+                  }`}
+                  onClick={() => setListaSeleccionada(n as 1 | 2 | 3)}
+                >
+                  {n}° Lista
+                </button>
+              ))}
               <button className="bg-green-500 px-2 py-1 text-xs text-white rounded" onClick={addLine}>
                 + Ítem
               </button>
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto print:overflow-visible">
             <table className="min-w-full text-[11px] border">
               <thead className="bg-zinc-100">
                 <tr>
-                  <th className="px-2 py-1 text-left">Código</th>
+                  <th className="px-2 py-1 text-left" style={{ width: "80px" }}>
+                    Código
+                  </th>
                   <th className="px-2 py-1 text-left">Descripción</th>
-                  <th className="px-2 py-1 text-right">Kg</th>
-                  <th className="px-2 py-1 text-right">Cantidad</th>
-                  {/* Oculto en impresión */}
-                  <th className="hidden md:table-cell px-2 py-1 text-right print:hidden">
-  Precio base
-</th>
-                  <th className="px-2 py-1 text-right">% Desc</th>
-                  <th className="px-2 py-1 text-right">Precio venta</th>
-                  <th className="px-2 py-1 text-right">Total</th>
-                  {/* botón eliminar oculto en impresión */}
+                  <th className="px-2 py-1 text-right print:hidden" style={{ width: "70px" }}>
+                    Kg
+                  </th>
+                  <th className="px-2 py-1 text-right" style={{ width: "80px" }}>
+                    Cant
+                  </th>
+                  <th className="px-2 py-1 text-right print:hidden" style={{ width: "110px" }}>
+                    Precio base
+                  </th>
+                  <th className="px-2 py-1 text-right print:hidden" style={{ width: "80px" }}>
+                    % Desc
+                  </th>
+                  <th className="px-2 py-1 text-right" style={{ width: "110px" }}>
+                    Precio venta
+                  </th>
+                  <th className="px-2 py-1 text-right" style={{ width: "130px" }}>
+                    $ Presentación
+                  </th>
+                  <th className="px-2 py-1 text-right" style={{ width: "130px" }}>
+                    Total
+                  </th>
                   <th className="print:hidden" />
                 </tr>
               </thead>
+
               <tbody>
-                {lines.map((r, i) => (
-                  <tr key={i} className="border-t">
-                    <td className="px-2 py-1">
-                      <input
-                        className="w-32 border rounded px-1"
-                        value={r.code}
-                        onChange={(e) => updateLine(i, "code", e.target.value)}
-                        onBlur={(e) => fillFromCode(i, e.target.value)}
-                        list="productosList"
-                      />
-                      <datalist id="productosList">
-                        {productos.map((p) => (
-                          <option key={p.code} value={p.code}>
-                            {p.code} — {p.name}
-                          </option>
-                        ))}
-                      </datalist>
-                    </td>
+                {lines.map((r, i) => {
+                  const precioPresentacion = (r.precioVenta || 0) * (r.kilos || 1);
+                  return (
+                    <tr key={i} className="border-t align-middle">
+                      {/* Código */}
+                      <td className="px-2 py-1">
+                        <input
+                          className="w-24 border rounded px-1"
+                          value={r.code}
+                          onChange={(e) => updateLine(i, "code", e.target.value)}
+                          onBlur={(e) => fillFromCode(i, e.target.value)}
+                          list="productosList"
+                        />
+                        <datalist id="productosList">
+                          {productos.map((p) => (
+                            <option key={p.code} value={p.code}>
+                              {p.code} — {p.name}
+                            </option>
+                          ))}
+                        </datalist>
 
-                    <td className="px-2 py-1">{r.name}</td>
+                        {/* Etiquetas de estado (solo pantalla) */}
+                        {r.isEspecial && !r.isBloqueado && (
+                          <div className="text-[10px] text-emerald-700 mt-1 print:hidden">
+                            ✅ Precio especial vigente
+                          </div>
+                        )}
+                        {r.isBloqueado && (
+                          <div className="text-[10px] text-red-600 mt-1 print:hidden">
+                            ❌ Precio especial vencido (corrige para continuar)
+                          </div>
+                        )}
+                      </td>
 
-                    <td className="px-2 py-1 text-right">
-                      <input
-                        type="number"
-                        className="w-16 border rounded text-right"
-                        value={r.kilos}
-                        onChange={(e) => updateLine(i, "kilos", num(e.target.value))}
-                        min={0}
-                        step="any"
-                      />
-                    </td>
+                      {/* Descripción */}
+                      <td className="px-2 py-1">
+                        <div className="truncate print:whitespace-normal">{r.name}</div>
+                      </td>
 
-                    <td className="px-2 py-1 text-right">
-                      <input
-                        type="number"
-                        className="w-16 border rounded text-right"
-                        value={r.qty}
-                        onChange={(e) => updateLine(i, "qty", num(e.target.value))}
-                        min={0}
-                        step="any"
-                      />
-                    </td>
+                      {/* Kg (solo pantalla) */}
+                      <td className="px-2 py-1 text-right print:hidden">
+                        <input
+                          type="number"
+                          className="w-16 border rounded text-right"
+                          value={r.kilos}
+                          onChange={(e) => updateLine(i, "kilos", num(e.target.value))}
+                          min={0}
+                          step="any"
+                        />
+                      </td>
 
-                    {/* Precio Base -> oculto al imprimir */}
-                    <td className="px-2 py-1 text-right print:hidden">{money(r.priceBase)}</td>
+                      {/* Cantidad */}
+                      <td className="px-2 py-1 text-center">
+  <input
+    type="number"
+    className="w-16 border rounded text-right print:hidden"
+    value={r.qty}
+    onChange={(e) => updateLine(i, "qty", num(e.target.value))}
+    min={0}
+    step="any"
+  />
+  <span className="hidden print:inline">{r.qty}</span>
+</td>
 
-                    <td className="px-2 py-1 text-right">
-                      <input
-                        type="number"
-                        className="w-16 border rounded text-right"
-                        value={r.descuento}
-                        onChange={(e) => updateLine(i, "descuento", num(e.target.value))}
-                        disabled={r.isEspecial}
-                        min={-20}
-                        max={20}
-                        step="any"
-                      />
-                    </td>
 
-                    <td className="px-2 py-1 text-right">{money(r.precioVenta)}</td>
-                    <td className="px-2 py-1 text-right">{money(r.total)}</td>
+                      {/* Precio Base (solo pantalla) */}
+                      <td className="px-2 py-1 text-right print:hidden">{money(r.priceBase)}</td>
 
-                    {/* Botón Eliminar -> oculto al imprimir */}
-                    <td className="px-2 py-1 print:hidden">
-                      <button className="text-red-600 text-xs" onClick={() => rmLine(i)}>
-                        Eliminar
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      {/* % Desc (solo pantalla) */}
+                      <td className="px-2 py-1 text-right print:hidden">
+                        <input
+                          type="number"
+                          className="w-16 border rounded text-right"
+                          value={r.descuento}
+                          onChange={(e) => updateLine(i, "descuento", num(e.target.value))}
+                          disabled={r.isEspecial || r.isBloqueado}
+                          min={-20}
+                          max={20}
+                          step="any"
+                        />
+                      </td>
+
+                      {/* Precio Venta */}
+                      <td className="px-2 py-1 text-right">{money(r.precioVenta)}</td>
+
+                      {/* $ Presentación */}
+                      <td className="px-2 py-1 text-right">{money(precioPresentacion)}</td>
+
+                      {/* Total */}
+                      <td className="px-2 py-1 text-right">{money(r.total)}</td>
+
+                      {/* Acciones (solo pantalla) */}
+                      <td className="px-2 py-1 print:hidden">
+                        <button className="text-red-600 text-xs" onClick={() => rmLine(i)}>
+                          Eliminar
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
 
+              {/* Pie de tabla (pantalla e impresión) */}
               {lines.length > 0 && (
-                <tfoot>
-                  <tr className="font-semibold bg-zinc-50">
-                    <td colSpan={7} className="text-right px-2 py-1">
-                      TOTAL
-                    </td>
-                    <td className="text-right px-2 py-1">{money(subtotal)}</td>
-                    <td className="print:hidden" />
-                  </tr>
-                </tfoot>
+                <>
+                  {/* Pie pantalla: respeta columnas visibles en pantalla */}
+                  <tfoot className="print:hidden">
+                    <tr className="font-semibold bg-zinc-50">
+                      <td colSpan={9} className="text-right px-2 py-1 border-t">
+                        TOTAL
+                      </td>
+                      <td className="text-right px-2 py-1 border-t">{money(subtotal)}</td>
+                    </tr>
+                  </tfoot>
+
+                  {/* Pie impresión: solo 6 columnas visibles */}
+                  <tfoot className="hidden print:table-footer-group">
+                    <tr className="font-semibold">
+                      <td colSpan={5} className="text-right px-2 py-2" style={{ borderTop: "2px solid #000" }}>
+                        TOTAL
+                      </td>
+                      <td className="text-right px-2 py-2" style={{ borderTop: "2px solid #000" }}>
+                        {money(subtotal)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </>
               )}
             </table>
           </div>
         </section>
 
-        {/* ===================== ENVÍO Y COMENTARIOS (VISIBLE EN IMPRESIÓN) ===================== */}
+        {/* ===== ENVÍO Y COMENTARIOS ===== */}
         <section className="bg-white shadow p-4 rounded mb-4">
           <h2 className="font-semibold text-[#2B6CFF] mb-2">📧 Envío y Comentarios</h2>
-          <div className="grid grid-cols-2 gap-2 text-[12px]">
+          <div className="grid grid-cols-2 gap-2 text-[12px] print:grid-cols-2">
             <label className="flex flex-col gap-1">
-              Correo Ejecutivo
+              <span className="font-medium">Correo Ejecutivo</span>
               <input
                 type="email"
                 className="w-full border rounded px-2 py-1"
@@ -754,7 +842,7 @@ export default function NotaVentaPage() {
               />
             </label>
             <label className="flex flex-col gap-1">
-              Comentarios
+              <span className="font-medium">Comentarios</span>
               <input
                 type="text"
                 className="w-full border rounded px-2 py-1"
@@ -766,12 +854,11 @@ export default function NotaVentaPage() {
         </section>
       </div>
 
-      {/* ===================== BOTONES DE ACCIÓN (OCULTOS EN IMPRESIÓN) ===================== */}
+      {/* ===== BOTONES (solo pantalla) ===== */}
       <div className="flex flex-wrap gap-2 print:hidden px-6 pb-8">
         <button className="bg-zinc-200 px-3 py-1 rounded" onClick={imprimir}>
           🖨️ Imprimir / PDF
         </button>
-
         <button
           className={`px-3 py-1 rounded text-white ${saving ? "bg-zinc-400" : "bg-emerald-600 hover:bg-emerald-700"}`}
           onClick={guardarEnGoogleSheets}
@@ -779,17 +866,14 @@ export default function NotaVentaPage() {
         >
           {saving ? "Guardando..." : "💾 Guardar"}
         </button>
-
-        <button className="bg-blue-500 text-white px-3 py-1 rounded" onClick={enviarEmail}>
-          ✉️ Enviar por Email
-        </button>
-
         <button className="bg-zinc-200 px-3 py-1 rounded" onClick={limpiarTodo}>
           🧹 Nueva NV
         </button>
       </div>
 
-      {/* ===================== ESTILOS DE IMPRESIÓN ===================== */}
+      {/* =========================================================================
+         [K] ESTILOS DE IMPRESIÓN — PDF profesional
+         ======================================================================= */}
       <style jsx>{`
         :global(html),
         :global(body),
@@ -797,6 +881,8 @@ export default function NotaVentaPage() {
           -webkit-print-color-adjust: exact;
           print-color-adjust: exact;
         }
+
+        /* Evitar scroll en impresión */
         @media print {
           body * {
             visibility: hidden !important;
@@ -811,6 +897,105 @@ export default function NotaVentaPage() {
             top: 0;
             width: 100% !important;
           }
+
+          /* Controles como texto plano */
+          input,
+          select,
+          textarea,
+          button {
+            border: none !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            width: auto !important;
+            color: #000 !important;
+            font-size: 11px !important;
+            appearance: none !important;
+          }
+
+          /* Distribución cliente: 3 por fila en impresión */
+          .client-grid > label {
+            display: inline-block !important;
+            width: 32% !important;
+            vertical-align: top !important;
+            margin-right: 1.5% !important;
+          }
+          .client-grid > label.print\\:col-span-2 {
+            width: 66% !important;
+          }
+
+          /* Tabla full width y sin scroll */
+          .overflow-x-auto {
+            overflow: visible !important;
+          }
+          table {
+            border-collapse: collapse !important;
+            width: 100% !important;
+            table-layout: fixed !important;
+          }
+          th,
+          td {
+            border: 1px solid #e5e5e5 !important;
+            padding: 4px 6px !important;
+            vertical-align: middle !important;
+          }
+          thead th {
+            background: #f5f5f5 !important;
+            text-align: center !important;
+            font-weight: 600 !important;
+          }
+
+          /* Ocultar columnas en impresión */
+thead tr th:nth-child(3),
+thead tr th:nth-child(5),
+thead tr th:nth-child(6),
+thead tr th:nth-child(10),
+tbody tr td:nth-child(3),
+tbody tr td:nth-child(5),
+tbody tr td:nth-child(6),
+tbody tr td:nth-child(10) {
+  display: none !important;
+}
+
+/* Estilos por columna (contando todas las columnas originales) */
+th:nth-child(1), td:nth-child(1) { /* Código */
+  width: 70px !important;
+  font-size: 10px !important;
+  text-align: left !important;
+}
+
+th:nth-child(2), td:nth-child(2) { /* Descripción */
+  width: auto !important;
+  white-space: normal !important;
+}
+
+th:nth-child(4), td:nth-child(4) { /* Cantidad */
+  width: 60px !important;
+  text-align: center !important;
+}
+
+th:nth-child(7), td:nth-child(7) { /* Precio venta */
+  width: 100px !important;
+  text-align: right !important;
+}
+
+th:nth-child(8), td:nth-child(8) { /* $ Presentación */
+  width: 120px !important;
+  text-align: right !important;
+}
+
+th:nth-child(9), td:nth-child(9) { /* Total */
+  width: 120px !important;
+  text-align: right !important;
+}
+
+          /* Totales */
+          tfoot tr td {
+            border-top: 2px solid #2B6CFF !important;
+            font-weight: 700 !important;
+          }
+
           .print\\:hidden {
             display: none !important;
           }
@@ -825,13 +1010,8 @@ export default function NotaVentaPage() {
           h2 {
             break-inside: avoid;
           }
-          thead {
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
         }
       `}</style>
     </>
   );
 }
-

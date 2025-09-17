@@ -7,7 +7,7 @@ export default function VentasPage() {
     <div className="min-h-screen bg-zinc-50 p-6">
       <h1 className="text-2xl font-bold text-[#2B6CFF] mb-6">📊 Módulo de Ventas</h1>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Cotizaciones */}
         <Link
           href="/ventas/cotizacion"
@@ -27,6 +27,17 @@ export default function VentasPage() {
           <h2 className="text-lg font-semibold text-[#2B6CFF] mb-2">📝 Nota de Venta</h2>
           <p className="text-sm text-zinc-600">
             Crea y administra notas de venta con precios especiales y descuentos.
+          </p>
+        </Link>
+
+        {/* Ficha de Cliente */}
+        <Link
+          href="/ventas/clientesnuevos"
+          className="block rounded-xl border bg-white p-6 shadow-sm hover:shadow-md transition"
+        >
+          <h2 className="text-lg font-semibold text-[#2B6CFF] mb-2">👤 Ficha de Cliente</h2>
+          <p className="text-sm text-zinc-600">
+            Solicita la creación de nuevos clientes y envíalos a SAP/Cobranzas.
           </p>
         </Link>
       </div>
