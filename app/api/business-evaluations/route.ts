@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const fetchCache = "force-no-store";
+export const preferredRegion = "auto";
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -12,14 +13,14 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// GET /api/business-evaluations?customer_id=&status=&from=&to=&page=1&limit=20
+// GET /api/business-evaluations
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const customer_id = url.searchParams.get("customer_id") ?? "";
-    const status = url.searchParams.get("status") ?? ""; // 'viable' | 'no_viable'
-    const fromDate = url.searchParams.get("from"); // YYYY-MM-DD
-    const toDate = url.searchParams.get("to");     // YYYY-MM-DD
+    const status = url.searchParams.get("status") ?? "";
+    const fromDate = url.searchParams.get("from");
+    const toDate = url.searchParams.get("to");
     const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
     const limit = Math.max(1, Math.min(100, Number(url.searchParams.get("limit") ?? 20)));
     const from = (page - 1) * limit;
@@ -46,17 +47,6 @@ export async function GET(req: Request) {
 }
 
 // POST /api/business-evaluations
-// body: {
-//   customer_id?: string,
-//   eval_date: 'YYYY-MM-DD',
-//   months_contract: number,
-//   avg_monthly_sales?: number,
-//   monthly_lease?: number,
-//   relation_lease_sales?: number,
-//   commission_pct?: number,
-//   status: 'viable'|'no_viable',
-//   comments?: string
-// }
 export async function POST(req: Request) {
   try {
     const b = await req.json();
@@ -73,14 +63,13 @@ export async function POST(req: Request) {
 
     const payload = {
       customer_id: b.customer_id ?? null,
-      eval_date: b.eval_date as string,
+      eval_date: b.eval_date,
       months_contract: Number(b.months_contract),
-      // Postgres money acepta number/text y castea; enviamos number plano
       avg_monthly_sales: b.avg_monthly_sales ?? 0,
       monthly_lease: b.monthly_lease ?? 0,
       relation_lease_sales: b.relation_lease_sales ?? 0,
       commission_pct: b.commission_pct ?? 0,
-      status: b.status as "viable" | "no_viable",
+      status: b.status,
       comments: (b.comments ?? "").toString().trim() || null,
       created_by: b.created_by ?? null,
     };
