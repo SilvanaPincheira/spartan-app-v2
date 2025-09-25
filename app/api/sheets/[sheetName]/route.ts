@@ -5,7 +5,6 @@ import Papa from "papaparse";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 
-// 🔧 Normalizar cabeceras
 function normalize(val: string) {
   return val
     ?.toLowerCase()
@@ -16,7 +15,6 @@ function normalize(val: string) {
 
 type Params = { params: { sheetName: string } };
 
-// ✅ GET: devolver solo las filas del usuario logueado
 export async function GET(req: Request, { params }: Params) {
   try {
     // 1️⃣ Usuario autenticado
@@ -28,13 +26,12 @@ export async function GET(req: Request, { params }: Params) {
 
     const email = user?.email?.toLowerCase() ?? "";
 
-    // 2️⃣ Decodificar nombre de la hoja (soporta espacios y mayúsculas)
+    // 2️⃣ Nombre de la hoja (decodificado)
     const sheetName = decodeURIComponent(params.sheetName);
     const spreadsheetId = process.env.SHEET_ID!;
     const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${sheetName}`;
 
-    console.log("📄 Leyendo hoja:", sheetName);
-    console.log("🌐 URL generada:", url);
+    console.log("📄 Leyendo hoja:", sheetName, "para usuario:", email);
 
     // 3️⃣ Descargar CSV
     const res = await fetch(url);
@@ -57,11 +54,11 @@ export async function GET(req: Request, { params }: Params) {
       return obj;
     });
 
-    // 5️⃣ Filtrar solo filas del usuario logueado (EMAIL_COL)
-    const filtered = data.filter(
-      (row) =>
-        row["email_col"]?.toString().trim().toLowerCase() === email
-    );
+    // 5️⃣ Filtrar SOLO filas con EMAIL_COL y que coincidan con el login
+    const filtered = data.filter((row) => {
+      const rowEmail = row["email_col"]?.toString().trim().toLowerCase();
+      return rowEmail && rowEmail === email;
+    });
 
     console.log("✅ Filas totales:", data.length, "→ Filtradas:", filtered.length);
 
@@ -71,4 +68,3 @@ export async function GET(req: Request, { params }: Params) {
     return NextResponse.json({ error: "Error en servidor" }, { status: 500 });
   }
 }
-
