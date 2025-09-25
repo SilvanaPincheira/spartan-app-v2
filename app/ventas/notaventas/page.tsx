@@ -2,15 +2,18 @@
 // -----------------------------------------------------------------------------
 // NOTA DE VENTA — CLIENT COMPONENT (Next.js / React)
 // -----------------------------------------------------------------------------
-// ✔ Carga clientes SOLO del usuario logueado (API /api/sheets/SN → filtra por EMAIL_COL)
-// ✔ Carga productos y precios especiales (CSV Google Sheets)
+// ✔ Carga clientes, productos y precios especiales (CSV Google Sheets)
 // ✔ Listas 1/2/3 para códigos que comienzan con "PT"
 // ✔ Precio especial por cliente+artículo con VIGENCIA:
 //      - Vigente  -> se aplica y muestra “✅ Precio especial vigente”
 //      - Vencido  -> BLOQUEA la línea y muestra “❌ Precio especial vencido”
 // ✔ Columna “$ Presentación” (= Precio venta × Kg)
 // ✔ Guarda una fila por ítem (payload) vía /api/save-to-sheets
-// ✔ Impresión A4 profesional
+// ✔ Impresión A4 profesional:
+//      - Datos del cliente en 2–3 campos por fila
+//      - Tabla limpia sin scroll con: Código | Descripción | Cant | Precio venta | $ Presentación | Total
+//      - Oculta en impresión: Kg, Precio base, % Desc, Acciones
+//      - Totales con borde superior y alineados a la derecha
 // -----------------------------------------------------------------------------
 
 "use client";
@@ -20,6 +23,7 @@ import React, { useEffect, useMemo, useState } from "react";
 /* ============================================================================
    [A] HELPERS GENERALES
    ============================================================================ */
+// Normaliza strings (búsquedas/igualdades sin tildes/mayúsculas)
 function normalize(s: string) {
   return (s || "")
     .toLowerCase()
@@ -27,13 +31,16 @@ function normalize(s: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .trim();
 }
+// Convierte lo que venga a número (0 si NaN)
 function num(x: unknown) {
   const v = Number(x);
   return Number.isFinite(v) ? v : 0;
 }
+// Limita un número al rango [min, max]
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
+// Formato moneda CLP (sin decimales)
 function money(n: number) {
   return (n || 0).toLocaleString("es-CL", {
     style: "currency",
@@ -41,6 +48,7 @@ function money(n: number) {
     maximumFractionDigits: 0,
   });
 }
+// Parse fecha “dd-mm-aaaa” / “dd/mm/aaaa” / ISO
 function parseFecha(v?: string): Date | null {
   const s = (v || "").trim();
   if (!s) return null;
@@ -62,7 +70,7 @@ function hoySinHora(): Date {
 }
 
 /* ============================================================================
-   [B] LECTURA DE CSVs (Google Sheets) — solo productos/precios especiales
+   [B] LECTURA DE CSVs (Google Sheets) — sin dependencias
    ============================================================================ */
 function parseCsv(text: string): Record<string, string>[] {
   const rows: string[][] = [];
@@ -146,10 +154,15 @@ type Client = {
   rut: string;
   codigo: string;
   ejecutivo: string;
-  direccion: string;
+  direccion: string; // Dirección de despacho (readonly)
 };
 type Product = { code: string; name: string; price_list: number; kilos: number };
-type PrecioEspecial = { codigoSN: string; articulo: string; precio: number; vencimiento?: string };
+type PrecioEspecial = {
+  codigoSN: string;
+  articulo: string;
+  precio: number;
+  vencimiento?: string;
+};
 type Line = {
   code: string;
   name: string;
@@ -160,8 +173,8 @@ type Line = {
   descuento: number;
   precioVenta: number;
   total: number;
-  isEspecial: boolean;
-  isBloqueado: boolean;
+  isEspecial: boolean;   // especial vigente (aplica)
+  isBloqueado: boolean;  // especial VENCIDO -> bloquea guardar
 };
 
 /* ============================================================================
@@ -183,7 +196,7 @@ export default function NotaVentaPage() {
   const [preciosEspeciales, setPreciosEspeciales] = useState<PrecioEspecial[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
 
-  /* ----- Estado: UX ----- */
+  /* ----- Estado: Metadatos/UX ----- */
   const [listaSeleccionada, setListaSeleccionada] = useState<1 | 2 | 3>(1);
   const [emailEjecutivo, setEmailEjecutivo] = useState("");
   const [comentarios, setComentarios] = useState("");
@@ -207,6 +220,7 @@ export default function NotaVentaPage() {
     if (!pe.vencimiento) return true;
     const f = parseFecha(pe.vencimiento);
     if (!f) return true;
+    // vigente si HOY ≤ fecha de vencimiento (día completo)
     const fv = new Date(f.getFullYear(), f.getMonth(), f.getDate()).getTime();
     return hoySinHora().getTime() <= fv;
   }
@@ -216,32 +230,26 @@ export default function NotaVentaPage() {
      ========================================================================== */
   useEffect(() => setNumeroNV(generarNumeroNV()), []);
 
-  // Clientes (API filtrada por EMAIL_COL)
+  // Clientes
   useEffect(() => {
     (async () => {
-      try {
-        const res = await fetch("/api/sheets/SN", { cache: "no-store" });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || "Error al cargar clientes");
-
-        const list: Client[] = (json.data || []).map((r: any) => ({
-          nombre: String(r.CardName ?? r.Nombre ?? "").trim(),
-          rut: String(r.RUT ?? r.LicTradNum ?? "").trim(),
-          ejecutivo: String(r["Empleado Ventas"] ?? r["Empleado de Ventas"] ?? "").trim(),
-          codigo: String(r.CardCode ?? "").trim(),
-          direccion: String(
-            r["Dirección Despacho"] ?? r["Direccion Despacho"] ?? r.Address ?? ""
-          ).trim(),
-        }));
-
-        setClients(list.filter((c) => c.nombre));
-      } catch (e: any) {
-        setErrorMsg(String(e.message || e));
-      }
-    })();
+      const { id, gid } = normalizeGoogleSheetUrl(
+        "https://docs.google.com/spreadsheets/d/1kF0INEtwYDXhQCBPTVhU8NQI2URKoi99Hs43DTSO02I/edit?gid=161671364#gid=161671364"
+      );
+      if (!id) return;
+      const rows = await loadSheetSmart(id, gid, "Clientes");
+      const list: Client[] = rows.map((r) => ({
+        nombre: String((r as any).CardName ?? (r as any).Nombre ?? "").trim(),
+        rut: String((r as any).RUT ?? (r as any).LicTradNum ?? "").trim(),
+        ejecutivo: String((r as any)["Empleado Ventas"] ?? (r as any)["Empleado de Ventas"] ?? "").trim(),
+        codigo: String((r as any).CardCode ?? "").trim(),
+        direccion: String((r as any)["Dirección Despacho"] ?? (r as any)["Direccion Despacho"] ?? (r as any).Address ?? "").trim(),
+      }));
+      setClients(list.filter((c) => c.nombre));
+    })().catch((e) => setErrorMsg(String(e)));
   }, []);
 
-  // Productos (Google Sheets CSV directo)
+  // Productos
   useEffect(() => {
     (async () => {
       const { id, gid } = normalizeGoogleSheetUrl(
@@ -290,6 +298,7 @@ export default function NotaVentaPage() {
     const out = { ...row };
 
     if (out.isBloqueado) {
+      // Si está bloqueado por especial vencido, lo dejamos en 0 para no sumar.
       out.precioVenta = 0;
       out.total = 0;
       return out;
@@ -336,6 +345,7 @@ export default function NotaVentaPage() {
     setLines((old) => old.filter((_, idx) => idx !== i));
   }
 
+  // Al salir del código, llenar datos y evaluar especial
   function fillFromCode(i: number, code: string) {
     const prod = productos.find((p) => p.code === code);
     if (!prod) return;
@@ -361,6 +371,7 @@ export default function NotaVentaPage() {
             esp = pe.precio || 0;
             isEsp = true;
           } else {
+            // Precio especial existe pero está VENCIDO -> BLOQUEA la línea
             bloqueado = true;
           }
         }
@@ -376,6 +387,7 @@ export default function NotaVentaPage() {
     });
   }
 
+  // Actualiza cualquier campo y recalcula
   function updateLine(i: number, field: keyof Line, value: unknown) {
     setLines((old) => {
       const n = [...old];
@@ -394,11 +406,13 @@ export default function NotaVentaPage() {
     });
   }
 
+  // Recalcula al cambiar lista
   useEffect(() => {
     setLines((old) => old.map((r) => computeLine(r)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listaSeleccionada]);
 
+  // Subtotal
   const subtotal = useMemo(
     () => lines.reduce((a, r) => a + (Number.isFinite(r.total) ? r.total : 0), 0),
     [lines]
@@ -553,7 +567,7 @@ export default function NotaVentaPage() {
         {/* ===== CLIENTE ===== */}
         <section className="bg-white shadow p-4 rounded mb-4">
           <h2 className="font-semibold text-[#2B6CFF] mb-2">Cliente</h2>
-
+          {/* Pantalla: 2 columnas — Impresión: 3 columnas */}
           <div className="client-grid grid grid-cols-2 gap-2 text-[12px] print:grid-cols-3">
             <label className="flex flex-col gap-1">
               <span className="font-medium">Nombre</span>
@@ -629,14 +643,13 @@ export default function NotaVentaPage() {
           <div className="flex justify-between mb-2 items-center">
             <h2 className="font-semibold text-[#2B6CFF]">Productos</h2>
 
+            {/* Botones Lista (solo pantalla) */}
             <div className="flex gap-2 print:hidden">
               {[1, 2, 3].map((n) => (
                 <button
                   key={n}
                   className={`px-2 py-1 rounded text-xs ${
-                    listaSeleccionada === (n as 1 | 2 | 3)
-                      ? "bg-blue-500 text-white"
-                      : "bg-zinc-200"
+                    listaSeleccionada === (n as 1 | 2 | 3) ? "bg-blue-500 text-white" : "bg-zinc-200"
                   }`}
                   onClick={() => setListaSeleccionada(n as 1 | 2 | 3)}
                 >
@@ -704,6 +717,7 @@ export default function NotaVentaPage() {
                           ))}
                         </datalist>
 
+                        {/* Etiquetas de estado (solo pantalla) */}
                         {r.isEspecial && !r.isBloqueado && (
                           <div className="text-[10px] text-emerald-700 mt-1 print:hidden">
                             ✅ Precio especial vigente
@@ -735,16 +749,17 @@ export default function NotaVentaPage() {
 
                       {/* Cantidad */}
                       <td className="px-2 py-1 text-center">
-                        <input
-                          type="number"
-                          className="w-16 border rounded text-right print:hidden"
-                          value={r.qty}
-                          onChange={(e) => updateLine(i, "qty", num(e.target.value))}
-                          min={0}
-                          step="any"
-                        />
-                        <span className="hidden print:inline">{r.qty}</span>
-                      </td>
+  <input
+    type="number"
+    className="w-16 border rounded text-right print:hidden"
+    value={r.qty}
+    onChange={(e) => updateLine(i, "qty", num(e.target.value))}
+    min={0}
+    step="any"
+  />
+  <span className="hidden print:inline">{r.qty}</span>
+</td>
+
 
                       {/* Precio Base (solo pantalla) */}
                       <td className="px-2 py-1 text-right print:hidden">{money(r.priceBase)}</td>
@@ -783,9 +798,10 @@ export default function NotaVentaPage() {
                 })}
               </tbody>
 
-              {/* Pie de tabla */}
+              {/* Pie de tabla (pantalla e impresión) */}
               {lines.length > 0 && (
                 <>
+                  {/* Pie pantalla: respeta columnas visibles en pantalla */}
                   <tfoot className="print:hidden">
                     <tr className="font-semibold bg-zinc-50">
                       <td colSpan={9} className="text-right px-2 py-1 border-t">
@@ -795,6 +811,7 @@ export default function NotaVentaPage() {
                     </tr>
                   </tfoot>
 
+                  {/* Pie impresión: solo 6 columnas visibles */}
                   <tfoot className="hidden print:table-footer-group">
                     <tr className="font-semibold">
                       <td colSpan={5} className="text-right px-2 py-2" style={{ borderTop: "2px solid #000" }}>
@@ -865,6 +882,7 @@ export default function NotaVentaPage() {
           print-color-adjust: exact;
         }
 
+        /* Evitar scroll en impresión */
         @media print {
           body * {
             visibility: hidden !important;
@@ -880,6 +898,7 @@ export default function NotaVentaPage() {
             width: 100% !important;
           }
 
+          /* Controles como texto plano */
           input,
           select,
           textarea,
@@ -895,6 +914,7 @@ export default function NotaVentaPage() {
             appearance: none !important;
           }
 
+          /* Distribución cliente: 3 por fila en impresión */
           .client-grid > label {
             display: inline-block !important;
             width: 32% !important;
@@ -905,6 +925,7 @@ export default function NotaVentaPage() {
             width: 66% !important;
           }
 
+          /* Tabla full width y sin scroll */
           .overflow-x-auto {
             overflow: visible !important;
           }
@@ -925,43 +946,51 @@ export default function NotaVentaPage() {
             font-weight: 600 !important;
           }
 
-          thead tr th:nth-child(3),
-          thead tr th:nth-child(5),
-          thead tr th:nth-child(6),
-          thead tr th:nth-child(10),
-          tbody tr td:nth-child(3),
-          tbody tr td:nth-child(5),
-          tbody tr td:nth-child(6),
-          tbody tr td:nth-child(10) {
-            display: none !important;
-          }
+          /* Ocultar columnas en impresión */
+thead tr th:nth-child(3),
+thead tr th:nth-child(5),
+thead tr th:nth-child(6),
+thead tr th:nth-child(10),
+tbody tr td:nth-child(3),
+tbody tr td:nth-child(5),
+tbody tr td:nth-child(6),
+tbody tr td:nth-child(10) {
+  display: none !important;
+}
 
-          th:nth-child(1), td:nth-child(1) { /* Código */
-            width: 70px !important;
-            font-size: 10px !important;
-            text-align: left !important;
-          }
-          th:nth-child(2), td:nth-child(2) { /* Descripción */
-            width: auto !important;
-            white-space: normal !important;
-          }
-          th:nth-child(4), td:nth-child(4) { /* Cantidad */
-            width: 60px !important;
-            text-align: center !important;
-          }
-          th:nth-child(7), td:nth-child(7) { /* Precio venta */
-            width: 100px !important;
-            text-align: right !important;
-          }
-          th:nth-child(8), td:nth-child(8) { /* $ Presentación */
-            width: 120px !important;
-            text-align: right !important;
-          }
-          th:nth-child(9), td:nth-child(9) { /* Total */
-            width: 120px !important;
-            text-align: right !important;
-          }
+/* Estilos por columna (contando todas las columnas originales) */
+th:nth-child(1), td:nth-child(1) { /* Código */
+  width: 70px !important;
+  font-size: 10px !important;
+  text-align: left !important;
+}
 
+th:nth-child(2), td:nth-child(2) { /* Descripción */
+  width: auto !important;
+  white-space: normal !important;
+}
+
+th:nth-child(4), td:nth-child(4) { /* Cantidad */
+  width: 60px !important;
+  text-align: center !important;
+}
+
+th:nth-child(7), td:nth-child(7) { /* Precio venta */
+  width: 100px !important;
+  text-align: right !important;
+}
+
+th:nth-child(8), td:nth-child(8) { /* $ Presentación */
+  width: 120px !important;
+  text-align: right !important;
+}
+
+th:nth-child(9), td:nth-child(9) { /* Total */
+  width: 120px !important;
+  text-align: right !important;
+}
+
+          /* Totales */
           tfoot tr td {
             border-top: 2px solid #2B6CFF !important;
             font-weight: 700 !important;
