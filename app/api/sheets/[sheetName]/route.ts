@@ -28,10 +28,19 @@ export async function GET(req: Request, { params }: Params) {
 
     // 2️⃣ Nombre de la hoja (decodificado)
     const sheetName = decodeURIComponent(params.sheetName);
-    const spreadsheetId = process.env.SHEET_ID!;
-    const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${sheetName}`;
 
-    console.log("📄 Leyendo hoja:", sheetName, "para usuario:", email);
+    // Mapear nombres "bonitos" → pestañas reales
+    const tabMap: Record<string, string> = {
+      Metas: "Hoja 6",
+      "Clientes Pendientes": "clientesnuevos",
+      "Notas de Venta": "Hoja 1",
+    };
+    const tabName = tabMap[sheetName] || sheetName;
+
+    const spreadsheetId = process.env.SHEET_ID!;
+    const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`;
+
+    console.log("📄 Leyendo hoja:", sheetName, "→ pestaña real:", tabName, "para usuario:", email);
 
     // 3️⃣ Descargar CSV
     const res = await fetch(url);
@@ -54,15 +63,20 @@ export async function GET(req: Request, { params }: Params) {
       return obj;
     });
 
-    // 5️⃣ Filtrar SOLO filas con EMAIL_COL y que coincidan con el login
-    const filtered = data.filter((row) => {
-      const rowEmail = row["email_col"]?.toString().trim().toLowerCase();
-      return rowEmail && rowEmail === email;
-    });
+    // 5️⃣ Decidir si aplicar filtro
+    const noFilterSheets = ["Clientes Pendientes", "Notas de Venta"];
+    let finalData = data;
 
-    console.log("✅ Filas totales:", data.length, "→ Filtradas:", filtered.length);
+    if (!noFilterSheets.includes(sheetName)) {
+      finalData = data.filter((row) => {
+        const rowEmail = row["email_col"]?.toString().trim().toLowerCase();
+        return rowEmail && rowEmail === email;
+      });
+    }
 
-    return NextResponse.json({ data: filtered });
+    console.log("✅ Filas totales:", data.length, "→ Después del filtro:", finalData.length);
+
+    return NextResponse.json({ data: finalData });
   } catch (err) {
     console.error("🔥 Error en API Sheets:", err);
     return NextResponse.json({ error: "Error en servidor" }, { status: 500 });
