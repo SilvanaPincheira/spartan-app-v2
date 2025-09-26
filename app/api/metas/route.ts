@@ -12,7 +12,7 @@ export async function GET() {
     }
 
     const url =
-      "https://docs.google.com/spreadsheets/d/1GASOV0vI85q5TtVn5hdZFD0Mwcj2SzXM6Iqvgl50A/gviz/tq?tqx=out:csv&sheet=Hoja 6";
+      "https://docs.google.com/spreadsheets/d/1GASOV0vI85q5TtVn5hdZFD0Mwcj2SzXM6Iqvgl50A/gviz/tq?tqx=out:csv&sheet=Hoja6";
 
     const res = await fetch(url);
     if (!res.ok) throw new Error("No se pudo leer Google Sheets");
