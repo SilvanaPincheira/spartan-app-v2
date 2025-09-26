@@ -6,7 +6,7 @@ export default function MetasPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/sheets/Metas")
+    fetch("/api/metas")   // ✅ ahora apunta al route correcto
       .then((res) => res.json())
       .then((data) => {
         setRows(data.data || []);
