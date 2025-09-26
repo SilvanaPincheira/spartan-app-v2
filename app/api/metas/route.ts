@@ -1,4 +1,3 @@
-// app/api/metas/route.ts
 import { NextResponse } from "next/server";
 import Papa from "papaparse";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
@@ -13,7 +12,7 @@ export async function GET() {
     }
 
     const url =
-      "https://docs.google.com/spreadsheets/d/e/2PACX-1vQeg3EGhKOHiA9cRDqPioN5oaHZUOpDxB1olx-H6jkUIdBnyRvgEBJwe3IQeb3N7e9rnsQy4UnOQlk1/gviz/tq?tqx=out:csv&sheet=Tabla_1";
+      "https://docs.google.com/spreadsheets/d/1GASOV0vI85q5TtVn5hdZFD0Mwcj2SzXM6Iqvgl50A/gviz/tq?tqx=out:csv&sheet=Hoja 6";
 
     const res = await fetch(url);
     if (!res.ok) throw new Error("No se pudo leer Google Sheets");
