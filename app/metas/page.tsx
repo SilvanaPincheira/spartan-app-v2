@@ -6,30 +6,34 @@ export default function MetasPage() {
   const [metas, setMetas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Orden de las columnas según la hoja
+  // Orden de las columnas según la hoja (normalizadas por la API)
   const columnasOrdenadas = [
-    "ejecutivo",
-    "mes",
-    "anio",
-    "meta_kg",
-    "meta_monto",
-    "avance_kg",
-    "avance_monto",
-    "cumplimiento_kg",
-    "cumplimiento_monto",
+    "zona_chile",
+    "gerencia",
+    "supervisor",
+    "vendedor",
+    "pdido",
+    "entrega",
+    "total_quimicos",
+    "no_son_equipo_venta",
+    "meta_septiembre_2025",
+    "cumplimiento",
+    "cumplimiento_",
   ];
 
   // Nombres legibles para la UI
   const columnasLegibles: Record<string, string> = {
-    ejecutivo: "Ejecutivo",
-    mes: "Mes",
-    anio: "Año",
-    meta_kg: "Meta (Kg)",
-    meta_monto: "Meta ($)",
-    avance_kg: "Avance (Kg)",
-    avance_monto: "Avance ($)",
-    cumplimiento_kg: "% Cumpl. Kg",
-    cumplimiento_monto: "% Cumpl. $",
+    zona_chile: "Zona Chile",
+    gerencia: "Gerencia",
+    supervisor: "Supervisor",
+    vendedor: "Vendedor",
+    pdido: "Pedido",
+    entrega: "Entrega",
+    total_quimicos: "Total Químicos",
+    no_son_equipo_venta: "No son Equipo Venta",
+    meta_septiembre_2025: "Meta Septiembre 2025",
+    cumplimiento: "Cumplimiento $",
+    cumplimiento_: "Cumplimiento %",
   };
 
   useEffect(() => {
