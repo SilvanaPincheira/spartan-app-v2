@@ -1,12 +1,19 @@
-// app/kpi/clientes-inactivos/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
-/* === Helpers === */
+/* ===== Helpers ===== */
 function sanitizeRut(rut: string) {
   return (rut || "").replace(/[^0-9Kk]/g, "").toUpperCase();
+}
+function parsePeriodo(val: string): Date | null {
+  if (!val) return null;
+  // formato esperado: "2025-01"
+  const m = val.match(/^(\d{4})[-/](\d{1,2})$/);
+  if (m) return new Date(+m[1], +m[2] - 1, 1);
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? null : d;
 }
 function num(x: any) {
   const v = Number(x);
@@ -25,7 +32,7 @@ async function fetchCsv(spreadsheetId: string, gid: string) {
   });
 }
 
-/* === Component === */
+/* ===== Component ===== */
 export default function ClientesInactivos() {
   const supabase = createClientComponentClient();
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
@@ -33,93 +40,78 @@ export default function ClientesInactivos() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    (async () => {
-      // sesión actual
-      const { data: { session } } = await supabase.auth.getSession();
-      setSessionEmail(session?.user?.email ?? null);
+    // traer email del usuario logueado
+    supabase.auth.getUser().then(({ data }) => {
+      const email = data.user?.email ?? null;
+      setSessionEmail(email);
+    });
+  }, [supabase]);
 
+  useEffect(() => {
+    if (!sessionEmail) return;
+
+    (async () => {
       try {
-        // IDs
         const ventasId = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
         const comId = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
-        const ventasGid = "871602912";
-        const comGid = "551810728";
+        const ventasGid = "871602912"; // pestaña Ventas
+        const comGid = "551810728"; // pestaña Comodatos Salida
 
-        // Datos
         const ventas = await fetchCsv(ventasId, ventasGid);
         const comodatos = await fetchCsv(comId, comGid);
 
-        // Cutoffs
-        const cutoff6m = new Date();
-        cutoff6m.setMonth(cutoff6m.getMonth() - 6);
+        const cutoff = new Date();
+        cutoff.setMonth(cutoff.getMonth() - 6);
+
         const cutoffCom = new Date();
-        cutoffCom.setMonth(cutoffCom.getMonth() - 24);
+        cutoffCom.setFullYear(cutoffCom.getFullYear() - 2);
 
-        /* --- Ventas agrupadas por RUT --- */
-        const ventasPorRut: Record<string, { ventas6m: number; ultimaCompra: string }> = {};
+        // ====== Procesar ventas (por RUT) ======
+        const ultimaCompra: Record<string, Date> = {};
+        const ventas6m = new Set<string>();
+
         for (const v of ventas) {
-          const rut = sanitizeRut(v["Rut Cliente"] || v["RUT Cliente"] || "");
-          const periodo = v["Periodo"]?.toString().trim(); // ej: 2025-01
-          if (!rut || !periodo) continue;
+          const rut = sanitizeRut(v["Rut Cliente"] || v["RUT Cliente"] || v["RUT"]);
+          const fecha =
+            parsePeriodo(v["Periodo"]) ||
+            new Date(v["DocDate"]) ||
+            new Date(v["Fecha Documento"]);
+          if (!rut || !fecha || isNaN(fecha.getTime())) continue;
 
-          const fechaPeriodo = new Date(periodo + "-01");
-          const venta = num(v["Global Venta"]);
-
-          if (!ventasPorRut[rut]) ventasPorRut[rut] = { ventas6m: 0, ultimaCompra: "—" };
-
-          if (fechaPeriodo >= cutoff6m) {
-            ventasPorRut[rut].ventas6m += venta;
+          if (!ultimaCompra[rut] || fecha > ultimaCompra[rut]) {
+            ultimaCompra[rut] = fecha;
           }
-
-          if (
-            ventasPorRut[rut].ultimaCompra === "—" ||
-            new Date(ventasPorRut[rut].ultimaCompra + "-01") < fechaPeriodo
-          ) {
-            ventasPorRut[rut].ultimaCompra = periodo;
-          }
+          if (fecha >= cutoff) ventas6m.add(rut);
         }
 
-        /* --- Comodatos agrupados por RUT --- */
-        const comodatosPorRut: Record<string, { total: number; email: string; nombre: string }> = {};
-        for (const c of comodatos) {
-          const rut = sanitizeRut(c["Rut Cliente"] || "");
-          const periodo = c["Periodo"]?.toString().trim();
-          const fechaPeriodo = periodo ? new Date(periodo + "-01") : null;
-          const total = num(c["Total"]);
-          if (!rut || !fechaPeriodo) continue;
-
-          if (fechaPeriodo >= cutoffCom) {
-            if (!comodatosPorRut[rut]) {
-              comodatosPorRut[rut] = {
-                total: 0,
-                email: c["EMAIL_COL"] || "",
-                nombre: c["Nombre Cliente"] || "",
-              };
-            }
-            comodatosPorRut[rut].total += total;
-          }
-        }
-
-        /* --- Unir y filtrar --- */
+        // ====== Procesar comodatos (por RUT) ======
         const resultado: any[] = [];
-        for (const rut in comodatosPorRut) {
-          const com = comodatosPorRut[rut];
-          const vent = ventasPorRut[rut];
-          if (com.total > 0 && (!vent || vent.ventas6m === 0)) {
-            resultado.push({
-              rut,
-              nombre: com.nombre,
-              email: com.email,
-              monto: com.total,
-              ultimaCompra: vent?.ultimaCompra || "—",
-            });
-          }
+        for (const c of comodatos) {
+          const rut = sanitizeRut(c["Rut Cliente"] || c["RUT Cliente"] || c["Rut"]);
+          const fechaContab = parsePeriodo(c["Periodo"]) || new Date(c["Fecha Contab"]);
+          if (!rut || !fechaContab || fechaContab < cutoffCom) continue;
+
+          if (ventas6m.has(rut)) continue;
+
+          resultado.push({
+            rut,
+            nombre: c["Nombre Cliente"] || "",
+            email: (c["EMAIL_COL"] || "").toLowerCase(),
+            ejecutivo: c["Empleado ventas"] || c["Ejecutivo"] || "",
+            monto: num(c["Total"]),
+            ultimaCompra: ultimaCompra[rut]
+              ? ultimaCompra[rut].toLocaleDateString("es-CL")
+              : "—",
+          });
         }
 
-        // Filtro por ejecutivo logueado
-        const filtrado = sessionEmail
-          ? resultado.filter((r) => r.email === sessionEmail)
-          : resultado;
+        // ====== Filtrar por el usuario logueado (EMAIL_COL de Comodatos) ======
+        let filtrado = resultado;
+        if (sessionEmail) {
+          filtrado = resultado.filter(
+            (r) => r.email && r.email.toLowerCase() === sessionEmail.toLowerCase()
+          );
+        }
 
         setData(filtrado);
       } catch (err) {
@@ -128,13 +120,20 @@ export default function ClientesInactivos() {
         setLoading(false);
       }
     })();
-  }, [supabase, sessionEmail]);
+  }, [sessionEmail]);
 
   return (
     <div className="p-6">
-      <h1 className="text-xl font-bold text-[#2B6CFF] mb-4">
+      <h1 className="text-xl font-bold text-[#2B6CFF] mb-2">
         📊 Clientes con comodatos vigentes sin compras en 6M
       </h1>
+
+      {sessionEmail && (
+        <p className="mb-4 text-sm text-zinc-600">
+          👋 Bienvenido <b>{sessionEmail}</b>, aquí puedes ver tus clientes asignados con alerta de inactividad.
+        </p>
+      )}
+
       {loading ? (
         <p>Cargando…</p>
       ) : (
@@ -144,14 +143,15 @@ export default function ClientesInactivos() {
               <th className="px-2 py-1">RUT</th>
               <th className="px-2 py-1">Cliente</th>
               <th className="px-2 py-1">Email</th>
-              <th className="px-2 py-1">Monto Comodato</th>
+              <th className="px-2 py-1">Ejecutivo</th>
+              <th className="px-2 py-1 text-right">Monto Comodato</th>
               <th className="px-2 py-1">Última compra</th>
             </tr>
           </thead>
           <tbody>
             {data.length === 0 && (
               <tr>
-                <td colSpan={5} className="text-center py-3">
+                <td colSpan={6} className="text-center py-3">
                   ✅ No hay clientes inactivos con comodato vigente
                 </td>
               </tr>
@@ -161,6 +161,7 @@ export default function ClientesInactivos() {
                 <td className="px-2 py-1">{d.rut}</td>
                 <td className="px-2 py-1">{d.nombre}</td>
                 <td className="px-2 py-1">{d.email}</td>
+                <td className="px-2 py-1">{d.ejecutivo}</td>
                 <td className="px-2 py-1 text-right">
                   {d.monto.toLocaleString("es-CL")}
                 </td>
