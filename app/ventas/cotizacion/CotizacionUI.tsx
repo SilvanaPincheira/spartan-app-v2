@@ -678,7 +678,7 @@ export default function CotizacionEjecutivaSheets() {
           <p>RUT: 76.333.980-7</p>
           <p>N° Cuenta: 25013084</p>
           <p>Tipo de cuenta: Cta. Cte.</p>
-          <p>Email comprobantes: horacio.pavez@spartan.cl</p>
+          <p>Email comprobantes: cobranzas@spartan.cl</p>
         </section>
 
         {/* Footer */}
