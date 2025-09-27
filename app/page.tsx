@@ -2,87 +2,45 @@
 "use client";
 
 import Image from "next/image";
-import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { RadialBarChart, RadialBar, PolarAngleAxis } from "recharts";
+import { useEffect, useState } from "react";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 const LOGO_URL =
   "https://assets.jumpseller.com/store/spartan-de-chile/themes/317202/options/27648963/Logo-spartan-white.png?1600810625";
 
-const parseNumber = (value: unknown) => {
-  if (value === null || value === undefined) return 0;
-  return Number(value.toString().replace(/[^0-9.-]+/g, "")) || 0;
-};
-
 export default function HomeMenu() {
-  const search = useSearchParams();
-  const isAdmin = (search.get("admin") || "") === "1";
-
-  const [rows, setRows] = useState<string[][]>([]);
+  const supabase = createClientComponentClient();
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const spreadsheetId = "1GASOV0vl85q5STfvDn5hdZFD0Mwcj2SzXM6IqvgI50A";
-        const gid = "1307924129";
-        const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:json&gid=${gid}`;
-        const res = await fetch(url, { cache: "no-store" });
-        const text = await res.text();
-        const json = JSON.parse(text.substring(47).slice(0, -2));
-        const data: string[][] = json.table.rows.map((r: any) =>
-          r.c.map((c: any) => (c ? c.v : "")),
-        );
-        setRows(data);
-      } catch (err) {
-        console.error("Error cargando Google Sheets:", err);
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.email) {
+        setUserEmail(session.user.email);
       }
-    };
-    fetchData();
-  }, []);
+    })();
+  }, [supabase]);
 
-  const foodData = useMemo(
-    () => rows.filter((row) => row[1]?.toString().startsWith("FB")),
-    [rows],
-  );
+  // Fecha actual
+  const today = new Date().toLocaleDateString("es-CL", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
 
-  const totalMeta = useMemo(
-    () => foodData.reduce((sum, r) => sum + parseNumber(r[8]), 0),
-    [foodData],
-  );
-  const totalVentas = useMemo(
-    () => foodData.reduce((sum, r) => sum + parseNumber(r[6]), 0),
-    [foodData],
-  );
-  const totalCumplimiento = useMemo(
-    () => foodData.reduce((sum, r) => sum + parseNumber(r[9]), 0),
-    [foodData],
-  );
-
-  const progreso = useMemo(
-    () => (totalMeta > 0 ? (totalVentas / totalMeta) * 100 : 0),
-    [totalMeta, totalVentas],
-  );
-
-  const gaugeData = useMemo(
-    () => [
-      {
-        name: "Ventas",
-        value: totalVentas,
-        fill:
-          totalVentas >= totalMeta
-            ? "#4CAF50"
-            : totalVentas >= totalMeta * 0.8
-            ? "#F9D423"
-            : "#FF4E50",
-      },
-    ],
-    [totalMeta, totalVentas],
-  );
-
-  const domainMax = totalMeta > 0 ? totalMeta : 1;
+  // Mensajes dinámicos de bienvenida
+  const mensajes = [
+    "🚀 Listo para un día productivo.",
+    "📊 Revisa tus reportes y KPIs.",
+    "⚡ Gestiona tus comodatos y ventas fácilmente.",
+    "✅ No olvides dar seguimiento a tus clientes.",
+  ];
+  const randomMsg = mensajes[Math.floor(Math.random() * mensajes.length)];
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+      {/* Header corporativo */}
       <header className="relative overflow-hidden">
         <div className="absolute inset-0 bg-[#1f4ed8]" />
         <div className="absolute inset-y-0 right-[-20%] w-[60%] rotate-[-8deg] bg-sky-400/60" />
@@ -101,84 +59,25 @@ export default function HomeMenu() {
                 Spartan — Panel Principal
               </h1>
               <p className="mt-1 text-white/80 text-sm max-w-2xl">
-                Visualiza los indicadores estratégicos y metas de la empresa.
+                Bienvenido al panel central de gestión y reportes.
               </p>
             </div>
           </div>
         </div>
       </header>
 
+      {/* Mensaje dinámico */}
       <main className="relative mx-auto max-w-7xl px-6 py-10">
-        <section className="rounded-2xl border bg-white shadow-sm p-6">
-          <h2 className="text-xl font-semibold text-[#2B6CFF] mb-4">
-            📊 Resumen Metas Septiembre Área FOOD
+        <section className="rounded-2xl border bg-white shadow-sm p-6 text-center">
+          <h2 className="text-2xl font-bold text-[#2B6CFF] mb-2">
+            👋 Bienvenido{userEmail ? `, ${userEmail}` : ""} 
           </h2>
-          <p className="mb-4 text-sm text-zinc-600">
-            KPIs consolidados solo de la Gerencia <b>FB</b>.
-          </p>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="p-4 rounded-xl bg-zinc-100 dark:bg-zinc-800 shadow text-center">
-              <h3 className="text-lg font-bold text-[#1f4ed8]">Meta Total</h3>
-              <p className="text-2xl font-semibold">
-                {totalMeta.toLocaleString("es-CL")}
-              </p>
-            </div>
-
-            <div className="p-4 rounded-xl bg-zinc-100 dark:bg-zinc-800 shadow text-center">
-              <h3 className="text-lg font-bold text-[#1f4ed8]">Total Ventas</h3>
-              <p className="text-2xl font-semibold">
-                {totalVentas.toLocaleString("es-CL")}
-              </p>
-            </div>
-
-            <div className="p-4 rounded-xl bg-zinc-100 dark:bg-zinc-800 shadow text-center">
-              <h3 className="text-lg font-bold text-[#1f4ed8]">Cumplimiento $</h3>
-              <p className={`text-2xl font-semibold ${totalCumplimiento >= 0 ? "text-green-600" : "text-red-600"}`}>
-                {totalCumplimiento.toLocaleString("es-CL")}
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-10 flex flex-col items-center">
-            <h3 className="text-lg font-bold text-center text-[#1f4ed8] mb-4">
-              Avance de Ventas vs Meta
-            </h3>
-
-            <RadialBarChart
-              width={320}
-              height={160}
-              cx="50%"
-              cy="100%"
-              innerRadius="80%"
-              outerRadius="100%"
-              barSize={20}
-              data={gaugeData}
-              startAngle={180}
-              endAngle={0}
-            >
-              <PolarAngleAxis type="number" domain={[0, domainMax]} angleAxisId={0} tick={false} />
-              <RadialBar dataKey="value" background={{ fill: "#e5e7eb" }} cornerRadius={50} />
-            </RadialBarChart>
-
-            <p className="mt-4 text-3xl font-bold text-zinc-700">{progreso.toFixed(1)} %</p>
-            <p className="mt-1 text-sm text-zinc-500">
-              Meta: <b>{totalMeta.toLocaleString("es-CL")}</b>
-            </p>
-          </div>
+          <p className="text-zinc-600 mb-2">{today}</p>
+          <p className="text-lg font-medium">{randomMsg}</p>
         </section>
-
-        {isAdmin && (
-          <div className="mt-10 rounded-2xl border bg-white p-4 shadow-sm dark:bg-zinc-900">
-            <p className="text-sm text-zinc-600">⚙️ Accesos rápidos para administración</p>
-            <ul className="mt-2 list-disc list-inside text-sm text-zinc-700">
-              <li>Configurar conexión de datos</li>
-              <li>Actualizar fuentes de Comodatos</li>
-            </ul>
-          </div>
-        )}
       </main>
 
+      {/* Botón WhatsApp */}
       <a
         href="https://wa.me/56075290961?text=Hola%20Silvana,%20necesito%20m%C3%A1s%20informaci%C3%B3n"
         target="_blank"
