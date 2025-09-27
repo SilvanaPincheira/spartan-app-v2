@@ -14,6 +14,8 @@
 //      - Tabla limpia sin scroll con: Código | Descripción | Cant | Precio venta | $ Presentación | Total
 //      - Oculta en impresión: Kg, Precio base, % Desc, Acciones
 //      - Totales con borde superior y alineados a la derecha
+// ✔ Precio venta editable con teclado y validación: no menor al 80% del precio base
+//    (se calcula % Desc inverso y se respeta el precio digitado)
 // -----------------------------------------------------------------------------
 
 "use client";
@@ -33,6 +35,12 @@ function normalize(s: string) {
 }
 // Convierte lo que venga a número (0 si NaN)
 function num(x: unknown) {
+  if (typeof x === "string") {
+    // permitir que escriban con puntos/commas
+    const cleaned = x.replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
+    const v = Number(cleaned);
+    return Number.isFinite(v) ? v : 0;
+  }
   const v = Number(x);
   return Number.isFinite(v) ? v : 0;
 }
@@ -78,7 +86,10 @@ function parseCsv(text: string): Record<string, string>[] {
   let cell = "";
   let inQuotes = false;
 
-  const pushCell = () => (row.push(cell), (cell = ""));
+  const pushCell = () => {
+    row.push(cell);
+    cell = "";
+  };
   const pushRow = () => {
     if (row.length) rows.push(row);
     row = [];
@@ -104,7 +115,9 @@ function parseCsv(text: string): Record<string, string>[] {
       else if (ch === "\n") {
         pushCell();
         pushRow();
-      } else cell += ch;
+      } else {
+        cell += ch;
+      }
     }
   }
   if (cell.length || row.length) {
@@ -123,6 +136,7 @@ function parseCsv(text: string): Record<string, string>[] {
   }
   return out;
 }
+
 async function fetchCsv(spreadsheetId: string, gid: string | number) {
   const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
   const res = await fetch(url, { cache: "no-store" });
@@ -130,6 +144,7 @@ async function fetchCsv(spreadsheetId: string, gid: string | number) {
   const text = await res.text();
   return parseCsv(text);
 }
+
 async function loadSheetSmart(spreadsheetId: string, gid: string | number, label: string) {
   try {
     return await fetchCsv(spreadsheetId, gid);
@@ -137,6 +152,7 @@ async function loadSheetSmart(spreadsheetId: string, gid: string | number, label
     throw new Error(`${label}: no se pudo leer`);
   }
 }
+
 function normalizeGoogleSheetUrl(url: string) {
   const m = (url || "").match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
   const id = m ? m[1] : "";
@@ -294,6 +310,14 @@ export default function NotaVentaPage() {
     return baseLista1 * 0.97 * 0.97;           // -3% adicional
   }
 
+  function precioBaseSegunLista(row: Line) {
+    let base = row.priceBase;
+    if ((row.code || "").toUpperCase().startsWith("PT")) {
+      base = precioListaDesdeBase(row.priceBase, listaSeleccionada);
+    }
+    return base;
+  }
+
   function computeLine(row: Line): Line {
     const out = { ...row };
 
@@ -306,23 +330,31 @@ export default function NotaVentaPage() {
 
     if (out.isEspecial && out.especialPrice > 0) {
       out.descuento = 0;
-      out.precioVenta = out.especialPrice;
+      out.precioVenta = Math.round(out.especialPrice);
     } else {
-      let baseSegunLista = out.priceBase;
-      if ((out.code || "").toUpperCase().startsWith("PT")) {
-        baseSegunLista = precioListaDesdeBase(out.priceBase, listaSeleccionada);
+      const base = precioBaseSegunLista(out);
+      if (out.precioVenta && out.precioVenta > 0) {
+        // 👉 Respeta precio manual y sincroniza %Desc
+        out.precioVenta = Math.round(out.precioVenta);
+        const descCalc = base > 0 ? ((base - out.precioVenta) / base) * 100 : 0;
+        out.descuento = Math.round(clamp(descCalc, -20, 20) * 100) / 100; // 🔹 redondeo a 2 decimales
+      } else {
+        // 👉 Si no hay precio manual, deriva desde %Desc
+        const desc = clamp(num(out.descuento), -20, 20);
+        out.precioVenta = Math.round(base * (1 - desc / 100));
+        out.descuento = Math.round(desc * 100) / 100; // 🔹 redondeo a 2 decimales
       }
-      const desc = clamp(num(out.descuento), -20, 20);
-      out.precioVenta = baseSegunLista * (1 - desc / 100);
     }
 
-    out.total = (num(out.qty) || 0) * (num(out.kilos) || 1) * (out.precioVenta || 0);
+    // $ Presentación = $/kg * kg ; Total = $ Presentación * cantidad
+    const precioPresentacion = out.precioVenta * (num(out.kilos) || 1);
+    out.total = precioPresentacion * (num(out.qty) || 0);
     return out;
   }
 
   /* ==========================================================================
-     [G] MANEJO DE LÍNEAS
-     ========================================================================== */
+   [G] MANEJO DE LÍNEAS
+   ========================================================================== */
   function addLine() {
     setLines((old) => [
       ...old,
@@ -332,7 +364,7 @@ export default function NotaVentaPage() {
         kilos: 1,
         qty: 1,
         priceBase: 0,
-        especialPrice: 0,
+        especialPrice: 0, 
         descuento: 0,
         precioVenta: 0,
         total: 0,
@@ -341,6 +373,7 @@ export default function NotaVentaPage() {
       },
     ]);
   }
+
   function rmLine(i: number) {
     setLines((old) => old.filter((_, idx) => idx !== i));
   }
@@ -380,7 +413,7 @@ export default function NotaVentaPage() {
       row.especialPrice = esp;
       row.isEspecial = isEsp;
       row.isBloqueado = bloqueado;
-      row.descuento = isEsp ? 0 : clamp(num(row.descuento), -20, 20);
+      row.descuento = isEsp ? 0 : Math.round(clamp(num(row.descuento), -20, 20) *100) / 100;
 
       n[i] = computeLine(row);
       return n;
@@ -393,19 +426,68 @@ export default function NotaVentaPage() {
       const n = [...old];
       const current = n[i];
       if (!current) return old;
-
-      const row: Line = { ...current, [field]: value } as Line;
-      row.kilos = num(row.kilos) || 1;
-      row.qty = num(row.qty) || 0;
-      row.priceBase = num(row.priceBase) || 0;
-      row.especialPrice = num(row.especialPrice) || 0;
-      row.descuento = row.isEspecial ? 0 : clamp(num(row.descuento), -20, 20);
-
+  
+      const row: Line = { ...current };
+  
+      if (field === "precioVenta") {
+        if (value === "" || value === undefined) {
+          row.precioVenta = 0;
+          row.descuento = 0;
+        } else {
+          const pv = Math.round(num(value));
+          const base = precioBaseSegunLista(row);
+  
+          // calcular % desc relativo al BASE
+          const descCalc = base > 0 ? ((base - pv) / base) * 100 : 0;
+  
+          // ❌ validar: si descuento es mayor a 20%, no dejar pasar
+          if (descCalc > 20) {
+            if (typeof window !== "undefined") {
+              alert(
+                `❌ Precio inferior al esperado.\n\n` +
+                  `Base: ${base.toLocaleString("es-CL", {
+                    style: "currency",
+                    currency: "CLP",
+                    minimumFractionDigits: 0,
+                  })}\n` +
+                  `Digitado: ${pv.toLocaleString("es-CL", {
+                    style: "currency",
+                    currency: "CLP",
+                    minimumFractionDigits: 0,
+                  })}\n\n` +
+                  `El precio no puede ser menor al 80% del base.`
+              );
+            }
+            return old; // 🚫 no aplicar cambios
+          }
+  
+          // ✅ válido: guardar lo que digitó el usuario
+          row.precioVenta = pv;
+          row.descuento = Math.round(clamp(descCalc, -20, 20) * 100) / 100;
+        }
+      } else {
+        // resto de campos como siempre
+        (row as any)[field] = value as any;
+        row.kilos = num(row.kilos) || 1;
+        row.qty = num(row.qty) || 0;
+        row.priceBase = num(row.priceBase) || 0;
+        row.especialPrice = num(row.especialPrice) || 0;
+        row.descuento = row.isEspecial
+          ? 0
+          : Math.round(clamp(num(row.descuento), -20, 20) * 100)/100;
+  
+        // Si el cambio fue en %Desc, recalculamos precioVenta según base (lista)
+        if (field === "descuento") {
+          const base = precioBaseSegunLista(row);
+          row.precioVenta = Math.round(base * (1 - row.descuento / 100));
+        }
+      }
+  
       n[i] = computeLine(row);
       return n;
     });
   }
-
+  
   // Recalcula al cambiar lista
   useEffect(() => {
     setLines((old) => old.map((r) => computeLine(r)));
@@ -414,7 +496,11 @@ export default function NotaVentaPage() {
 
   // Subtotal
   const subtotal = useMemo(
-    () => lines.reduce((a, r) => a + (Number.isFinite(r.total) ? r.total : 0), 0),
+    () =>
+      lines.reduce(
+        (a, r) => a + (Number.isFinite(r.total) ? r.total : 0),
+        0
+      ),
     [lines]
   );
 
@@ -749,17 +835,16 @@ export default function NotaVentaPage() {
 
                       {/* Cantidad */}
                       <td className="px-2 py-1 text-center">
-  <input
-    type="number"
-    className="w-16 border rounded text-right print:hidden"
-    value={r.qty}
-    onChange={(e) => updateLine(i, "qty", num(e.target.value))}
-    min={0}
-    step="any"
-  />
-  <span className="hidden print:inline">{r.qty}</span>
-</td>
-
+                        <input
+                          type="number"
+                          className="w-16 border rounded text-right print:hidden"
+                          value={r.qty}
+                          onChange={(e) => updateLine(i, "qty", num(e.target.value))}
+                          min={0}
+                          step="any"
+                        />
+                        <span className="hidden print:inline">{r.qty}</span>
+                      </td>
 
                       {/* Precio Base (solo pantalla) */}
                       <td className="px-2 py-1 text-right print:hidden">{money(r.priceBase)}</td>
@@ -778,8 +863,28 @@ export default function NotaVentaPage() {
                         />
                       </td>
 
-                      {/* Precio Venta */}
-                      <td className="px-2 py-1 text-right">{money(r.precioVenta)}</td>
+                      {/* Precio venta $/kg (editable) */}
+                      <td className="px-2 py-1 text-right">
+                      <input
+  type="number"
+  min={0}
+  step={1}
+  className="w-28 rounded border px-2 py-1 text-right"
+  value={r.precioVenta === 0 ? "" : r.precioVenta}
+  onChange={(e) => {
+    // Solo actualiza el valor en memoria temporal sin validar
+    const n = [...lines];
+    n[i].precioVenta = e.target.value === "" ? 0 : Number(e.target.value);
+    setLines(n);
+  }}
+  onBlur={(e) => {
+    // Cuando tabula o sale del campo -> validar
+    updateLine(i, "precioVenta", e.target.value);
+  }}
+  disabled={r.isEspecial || r.isBloqueado}
+
+                        />
+                      </td>
 
                       {/* $ Presentación */}
                       <td className="px-2 py-1 text-right">{money(precioPresentacion)}</td>
@@ -947,48 +1052,48 @@ export default function NotaVentaPage() {
           }
 
           /* Ocultar columnas en impresión */
-thead tr th:nth-child(3),
-thead tr th:nth-child(5),
-thead tr th:nth-child(6),
-thead tr th:nth-child(10),
-tbody tr td:nth-child(3),
-tbody tr td:nth-child(5),
-tbody tr td:nth-child(6),
-tbody tr td:nth-child(10) {
-  display: none !important;
-}
+          thead tr th:nth-child(3),
+          thead tr th:nth-child(5),
+          thead tr th:nth-child(6),
+          thead tr th:nth-child(10),
+          tbody tr td:nth-child(3),
+          tbody tr td:nth-child(5),
+          tbody tr td:nth-child(6),
+          tbody tr td:nth-child(10) {
+            display: none !important;
+          }
 
-/* Estilos por columna (contando todas las columnas originales) */
-th:nth-child(1), td:nth-child(1) { /* Código */
-  width: 70px !important;
-  font-size: 10px !important;
-  text-align: left !important;
-}
+          /* Estilos por columna (contando todas las columnas originales) */
+          th:nth-child(1), td:nth-child(1) { /* Código */
+            width: 70px !important;
+            font-size: 10px !important;
+            text-align: left !important;
+          }
 
-th:nth-child(2), td:nth-child(2) { /* Descripción */
-  width: auto !important;
-  white-space: normal !important;
-}
+          th:nth-child(2), td:nth-child(2) { /* Descripción */
+            width: auto !important;
+            white-space: normal !important;
+          }
 
-th:nth-child(4), td:nth-child(4) { /* Cantidad */
-  width: 60px !important;
-  text-align: center !important;
-}
+          th:nth-child(4), td:nth-child(4) { /* Cantidad */
+            width: 60px !important;
+            text-align: center !important;
+          }
 
-th:nth-child(7), td:nth-child(7) { /* Precio venta */
-  width: 100px !important;
-  text-align: right !important;
-}
+          th:nth-child(7), td:nth-child(7) { /* Precio venta */
+            width: 100px !important;
+            text-align: right !important;
+          }
 
-th:nth-child(8), td:nth-child(8) { /* $ Presentación */
-  width: 120px !important;
-  text-align: right !important;
-}
+          th:nth-child(8), td:nth-child(8) { /* $ Presentación */
+            width: 120px !important;
+            text-align: right !important;
+          }
 
-th:nth-child(9), td:nth-child(9) { /* Total */
-  width: 120px !important;
-  text-align: right !important;
-}
+          th:nth-child(9), td:nth-child(9) { /* Total */
+            width: 120px !important;
+            text-align: right !important;
+          }
 
           /* Totales */
           tfoot tr td {
@@ -1015,3 +1120,4 @@ th:nth-child(9), td:nth-child(9) { /* Total */
     </>
   );
 }
+

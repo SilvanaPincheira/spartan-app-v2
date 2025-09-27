@@ -96,6 +96,35 @@ export default function ComodatosMenu() {
             </svg>
           </div>
         </Link>
+        {/* Card: Solicitud de Retiro de Equipos */}
+<Link
+  href="/comodatos/solicitud-de-retiro"
+  className="group block rounded-2xl border bg-white p-6 shadow-sm ring-1 ring-black/5 transition hover:shadow-md"
+>
+  <div className="flex items-center justify-between">
+    <h2 className="text-xl font-semibold text-[#2B6CFF]">
+      Solicitud de Retiro
+    </h2>
+    <span className="text-3xl">📦</span>
+  </div>
+  <p className="mt-2 text-sm text-zinc-600">
+    Crea una solicitud de retiro de equipos, selecciona comodatos históricos y envíala a Servicio Técnico.
+  </p>
+  <div className="mt-4 inline-flex items-center gap-2 text-[#2B6CFF]">
+    <span className="underline underline-offset-4">Ir al módulo</span>
+    <svg
+      className="h-4 w-4 transition group-hover:translate-x-0.5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path d="M5 12h14" />
+      <path d="m12 5 7 7-7 7" />
+    </svg>
+  </div>
+</Link>
+
       </div>
     </div>
   );
