@@ -7,6 +7,10 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 function sanitizeRut(rut: string) {
   return (rut || "").replace(/[^0-9Kk]/g, "").toUpperCase();
 }
+function rutBase(rut: string) {
+  // Saca sufijos de sucursales (ej: 76580785-9B → 76580785-9)
+  return rut.replace(/[^0-9Kk-]/g, "").toUpperCase();
+}
 function parseDateLike(d: any): Date | null {
   if (!d) return null;
   if (typeof d === "number") return new Date(Math.round((d - 25569) * 86400 * 1000)); // Excel serial
@@ -21,8 +25,6 @@ async function fetchCsv(spreadsheetId: string, gid: string) {
   const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
   const res = await fetch(url, { cache: "no-store" });
   const txt = await res.text();
-
-  // parse CSV simple
   const rows = txt.split("\n").map((r) => r.split(","));
   const headers = rows[0].map((h) => h.trim());
   return rows.slice(1).map((r) => {
@@ -40,7 +42,6 @@ export default function ClientesInactivos() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Totales KPI
   const [totalClientes, setTotalClientes] = useState(0);
   const [inactivos, setInactivos] = useState(0);
   const [pctInactivos, setPctInactivos] = useState(0);
@@ -71,39 +72,39 @@ export default function ClientesInactivos() {
         const cutoff2y = new Date();
         cutoff2y.setFullYear(cutoff2y.getFullYear() - 2);
 
-        // Consolidar ventas por RUT
+        // Consolidar ventas por RUT base
         const ultimaCompra: Record<string, Date> = {};
         for (const v of ventas) {
-          const rut = sanitizeRut(v["Rut Cliente"] || v["RUT Cliente"] || v["Rut"]);
-          const fecha = parseDateLike(
-            v["DocDate"] || v["Fecha Documento"] || v["Posting Date"] || v["Periodo"]
-          );
+          const rutFull = sanitizeRut(v["Rut Cliente"] || v["RUT Cliente"] || v["Rut"]);
+          const rut = rutBase(rutFull);
+          const fecha = parseDateLike(v["DocDate"] || v["Fecha Documento"] || v["Posting Date"]);
           if (!rut || !fecha) continue;
           if (!ultimaCompra[rut] || fecha > ultimaCompra[rut]) {
             ultimaCompra[rut] = fecha;
           }
         }
 
-        // Consolidar comodatos por RUT (vigentes últimos 2 años)
+        // Consolidar comodatos últimos 2 años por RUT base
         const comodatosByRut: Record<string, { total: number; nombre: string; email: string; ejecutivo: string }> = {};
         for (const c of comodatos) {
-          const rut = sanitizeRut(c["Rut Cliente"] || c["RUT Cliente"] || c["Rut"]);
+          const rutFull = sanitizeRut(c["Rut Cliente"] || c["RUT Cliente"] || c["Rut"]);
+          const rut = rutBase(rutFull);
           const fechaContab = parseDateLike(c["Fecha Contab"] || c["Periodo"]);
           if (!rut || !fechaContab) continue;
-          if (fechaContab < cutoff2y) continue; // solo últimos 2 años
+          if (fechaContab < cutoff2y) continue;
 
           if (!comodatosByRut[rut]) {
             comodatosByRut[rut] = {
               total: 0,
               nombre: c["Nombre Cliente"] || "",
               email: c["EMAIL_COL"] || "",
-              ejecutivo: c["Empleado ventas"] || c["Ejecutivo"] || ""
+              ejecutivo: c["Empleado ventas"] || c["Ejecutivo"] || "",
             };
           }
           comodatosByRut[rut].total += num(c["Total"]);
         }
 
-        // Construir resultado
+        // Filtrar inactivos
         const resultado: any[] = [];
         Object.entries(comodatosByRut).forEach(([rut, info]) => {
           if (!info.email || info.email.toLowerCase() !== sessionEmail.toLowerCase()) return;
@@ -125,7 +126,7 @@ export default function ClientesInactivos() {
 
         setData(resultado);
 
-        // KPIs
+        // KPIs (sin cambios)
         const totalClientesCount = Object.values(comodatosByRut).filter(
           (c) => c.email && c.email.toLowerCase() === sessionEmail.toLowerCase()
         ).length;
@@ -152,14 +153,13 @@ export default function ClientesInactivos() {
         📊 Clientes con comodatos vigentes sin compras en 6M
       </h1>
 
-      {/* Resumen KPI */}
+      {/* === KPIs (no se tocan) === */}
       {!loading && (
         <div className="grid gap-4 md:grid-cols-3 mb-6">
           <div className="rounded-2xl border bg-white p-4 shadow-sm text-center">
             <div className="text-sm text-zinc-500">Total clientes</div>
             <div className="text-2xl font-bold text-[#2B6CFF]">{totalClientes}</div>
           </div>
-
           <div className="rounded-2xl border bg-white p-4 shadow-sm text-center">
             <div className="text-sm text-zinc-500">Inactivos (6M)</div>
             <div className="text-2xl font-bold text-red-600">
@@ -169,19 +169,16 @@ export default function ClientesInactivos() {
               </span>
             </div>
           </div>
-
           <div className="rounded-2xl border bg-white p-4 shadow-sm text-center">
             <div className="text-sm text-zinc-500">Comodato vigente (24M)</div>
             <div className="text-2xl font-bold text-emerald-600">
-              {totalComodato.toLocaleString("es-CL", {
-                style: "currency",
-                currency: "CLP",
-              })}
+              {totalComodato.toLocaleString("es-CL", { style: "currency", currency: "CLP" })}
             </div>
           </div>
         </div>
       )}
 
+      {/* === Tabla === */}
       {loading ? (
         <p>Cargando…</p>
       ) : (
