@@ -12,7 +12,6 @@ export default function SeguimientoPedidos() {
   const columnasOrdenadas = [
     "empleado_ventas",
     "n_pedido",
-    "correo",
     "fecha",
     "estado_pedido_sac",
     "estado_pedido_cobranza",
@@ -31,7 +30,6 @@ export default function SeguimientoPedidos() {
   const columnasLegibles: Record<string, string> = {
     empleado_ventas: "Empleado Ventas",
     n_pedido: "N° Pedido",
-    correo: "Correo",
     fecha: "Fecha",
     estado_pedido_sac: "Estado SAC",
     estado_pedido_cobranza: "Estado Cobranza",
