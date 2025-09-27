@@ -36,16 +36,19 @@ export default function ClientesInactivos() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Obtener email del usuario logueado
   useEffect(() => {
-    (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+    const getSession = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       setSessionEmail(session?.user?.email ?? null);
-    })();
+    };
+    getSession();
   }, [supabase]);
 
   useEffect(() => {
-    if (!sessionEmail) return; // esperar email
+    if (!sessionEmail) return;
+
     (async () => {
       try {
         const ventasId = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
@@ -59,27 +62,27 @@ export default function ClientesInactivos() {
         const cutoff = new Date();
         cutoff.setMonth(cutoff.getMonth() - 6);
 
-        // Clientes activos últimos 6M
+        // Clientes activos (ventas últimos 6 meses)
         const activos = new Set<string>();
         const ultimaCompra: Record<string, Date> = {};
 
         for (const v of ventas) {
-          const rut = sanitizeRut(v["Rut Cliente"] || v["RUT Cliente"] || v["RUT"]);
-          const fecha = parseDateLike(v["DocDate"] || v["Fecha Documento"] || v["Posting Date"]);
+          const rut = sanitizeRut(v["Rut Cliente"] || v["RUT Cliente"]);
+          const fecha = parseDateLike(v["DocDate"] || v["Fecha Documento"]);
           if (!rut || !fecha) continue;
+
           if (fecha >= cutoff) activos.add(rut);
           if (!ultimaCompra[rut] || fecha > ultimaCompra[rut]) {
             ultimaCompra[rut] = fecha;
           }
         }
 
-        // Filtrar clientes inactivos por email
+        // Filtrar clientes inactivos con comodatos
         const resultado: any[] = [];
         for (const c of comodatos) {
-          const rut = sanitizeRut(c["Rut Cliente"] || c["RUT Cliente"] || c["RUT"]);
+          const rut = sanitizeRut(c["Rut Cliente"] || c["RUT Cliente"]);
           if (!rut) continue;
           if (activos.has(rut)) continue;
-          if ((c["EMAIL_COL"] || "").toLowerCase() !== sessionEmail.toLowerCase()) continue;
 
           resultado.push({
             rut,
@@ -93,7 +96,41 @@ export default function ClientesInactivos() {
           });
         }
 
-        setData(resultado);
+        // 🔹 Agrupar por RUT
+        const agrupados: Record<string, any> = {};
+        for (const r of resultado) {
+          if (!agrupados[r.rut]) {
+            agrupados[r.rut] = {
+              rut: r.rut,
+              nombre: r.nombre,
+              email: r.email,
+              ejecutivo: r.ejecutivo,
+              monto: 0,
+              ultimaCompra: r.ultimaCompra,
+            };
+          }
+          agrupados[r.rut].monto += r.monto;
+
+          // última compra más reciente
+          if (
+            r.ultimaCompra !== "—" &&
+            (!agrupados[r.rut].ultimaCompra ||
+              agrupados[r.rut].ultimaCompra === "—" ||
+              new Date(r.ultimaCompra.split("/").reverse().join("-")) >
+                new Date(
+                  agrupados[r.rut].ultimaCompra.split("/").reverse().join("-")
+                ))
+          ) {
+            agrupados[r.rut].ultimaCompra = r.ultimaCompra;
+          }
+        }
+
+        // 🔹 Filtrar por el email del usuario logueado
+        const filtrados = Object.values(agrupados).filter(
+          (d: any) => d.email === sessionEmail
+        );
+
+        setData(filtrados);
       } catch (err) {
         console.error("Error KPI:", err);
       } finally {
@@ -117,7 +154,7 @@ export default function ClientesInactivos() {
               <th className="px-2 py-1">Cliente</th>
               <th className="px-2 py-1">Email</th>
               <th className="px-2 py-1">Ejecutivo</th>
-              <th className="px-2 py-1 text-right">Monto Comodato</th>
+              <th className="px-2 py-1">Monto Comodato</th>
               <th className="px-2 py-1">Última compra</th>
             </tr>
           </thead>
@@ -125,7 +162,7 @@ export default function ClientesInactivos() {
             {data.length === 0 && (
               <tr>
                 <td colSpan={6} className="text-center py-3">
-                  ✅ No tienes clientes inactivos con comodato vigente
+                  ✅ No hay clientes inactivos con comodato vigente
                 </td>
               </tr>
             )}
