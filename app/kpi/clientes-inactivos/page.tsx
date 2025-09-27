@@ -9,13 +9,7 @@ function sanitizeRut(rut: string) {
 }
 function parseDateLike(d: any): Date | null {
   if (!d) return null;
-  // Google Sheets exporta como "M/D/YY H:mm" → ej: "1/23/25 0:00"
-  const parts = String(d).split(" ");
-  const datePart = parts[0];
-  const [m, d2, y] = datePart.split("/");
-  if (!m || !d2 || !y) return null;
-  const year = y.length === 2 ? 2000 + Number(y) : Number(y);
-  const dt = new Date(year, Number(m) - 1, Number(d2));
+  const dt = new Date(d);
   return isNaN(dt.getTime()) ? null : dt;
 }
 function num(x: any) {
@@ -35,7 +29,7 @@ async function fetchCsv(spreadsheetId: string, gid: string) {
   });
 }
 
-/* ===== Component ===== */
+/* ===== Page Component ===== */
 export default function ClientesInactivos() {
   const supabase = createClientComponentClient();
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
@@ -43,16 +37,14 @@ export default function ClientesInactivos() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setSessionEmail(data.user?.email ?? null);
-    });
-  }, [supabase]);
-
-  useEffect(() => {
-    if (!sessionEmail) return;
-
     (async () => {
       try {
+        // Obtener sesión
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        setSessionEmail(session?.user?.email || null);
+
         const ventasId = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
         const comId = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
         const ventasGid = "871602912";
@@ -61,62 +53,75 @@ export default function ClientesInactivos() {
         const ventas = await fetchCsv(ventasId, ventasGid);
         const comodatos = await fetchCsv(comId, comGid);
 
-        const cutoff = new Date();
-        cutoff.setMonth(cutoff.getMonth() - 6);
-
-        // ===== 1. Última compra por RUT consolidada =====
-        const ultimaCompra: Record<string, Date> = {};
-        const activos = new Set<string>();
-
+        /* Consolidar últimas compras por RUT */
+        const ventasByRut: Record<string, Date> = {};
         for (const v of ventas) {
           const rut = sanitizeRut(
             v["Rut Cliente"] || v["RUT Cliente"] || v["RUT"]
           );
-          const fecha = parseDateLike(
-            v["DocDate"] || v["Fecha Documento"] || v["Posting Date"]
-          );
+          const fecha = parseDateLike(v["DocDate"]);
           if (!rut || !fecha) continue;
-
-          // Guardar siempre la fecha máxima por RUT
-          const prev = ultimaCompra[rut];
-          if (!prev || fecha > prev) ultimaCompra[rut] = fecha;
-
-          // Activo si tiene compras recientes
-          if (fecha >= cutoff) activos.add(rut);
+          if (!ventasByRut[rut] || fecha > ventasByRut[rut]) {
+            ventasByRut[rut] = fecha;
+          }
         }
 
-        // ===== 2. Filtrar clientes con comodatos pero sin compras en 6M =====
-        const resultado: any[] = [];
+        /* Consolidar comodatos por RUT */
+        const comodatosByRut: Record<
+          string,
+          { nombre: string; email: string; ejecutivo: string; monto: number }
+        > = {};
         for (const c of comodatos) {
-          const rut = sanitizeRut(c["Rut Cliente"] || c["RUT"]);
+          const rut = sanitizeRut(c["Rut Cliente"] || c["RUT Cliente"] || c["RUT"]);
           if (!rut) continue;
-
-          // Filtrar por EMAIL_COL (ejecutivo)
+          const nombre = c["Nombre Cliente"] || "";
           const email = c["EMAIL_COL"] || "";
-          if (email.toLowerCase() !== sessionEmail.toLowerCase()) continue;
+          const ejecutivo = c["Empleado ventas"] || "";
+          const monto = num(c["Total"] || 0);
 
-          if (activos.has(rut)) continue; // ya compró en últimos 6M
-
-          resultado.push({
-            rut,
-            nombre: c["Nombre Cliente"] || "",
-            email,
-            ejecutivo: c["Ejecutivo"] || "",
-            monto: num(c["Total"]),
-            ultimaCompra: ultimaCompra[rut]
-              ? ultimaCompra[rut].toLocaleDateString("es-CL")
-              : "—",
-          });
+          if (!comodatosByRut[rut]) {
+            comodatosByRut[rut] = { nombre, email, ejecutivo, monto };
+          } else {
+            comodatosByRut[rut].monto += monto;
+          }
         }
 
-        setData(resultado);
+        /* Determinar clientes inactivos */
+        const cutoff = new Date();
+        cutoff.setMonth(cutoff.getMonth() - 6);
+
+        const resultado: any[] = [];
+        for (const rut in comodatosByRut) {
+          const info = comodatosByRut[rut];
+          const ultima = ventasByRut[rut] || null;
+          if (!ultima || ultima < cutoff) {
+            resultado.push({
+              rut,
+              nombre: info.nombre,
+              email: info.email,
+              ejecutivo: info.ejecutivo,
+              monto: info.monto,
+              ultimaCompra: ultima ? ultima.toLocaleDateString("es-CL") : "—",
+              estado: "🔴 Sin compras 6M",
+            });
+          }
+        }
+
+        /* Filtro por login */
+        const filtrados = sessionEmail
+          ? resultado.filter(
+              (r) => r.email?.toLowerCase() === sessionEmail.toLowerCase()
+            )
+          : resultado;
+
+        setData(filtrados);
       } catch (err) {
         console.error("Error KPI:", err);
       } finally {
         setLoading(false);
       }
     })();
-  }, [sessionEmail]);
+  }, [supabase]);
 
   return (
     <div className="p-6">
@@ -133,14 +138,15 @@ export default function ClientesInactivos() {
               <th className="px-2 py-1">Cliente</th>
               <th className="px-2 py-1">Email</th>
               <th className="px-2 py-1">Ejecutivo</th>
-              <th className="px-2 py-1">Monto Comodato</th>
+              <th className="px-2 py-1 text-right">Monto Comodato</th>
               <th className="px-2 py-1">Última compra</th>
+              <th className="px-2 py-1">Estado</th>
             </tr>
           </thead>
           <tbody>
             {data.length === 0 && (
               <tr>
-                <td colSpan={6} className="text-center py-3">
+                <td colSpan={7} className="text-center py-3">
                   ✅ No hay clientes inactivos con comodato vigente
                 </td>
               </tr>
@@ -155,6 +161,7 @@ export default function ClientesInactivos() {
                   {d.monto.toLocaleString("es-CL")}
                 </td>
                 <td className="px-2 py-1">{d.ultimaCompra}</td>
+                <td className="px-2 py-1">{d.estado}</td>
               </tr>
             ))}
           </tbody>
@@ -163,3 +170,4 @@ export default function ClientesInactivos() {
     </div>
   );
 }
+
