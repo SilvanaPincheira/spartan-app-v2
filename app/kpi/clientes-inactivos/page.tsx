@@ -1,354 +1,336 @@
+// app/kpi/clientes-inactivos/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
-/* ================= Helpers ================= */
-function sanitizeRut(rut: string) {
-  return (rut || "").toString().replace(/[^0-9Kk]/g, "").toUpperCase();
+/* ================== CONFIG ================== */
+const SHEET_ID = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
+const GID_VENTAS = "871602912";          // pestaña Ventas
+const GID_COMODATOS = "551810728";       // pestaña Comodatos Salida
+
+// Correos con vista completa (sin filtro por EMAIL_COL). Opcional.
+const ADMIN_EMAILS = new Set<string>([
+  "benjamin.beltran@spartan.cl",
+  "patricia.acuna@spartan.cl",
+  "jorge.palma@spartan.cl",
+]);
+
+/* ================== HELPERS ================== */
+function clp(n: number) {
+  return (n || 0).toLocaleString("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    maximumFractionDigits: 0,
+  });
+}
+function sanitizeRut(v: string) {
+  return (v || "").toString().replace(/[^0-9Kk]/g, "").toUpperCase();
 }
 function num(x: any) {
-  const v = Number(String(x).replace(/\./g, "").replace(/,/g, "."));
+  if (x == null) return 0;
+  const s = String(x).replace(/\./g, "").replace(/,/g, ".");
+  const v = Number(s);
   return Number.isFinite(v) ? v : 0;
 }
-
-/** CSV robusto (comillas, comas dentro, etc.) */
 function parseCsv(text: string): Record<string, string>[] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let inQuotes = false;
-  const pushCell = () => (row.push(cell), (cell = ""));
-  const pushRow = () => {
-    if (row.length) rows.push(row);
-    row = [];
-  };
-  const s = (text || "").replace(/\r/g, "");
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (s[i + 1] === '"') {
-          cell += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        cell += ch;
-      }
-    } else {
-      if (ch === '"') inQuotes = true;
-      else if (ch === ",") pushCell();
-      else if (ch === "\n") {
-        pushCell();
-        pushRow();
-      } else cell += ch;
-    }
-  }
-  if (cell.length || row.length) {
-    pushCell();
-    pushRow();
-  }
+  const rows = text.replace(/\r/g, "").split("\n");
   if (!rows.length) return [];
-  const headers = rows[0].map((h) => h.trim());
+  const headers = rows[0].split(",").map((h) => h.trim());
   const out: Record<string, string>[] = [];
   for (let i = 1; i < rows.length; i++) {
-    const r = rows[i];
-    if (!r || r.every((c) => c === "")) continue;
+    const cols = rows[i].split(",");
+    if (!cols || cols.every((c) => c.trim() === "")) continue;
     const obj: Record<string, string> = {};
-    headers.forEach((h, j) => (obj[h] = (r[j] ?? "").trim()));
+    headers.forEach((h, j) => (obj[h] = (cols[j] ?? "").trim()));
     out.push(obj);
   }
   return out;
 }
-
-async function fetchCsv(spreadsheetId: string, gid: string) {
-  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
+async function fetchCsv(sheetId: string, gid: string) {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`CSV ${res.status}`);
-  const text = await res.text();
-  return parseCsv(text);
+  return parseCsv(await res.text());
 }
 
-/** Fecha inteligente:
- * - "1/23/25 0:00" => mes/día/año
- * - "23/1/2025" => día/mes/año
- * - "2025-01-23"
- * - serial Excel (número)
+/**
+ * Fechas en Ventas vienen del estilo "1/23/25 0:00" -> mes/día/año
+ * Este parser intenta:
+ * - Date() nativo
+ * - mm/dd/yy
+ * - dd/mm/yy (fallback) si el primer número > 12
  */
 function parseSmartDate(raw: any): Date | null {
-  if (raw == null || raw === "") return null;
-
-  // Excel serial
-  if (/^\d+(\.\d+)?$/.test(String(raw))) {
-    const days = Number(raw);
-    if (!Number.isFinite(days)) return null;
-    const base = new Date(1899, 11, 30).getTime(); // Excel base
-    const ms = base + days * 86400000;
-    const d = new Date(ms);
-    return isNaN(d.getTime()) ? null : d;
-  }
-
+  if (!raw && raw !== 0) return null;
   const s = String(raw).trim();
-  // ISO
-  const iso = new Date(s);
-  if (!isNaN(iso.getTime())) return iso;
+  // Intento directo
+  const direct = new Date(s);
+  if (!isNaN(direct.getTime())) return direct;
 
-  // dd/mm/yyyy o mm/dd/yy + hora
-  const m = s.match(
-    /^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
-  );
+  // Quitar hora si viene
+  const main = s.split(" ")[0] || s;
+
+  // mm/dd/yy o mm/dd/yyyy
+  let m = main.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
   if (m) {
-    let a = Number(m[1]); // ¿día o mes?
-    let b = Number(m[2]); // ¿mes o día?
-    let y = Number(m[3]);
-    const hh = Number(m[4] || 0);
-    const mm = Number(m[5] || 0);
-    const ss = Number(m[6] || 0);
-    if (y < 100) y += 2000;
-
-    // Heurística:
-    // - si el 2do valor >12 => es mm/dd (ej: 1/23/25)
-    // - si el 1ro >12 => es dd/mm
-    // - ambiguo => por defecto dd/mm (LatAm)
-    let day: number, month: number;
-    if (b > 12) {
-      // mm/dd
-      month = a - 1;
-      day = b;
-    } else if (a > 12) {
-      // dd/mm
-      day = a;
-      month = b - 1;
-    } else {
-      // por defecto dd/mm
-      day = a;
-      month = b - 1;
+    let mm = Number(m[1]);
+    let dd = Number(m[2]);
+    let yy = Number(m[3]);
+    if (yy < 100) yy += 2000;
+    // Si mm>12, asumimos dd/mm/yy
+    if (mm > 12) {
+      const d2 = new Date(yy, dd - 1, mm);
+      return isNaN(d2.getTime()) ? null : d2;
     }
-
-    const d = new Date(y, month, day, hh, mm, ss);
-    return isNaN(d.getTime()) ? null : d;
+    const d1 = new Date(yy, mm - 1, dd);
+    return isNaN(d1.getTime()) ? null : d1;
   }
 
+  // dd-mm-yyyy
+  m = main.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (m) {
+    const dd = Number(m[1]);
+    const mm = Number(m[2]);
+    const yy = Number(m[3]);
+    const d = new Date(yy, mm - 1, dd);
+    return isNaN(d.getTime()) ? null : d;
+  }
   return null;
 }
 
-/* =================== Página =================== */
-type Row = {
+// Saca el primer email que encuentre en el row (hay hojas con columnas duplicadas EMAIL_COL)
+function getAnyEmail(row: Record<string, string>) {
+  for (const [k, v] of Object.entries(row)) {
+    if (/email/i.test(k) && String(v).trim()) return String(v).trim().toLowerCase();
+  }
+  return "";
+}
+
+function getRutFromVentas(r: Record<string, string>) {
+  return sanitizeRut(
+    r["Rut Cliente"] ??
+      r["RUT Cliente"] ??
+      r["RUT"] ??
+      r["Rut"] ??
+      ""
+  );
+}
+function getRutFromComodatos(r: Record<string, string>) {
+  return sanitizeRut(
+    r["Rut Cliente"] ??
+      r["RUT Cliente"] ??
+      r["RUT"] ??
+      r["Rut"] ??
+      ""
+  );
+}
+
+/* ================== TIPOS ================== */
+type OutRow = {
   rut: string;
   nombre: string;
   email: string;
   ejecutivo: string;
-  montoComodato24m: number;
-  ventas6m: number;
+  comodato24m: number;
   ultimaCompra: Date | null;
 };
 
+/* ================== PAGE ================== */
 export default function ClientesInactivos() {
-  const [rows, setRows] = useState<Row[]>([]);
+  const supabase = createClientComponentClient();
+  const [sessionEmail, setSessionEmail] = useState<string | null>(null);
+  const [isAdminOverride, setIsAdminOverride] = useState(false);
+
+  const [rows, setRows] = useState<OutRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState("");
+  const [err, setErr] = useState<string>("");
+
+  useEffect(() => {
+    // 1) sacar email del usuario
+    supabase.auth.getUser().then(({ data }) => {
+      setSessionEmail(data.user?.email ?? null);
+    });
+    // 2) admin override via ?all=1
+    if (typeof window !== "undefined") {
+      const u = new URL(window.location.href);
+      setIsAdminOverride(u.searchParams.get("all") === "1");
+    }
+  }, [supabase]);
 
   useEffect(() => {
     (async () => {
+      if (!sessionEmail && !isAdminOverride) {
+        // esperamos tener sesión (o all=1)
+        return;
+      }
+      setLoading(true);
+      setErr("");
+
       try {
-        setErrorMsg("");
-        setLoading(true);
+        const ventas = await fetchCsv(SHEET_ID, GID_VENTAS);
+        const comodatos = await fetchCsv(SHEET_ID, GID_COMODATOS);
 
-        // === IDs y GIDs
-        const SHEET_ID = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
-        const VENTAS_GID = "871602912"; // Ventas
-        const COMODATOS_GID = "551810728"; // Comodatos Salida
+        const today = new Date();
+        const cutoff6m = new Date(today.getFullYear(), today.getMonth() - 6, today.getDate());
+        const cutoff24m = new Date(today.getFullYear(), today.getMonth() - 24, today.getDate());
 
-        const [ventas, comodatos] = await Promise.all([
-          fetchCsv(SHEET_ID, VENTAS_GID),
-          fetchCsv(SHEET_ID, COMODATOS_GID),
-        ]);
+        const ventas6m = new Map<string, number>();       // sum venta últimos 6m por rut
+        const ultimaCompra = new Map<string, Date>();     // máx fecha venta por rut
+        const nombres = new Map<string, string>();        // nombre por rut
+        const emails = new Map<string, string>();         // email por rut (de ventas o comodatos)
+        const ejecutivos = new Map<string, string>();     // ejecutivo por rut
 
-        // Rangos
-        const hoy = new Date();
-        const desde6m = new Date(hoy.getFullYear(), hoy.getMonth() - 6, hoy.getDate());
-        const desde24m = new Date(hoy.getFullYear(), hoy.getMonth() - 24, hoy.getDate());
-
-        // Acumuladores por RUT
-        const ventas6mByRut = new Map<string, number>();
-        const ultimaCompraByRut = new Map<string, Date>();
-        const nombreByRut = new Map<string, string>();
-        const emailByRut = new Map<string, string>();
-        const ejecutivoByRut = new Map<string, string>();
-
-        // ===== VENTAS: sumar 6M y última compra (sin limitar) =====
-        for (const r of ventas) {
-          const rut = sanitizeRut(
-            r["Rut Cliente"] ||
-              r["RUT Cliente"] ||
-              r["RUT"] ||
-              r["Rut"] ||
-              r["RUT Cliente "]
-          );
+        // ===== VENTAS =====
+        for (const v of ventas) {
+          const rut = getRutFromVentas(v);
           if (!rut) continue;
 
-          // captura nombre/ejecutivo/email por si sirven mejor que Comodatos
-          const nombre = r["Nombre Cliente"] || "";
-          const ej =
-            r["Èmpleado Ventas"] ||
-            r["Empleado ventas"] ||
-            r["Empleado Ventas"] ||
+          // nombre / email / ejecutivo
+          if (v["Nombre Cliente"]) nombres.set(rut, v["Nombre Cliente"].trim());
+          const mail = getAnyEmail(v);
+          if (mail && !emails.has(rut)) emails.set(rut, mail);
+          const eje =
+            v["Èmpleado Ventas"] ??
+            v["Empleado ventas"] ??
+            v["Empleado Ventas"] ??
             "";
-          const mail = r["EMAIL_COL"] || "";
+          if (eje && !ejecutivos.has(rut)) ejecutivos.set(rut, eje.trim());
 
-          if (nombre && !nombreByRut.has(rut)) nombreByRut.set(rut, nombre);
-          if (ej && !ejecutivoByRut.has(rut)) ejecutivoByRut.set(rut, ej);
-          if (mail && !emailByRut.has(rut)) emailByRut.set(rut, mail);
-
-          const fecha =
-            parseSmartDate(r["DocDate"]) ||
-            parseSmartDate(r["Fecha Documento"]) ||
-            parseSmartDate(r["Posting Date"]) ||
-            parseSmartDate(r["Fecha Doc."]) ||
-            parseSmartDate(r["Fecha"]);
-          if (!fecha) continue;
-
-          // última compra (máxima)
-          const prev = ultimaCompraByRut.get(rut);
-          if (!prev || fecha > prev) ultimaCompraByRut.set(rut, fecha);
-
-          // suma 6M (si corresponde)
-          if (fecha >= desde6m) {
-            const venta =
-              num(r["Global Venta"]) ||
-              num(r["Total Venta"]) ||
-              num(r["Total"]) ||
-              0;
-            ventas6mByRut.set(rut, (ventas6mByRut.get(rut) || 0) + venta);
+          // fechas y montos
+          const f = parseSmartDate(v["DocDate"] ?? v["Fecha Documento"] ?? v["Posting Date"]);
+          if (f) {
+            if (!ultimaCompra.has(rut) || f > (ultimaCompra.get(rut) as Date))
+              ultimaCompra.set(rut, f);
+            if (f >= cutoff6m) {
+              const tot = num(v["Global Venta"] ?? v["Total Venta"] ?? v["PV antes del descuento"]);
+              ventas6m.set(rut, (ventas6m.get(rut) || 0) + tot);
+            }
           }
         }
 
-        // ===== COMODATOS: vigentes (24m) por RUT =====
-        const comodato24mByRut = new Map<string, number>();
+        // ===== COMODATOS (últimos 24m) =====
+        const comodato24m = new Map<string, number>();
         for (const c of comodatos) {
-          const rut = sanitizeRut(
-            c["Rut Cliente"] || c["RUT Cliente"] || c["RUT"] || c["Rut"]
-          );
+          const rut = getRutFromComodatos(c);
           if (!rut) continue;
 
-          // Capturar nombre/email/ejecutivo desde comodatos si faltan
-          const nombre = c["Nombre Cliente"] || "";
-          const mail = c["EMAIL_COL"] || "";
-          const ej = c["Ejecutivo"] || "";
+          // nombre / email / ejecutivo
+          if (c["Nombre Cliente"]) nombres.set(rut, c["Nombre Cliente"].trim());
+          const mail = getAnyEmail(c);
+          if (mail && !emails.has(rut)) emails.set(rut, mail); // tomar del que exista
+          if (c["Ejecutivo"] && !ejecutivos.has(rut)) ejecutivos.set(rut, c["Ejecutivo"].trim());
 
-          if (nombre && !nombreByRut.has(rut)) nombreByRut.set(rut, nombre);
-          if (mail && !emailByRut.has(rut)) emailByRut.set(rut, mail);
-          if (ej && !ejecutivoByRut.has(rut)) ejecutivoByRut.set(rut, ej);
-
-          const fecha =
-            parseSmartDate(c["Fecha Contab"]) ||
-            parseSmartDate(c["Fecha Conta"]) ||
-            parseSmartDate(c["Fecha"]);
-          if (!fecha || fecha < desde24m) continue; // solo 24m
+          const f = parseSmartDate(
+            c["Fecha Contab"] ?? c["Fecha Contabilización"] ?? c["Periodo"]
+          );
+          if (!f || f < cutoff24m) continue;
 
           const total = num(c["Total"]);
-          if (!total) continue;
-
-          comodato24mByRut.set(rut, (comodato24mByRut.get(rut) || 0) + total);
+          comodato24m.set(rut, (comodato24m.get(rut) || 0) + total);
         }
 
-        // ===== Construcción del KPI =====
-        const result: Row[] = [];
-        comodato24mByRut.forEach((montoComodato24m, rut) => {
-          if (montoComodato24m <= 0) return;
+        // ===== Consolidación y filtro por sesión =====
+        const sessionMail = (sessionEmail ?? "").toLowerCase();
+        const canSeeAll = isAdminOverride || (sessionMail && ADMIN_EMAILS.has(sessionMail));
 
-          const ventas6m = ventas6mByRut.get(rut) || 0;
-          if (ventas6m > 0) return; // solo sin compras en 6M
+        const result: OutRow[] = [];
+        comodato24m.forEach((monto, rut) => {
+          const venta6m = ventas6m.get(rut) || 0;
+          if (monto <= 0 || venta6m > 0) return; // queremos: tiene comodato y NO compró en 6m
+
+          const emailRut = (emails.get(rut) || "").toLowerCase();
+
+          // filtro por cartera (EMAIL_COL)
+          if (!canSeeAll) {
+            if (!emailRut) return;
+            if (emailRut !== sessionMail) return;
+          }
 
           result.push({
             rut,
-            nombre: nombreByRut.get(rut) || "—",
-            email: emailByRut.get(rut) || "—",
-            ejecutivo: ejecutivoByRut.get(rut) || "—",
-            montoComodato24m,
-            ventas6m,
-            ultimaCompra: ultimaCompraByRut.get(rut) || null,
+            nombre: nombres.get(rut) || "—",
+            email: emails.get(rut) || "—",
+            ejecutivo: ejecutivos.get(rut) || "—",
+            comodato24m: monto,
+            ultimaCompra: ultimaCompra.get(rut) || null,
           });
         });
 
-        // Orden: mayor comodato
-        result.sort((a, b) => b.montoComodato24m - a.montoComodato24m);
-
+        // ordenar por monto comodato desc
+        result.sort((a, b) => (b.comodato24m || 0) - (a.comodato24m || 0));
         setRows(result);
       } catch (e: any) {
-        console.error(e);
-        setErrorMsg(e?.message || "Error cargando KPI");
+        setErr(e?.message || "Error cargando KPI.");
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [sessionEmail, isAdminOverride]);
 
-  const totalClientes = useMemo(() => rows.length, [rows]);
+  const totalComodatos = useMemo(
+    () => rows.reduce((a, r) => a + (r.comodato24m || 0), 0),
+    [rows]
+  );
 
   return (
     <div className="p-6">
-      <h1 className="text-xl font-bold text-[#2B6CFF] mb-4">
+      <h1 className="text-xl font-bold text-[#2B6CFF] mb-3">
         📊 Clientes con comodatos vigentes sin compras en 6M
       </h1>
 
-      {errorMsg && (
-        <div className="mb-3 rounded border border-red-300 bg-red-50 p-2 text-sm text-red-700">
-          {errorMsg}
+      {err && (
+        <div className="mb-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {err}
         </div>
       )}
 
       {loading ? (
-        <p>Cargando…</p>
+        <div>Cargando…</div>
+      ) : rows.length === 0 ? (
+        <div className="rounded border bg-white px-3 py-2 text-sm">
+          ✅ No hay clientes inactivos con comodato vigente para tu cartera.
+        </div>
       ) : (
-        <div className="overflow-x-auto">
+        <>
           <div className="mb-2 text-sm text-zinc-600">
-            {totalClientes.toLocaleString()} clientes
+            Registros: <strong>{rows.length.toLocaleString("es-CL")}</strong> ·
+            &nbsp;Comodato 24M total: <strong>{clp(totalComodatos)}</strong>
           </div>
-          <table className="min-w-full text-sm border">
-            <thead className="bg-zinc-100">
-              <tr>
-                <th className="px-2 py-1 text-left">RUT</th>
-                <th className="px-2 py-1 text-left">Cliente</th>
-                <th className="px-2 py-1 text-left">Email</th>
-                <th className="px-2 py-1 text-left">Ejecutivo</th>
-                <th className="px-2 py-1 text-right">Comodato 24M</th>
-                <th className="px-2 py-1 text-left">Última compra</th>
-                <th className="px-2 py-1 text-left">Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
+
+          <div className="overflow-x-auto rounded border bg-white">
+            <table className="min-w-full text-sm">
+              <thead className="bg-zinc-100 text-zinc-700">
                 <tr>
-                  <td colSpan={7} className="px-2 py-4 text-center text-zinc-600">
-                    ✅ No hay clientes inactivos con comodato vigente
-                  </td>
+                  <th className="px-2 py-2 text-left">RUT</th>
+                  <th className="px-2 py-2 text-left">Cliente</th>
+                  <th className="px-2 py-2 text-left">Email</th>
+                  <th className="px-2 py-2 text-left">Ejecutivo</th>
+                  <th className="px-2 py-2 text-right">Comodato 24M</th>
+                  <th className="px-2 py-2 text-left">Última compra</th>
+                  <th className="px-2 py-2 text-left">Estado</th>
                 </tr>
-              ) : (
-                rows.map((r) => (
+              </thead>
+              <tbody>
+                {rows.map((r) => (
                   <tr key={r.rut} className="border-t">
                     <td className="px-2 py-1">{r.rut}</td>
                     <td className="px-2 py-1">{r.nombre}</td>
                     <td className="px-2 py-1">{r.email}</td>
                     <td className="px-2 py-1">{r.ejecutivo}</td>
-                    <td className="px-2 py-1 text-right">
-                      {r.montoComodato24m.toLocaleString("es-CL")}
-                    </td>
+                    <td className="px-2 py-1 text-right">{clp(r.comodato24m)}</td>
                     <td className="px-2 py-1">
                       {r.ultimaCompra
                         ? r.ultimaCompra.toLocaleDateString("es-CL")
                         : "—"}
                     </td>
-                    <td className="px-2 py-1">
-                      <span className="text-red-600">🔴 Sin compras 6M</span>
-                    </td>
+                    <td className="px-2 py-1 text-red-600">🔴 Sin compras 6M</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );
