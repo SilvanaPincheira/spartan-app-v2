@@ -1,172 +1,193 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
-/* ===== Helpers ===== */
-function sanitizeRut(rut: string) {
-  return (rut || "").replace(/[^0-9Kk]/g, "").toUpperCase();
-}
-function parseDateLike(d: any): Date | null {
-  if (!d) return null;
-  const dt = new Date(d);
-  return isNaN(dt.getTime()) ? null : dt;
-}
-function num(x: any) {
-  const v = Number(x);
-  return Number.isFinite(v) ? v : 0;
-}
-async function fetchCsv(spreadsheetId: string, gid: string) {
-  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
-  const res = await fetch(url, { cache: "no-store" });
-  const txt = await res.text();
-  const rows = txt.split("\n").map((r) => r.split(","));
-  const headers = rows[0];
-  return rows.slice(1).map((r) => {
-    const obj: any = {};
-    headers.forEach((h, i) => (obj[h.trim()] = (r[i] || "").trim()));
-    return obj;
-  });
-}
+export default function SeguimientoPedidos() {
+  const [pedidos, setPedidos] = useState<any[]>([]);
+  const [filtro, setFiltro] = useState("");
+  const [busqueda, setBusqueda] = useState("");
+  const [fechaInicio, setFechaInicio] = useState("");
+  const [fechaFin, setFechaFin] = useState("");
 
-/* ===== Page Component ===== */
-export default function ClientesInactivos() {
-  const supabase = createClientComponentClient();
-  const [sessionEmail, setSessionEmail] = useState<string | null>(null);
-  const [data, setData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const columnasOrdenadas = [
+    "empleado_ventas",
+    "n_pedido",
+    "correo",
+    "fecha",
+    "estado_pedido_sac",
+    "estado_pedido_cobranza",
+    "estado_pedido_bodega",
+    "folio_gdd",
+    "folio_fe",
+    "nro_ot",
+    "transporte",
+    "indicador",
+    "cardcode",
+    "cardname",
+    "direccion_despacho",
+    "oc",
+  ];
+
+  const columnasLegibles: Record<string, string> = {
+    empleado_ventas: "Empleado Ventas",
+    n_pedido: "N° Pedido",
+    correo: "Correo",
+    fecha: "Fecha",
+    estado_pedido_sac: "Estado SAC",
+    estado_pedido_cobranza: "Estado Cobranza",
+    estado_pedido_bodega: "Estado Bodega",
+    folio_gdd: "Folio GDD",
+    folio_fe: "Folio FE",
+    nro_ot: "N° OT",
+    transporte: "Transporte",
+    indicador: "Indicador",
+    cardcode: "Código Cliente",
+    cardname: "Nombre Cliente",
+    direccion_despacho: "Dirección Despacho",
+    oc: "OC",
+  };
+
+  const formatearFecha = (valor: string) => {
+    if (!valor) return "";
+    const partes = valor.includes("-") ? valor.split("-") : [];
+    if (partes.length === 3) {
+      if (partes[0].length === 4) {
+        return `${partes[2]}/${partes[1]}/${partes[0]}`;
+      } else {
+        return `${partes[0]}/${partes[1]}/${partes[2]}`;
+      }
+    }
+    return valor;
+  };
+
+  const parseFecha = (valor: string): Date | null => {
+    if (!valor) return null;
+    const partes = valor.split("-");
+    if (partes.length === 3) {
+      if (partes[0].length === 4) {
+        // yyyy-mm-dd
+        return new Date(+partes[0], +partes[1] - 1, +partes[2]);
+      } else {
+        // dd-mm-yyyy
+        return new Date(+partes[2], +partes[1] - 1, +partes[0]);
+      }
+    }
+    return null;
+  };
+
+  const pintarEstado = (estado: string) => {
+    if (!estado) return "";
+    const e = estado.toLowerCase();
+    if (e.includes("pendiente")) return "bg-red-100 text-red-700 font-semibold";
+    if (e.includes("aprobado") || e.includes("completado") || e.includes("liberado"))
+      return "bg-green-100 text-green-700 font-semibold";
+    if (e.includes("proceso")) return "bg-yellow-100 text-yellow-700 font-semibold";
+    return "";
+  };
 
   useEffect(() => {
-    (async () => {
-      try {
-        // Obtener sesión
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        setSessionEmail(session?.user?.email || null);
+    fetch("/api/logistica/seguimiento")
+      .then((res) => res.json())
+      .then((data) => setPedidos(data.data || []));
+  }, []);
 
-        const ventasId = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
-        const comId = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
-        const ventasGid = "871602912";
-        const comGid = "551810728";
+  const filtrarPedidos = pedidos.filter((p) => {
+    const coincideFiltro =
+      filtro === "" ||
+      p["estado_pedido_sac"] === filtro ||
+      p["estado_pedido_cobranza"] === filtro ||
+      p["estado_pedido_bodega"] === filtro;
 
-        const ventas = await fetchCsv(ventasId, ventasGid);
-        const comodatos = await fetchCsv(comId, comGid);
+    const coincideBusqueda =
+      busqueda === "" ||
+      Object.values(p).some((val) =>
+        String(val).toLowerCase().includes(busqueda.toLowerCase())
+      );
 
-        /* Consolidar últimas compras por RUT */
-        const ventasByRut: Record<string, Date> = {};
-        for (const v of ventas) {
-          const rut = sanitizeRut(
-            v["Rut Cliente"] || v["RUT Cliente"] || v["RUT"]
-          );
-          const fecha = parseDateLike(v["DocDate"]);
-          if (!rut || !fecha) continue;
-          if (!ventasByRut[rut] || fecha > ventasByRut[rut]) {
-            ventasByRut[rut] = fecha;
-          }
-        }
+    let coincideFecha = true;
+    const fechaPedido = parseFecha(p["fecha"]);
 
-        /* Consolidar comodatos por RUT */
-        const comodatosByRut: Record<
-          string,
-          { nombre: string; email: string; ejecutivo: string; monto: number }
-        > = {};
-        for (const c of comodatos) {
-          const rut = sanitizeRut(c["Rut Cliente"] || c["RUT Cliente"] || c["RUT"]);
-          if (!rut) continue;
-          const nombre = c["Nombre Cliente"] || "";
-          const email = c["EMAIL_COL"] || "";
-          const ejecutivo = c["Empleado ventas"] || "";
-          const monto = num(c["Total"] || 0);
+    if (fechaInicio && fechaPedido) {
+      coincideFecha = coincideFecha && fechaPedido >= new Date(fechaInicio);
+    }
+    if (fechaFin && fechaPedido) {
+      coincideFecha = coincideFecha && fechaPedido <= new Date(fechaFin);
+    }
 
-          if (!comodatosByRut[rut]) {
-            comodatosByRut[rut] = { nombre, email, ejecutivo, monto };
-          } else {
-            comodatosByRut[rut].monto += monto;
-          }
-        }
-
-        /* Determinar clientes inactivos */
-        const cutoff = new Date();
-        cutoff.setMonth(cutoff.getMonth() - 6);
-
-        const resultado: any[] = [];
-        for (const rut in comodatosByRut) {
-          const info = comodatosByRut[rut];
-          const ultima = ventasByRut[rut] || null;
-          if (!ultima || ultima < cutoff) {
-            resultado.push({
-              rut,
-              nombre: info.nombre,
-              email: info.email,
-              ejecutivo: info.ejecutivo,
-              monto: info.monto,
-              ultimaCompra: ultima ? ultima.toLocaleDateString("es-CL") : "—",
-              estado: "🔴 Sin compras 6M",
-            });
-          }
-        }
-
-        /* Filtro por login */
-        const filtrados = sessionEmail
-          ? resultado.filter(
-              (r) => r.email?.toLowerCase() === sessionEmail.toLowerCase()
-            )
-          : resultado;
-
-        setData(filtrados);
-      } catch (err) {
-        console.error("Error KPI:", err);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [supabase]);
+    return coincideFiltro && coincideBusqueda && coincideFecha;
+  });
 
   return (
     <div className="p-6">
-      <h1 className="text-xl font-bold text-[#2B6CFF] mb-4">
-        📊 Clientes con comodatos vigentes sin compras en 6M
-      </h1>
-      {loading ? (
-        <p>Cargando…</p>
-      ) : (
-        <table className="min-w-full text-sm border">
-          <thead className="bg-zinc-100">
+      <h1 className="text-xl font-bold mb-4">🚚 Seguimiento de Pedidos</h1>
+
+      {/* Filtros */}
+      <div className="flex flex-wrap gap-4 mb-4 items-center">
+        <input
+          type="text"
+          placeholder="🔍 Buscar pedido, cliente, etc..."
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          className="border p-2 rounded w-1/3"
+        />
+        <select
+          value={filtro}
+          onChange={(e) => setFiltro(e.target.value)}
+          className="border p-2 rounded"
+        >
+          <option value="">Todos los estados</option>
+          <option value="Pendiente">Pendiente</option>
+          <option value="En Proceso">En Proceso</option>
+          <option value="Aprobado">Aprobado</option>
+          <option value="Completado">Completado</option>
+          <option value="Liberado">Liberado</option>
+        </select>
+        <input
+          type="date"
+          value={fechaInicio}
+          onChange={(e) => setFechaInicio(e.target.value)}
+          className="border p-2 rounded"
+        />
+        <input
+          type="date"
+          value={fechaFin}
+          onChange={(e) => setFechaFin(e.target.value)}
+          className="border p-2 rounded"
+        />
+      </div>
+
+      {/* Tabla */}
+      <div className="overflow-x-auto">
+        <table className="min-w-full border border-gray-300 text-sm">
+          <thead className="bg-gray-100">
             <tr>
-              <th className="px-2 py-1">RUT</th>
-              <th className="px-2 py-1">Cliente</th>
-              <th className="px-2 py-1">Email</th>
-              <th className="px-2 py-1">Ejecutivo</th>
-              <th className="px-2 py-1 text-right">Monto Comodato</th>
-              <th className="px-2 py-1">Última compra</th>
-              <th className="px-2 py-1">Estado</th>
+              {columnasOrdenadas.map((col) => (
+                <th key={col} className="border p-2">
+                  {columnasLegibles[col] || col}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {data.length === 0 && (
-              <tr>
-                <td colSpan={7} className="text-center py-3">
-                  ✅ No hay clientes inactivos con comodato vigente
-                </td>
-              </tr>
-            )}
-            {data.map((d, i) => (
-              <tr key={i} className="border-t">
-                <td className="px-2 py-1">{d.rut}</td>
-                <td className="px-2 py-1">{d.nombre}</td>
-                <td className="px-2 py-1">{d.email}</td>
-                <td className="px-2 py-1">{d.ejecutivo}</td>
-                <td className="px-2 py-1 text-right">
-                  {d.monto.toLocaleString("es-CL")}
-                </td>
-                <td className="px-2 py-1">{d.ultimaCompra}</td>
-                <td className="px-2 py-1">{d.estado}</td>
+            {filtrarPedidos.map((row, i) => (
+              <tr key={i} className="hover:bg-gray-50">
+                {columnasOrdenadas.map((col, j) => (
+                  <td
+                    key={j}
+                    className={`border p-2 ${
+                      col.includes("estado") ? pintarEstado(row[col]) : ""
+                    }`}
+                  >
+                    {col === "fecha"
+                      ? formatearFecha(row[col])
+                      : row[col]}
+                  </td>
+                ))}
               </tr>
             ))}
           </tbody>
         </table>
-      )}
+      </div>
     </div>
   );
 }
