@@ -9,7 +9,13 @@ function sanitizeRut(rut: string) {
 }
 function parseDateLike(d: any): Date | null {
   if (!d) return null;
-  const dt = new Date(d);
+  // Google Sheets exporta como "M/D/YY H:mm" → ej: "1/23/25 0:00"
+  const parts = String(d).split(" ");
+  const datePart = parts[0];
+  const [m, d2, y] = datePart.split("/");
+  if (!m || !d2 || !y) return null;
+  const year = y.length === 2 ? 2000 + Number(y) : Number(y);
+  const dt = new Date(year, Number(m) - 1, Number(d2));
   return isNaN(dt.getTime()) ? null : dt;
 }
 function num(x: any) {
@@ -37,13 +43,9 @@ export default function ClientesInactivos() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const getSession = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      setSessionEmail(session?.user?.email ?? null);
-    };
-    getSession();
+    supabase.auth.getUser().then(({ data }) => {
+      setSessionEmail(data.user?.email ?? null);
+    });
   }, [supabase]);
 
   useEffect(() => {
@@ -62,32 +64,43 @@ export default function ClientesInactivos() {
         const cutoff = new Date();
         cutoff.setMonth(cutoff.getMonth() - 6);
 
-        // Clientes activos (ventas últimos 6 meses)
-        const activos = new Set<string>();
+        // ===== 1. Última compra por RUT consolidada =====
         const ultimaCompra: Record<string, Date> = {};
+        const activos = new Set<string>();
 
         for (const v of ventas) {
-          const rut = sanitizeRut(v["Rut Cliente"] || v["RUT Cliente"]);
-          const fecha = parseDateLike(v["DocDate"] || v["Fecha Documento"]);
+          const rut = sanitizeRut(
+            v["Rut Cliente"] || v["RUT Cliente"] || v["RUT"]
+          );
+          const fecha = parseDateLike(
+            v["DocDate"] || v["Fecha Documento"] || v["Posting Date"]
+          );
           if (!rut || !fecha) continue;
 
+          // Guardar siempre la fecha máxima por RUT
+          const prev = ultimaCompra[rut];
+          if (!prev || fecha > prev) ultimaCompra[rut] = fecha;
+
+          // Activo si tiene compras recientes
           if (fecha >= cutoff) activos.add(rut);
-          if (!ultimaCompra[rut] || fecha > ultimaCompra[rut]) {
-            ultimaCompra[rut] = fecha;
-          }
         }
 
-        // Filtrar clientes inactivos con comodatos
+        // ===== 2. Filtrar clientes con comodatos pero sin compras en 6M =====
         const resultado: any[] = [];
         for (const c of comodatos) {
-          const rut = sanitizeRut(c["Rut Cliente"] || c["RUT Cliente"]);
+          const rut = sanitizeRut(c["Rut Cliente"] || c["RUT"]);
           if (!rut) continue;
-          if (activos.has(rut)) continue;
+
+          // Filtrar por EMAIL_COL (ejecutivo)
+          const email = c["EMAIL_COL"] || "";
+          if (email.toLowerCase() !== sessionEmail.toLowerCase()) continue;
+
+          if (activos.has(rut)) continue; // ya compró en últimos 6M
 
           resultado.push({
             rut,
             nombre: c["Nombre Cliente"] || "",
-            email: c["EMAIL_COL"] || "",
+            email,
             ejecutivo: c["Ejecutivo"] || "",
             monto: num(c["Total"]),
             ultimaCompra: ultimaCompra[rut]
@@ -96,41 +109,7 @@ export default function ClientesInactivos() {
           });
         }
 
-        // 🔹 Agrupar por RUT
-        const agrupados: Record<string, any> = {};
-        for (const r of resultado) {
-          if (!agrupados[r.rut]) {
-            agrupados[r.rut] = {
-              rut: r.rut,
-              nombre: r.nombre,
-              email: r.email,
-              ejecutivo: r.ejecutivo,
-              monto: 0,
-              ultimaCompra: r.ultimaCompra,
-            };
-          }
-          agrupados[r.rut].monto += r.monto;
-
-          // última compra más reciente
-          if (
-            r.ultimaCompra !== "—" &&
-            (!agrupados[r.rut].ultimaCompra ||
-              agrupados[r.rut].ultimaCompra === "—" ||
-              new Date(r.ultimaCompra.split("/").reverse().join("-")) >
-                new Date(
-                  agrupados[r.rut].ultimaCompra.split("/").reverse().join("-")
-                ))
-          ) {
-            agrupados[r.rut].ultimaCompra = r.ultimaCompra;
-          }
-        }
-
-        // 🔹 Filtrar por el email del usuario logueado
-        const filtrados = Object.values(agrupados).filter(
-          (d: any) => d.email === sessionEmail
-        );
-
-        setData(filtrados);
+        setData(resultado);
       } catch (err) {
         console.error("Error KPI:", err);
       } finally {
