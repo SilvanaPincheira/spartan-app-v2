@@ -1,175 +1,223 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-/* ===================== HELPERS ===================== */
+/* ===== Helpers ===== */
+const normEmail = (s: string) => (s || "").trim().toLowerCase();
 function sanitizeRut(rut: string) {
   return (rut || "").replace(/[^0-9Kk]/g, "").toUpperCase();
 }
 function parseDateLike(d: any): Date | null {
   if (!d) return null;
-  if (d instanceof Date) return d;
-  const t = Date.parse(String(d));
-  return isNaN(t) ? null : new Date(t);
+  const dt = new Date(d);
+  return isNaN(dt.getTime()) ? null : dt;
 }
 function num(x: any) {
   const v = Number(x);
   return Number.isFinite(v) ? v : 0;
 }
-/* Parser CSV robusto */
-function parseCsv(text: string): Record<string, any>[] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let inQuotes = false;
-
-  const pushCell = () => (row.push(cell), (cell = ""));
-  const pushRow = () => (row.length ? rows.push(row) : 0, (row = []));
-
-  const s = text.replace(/\r/g, "");
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (s[i + 1] === '"') (cell += '"'), i++;
-        else inQuotes = false;
-      } else cell += ch;
-    } else {
-      if (ch === '"') inQuotes = true;
-      else if (ch === ",") pushCell();
-      else if (ch === "\n") (pushCell(), pushRow());
-      else cell += ch;
-    }
-  }
-  if (cell.length || row.length) (pushCell(), pushRow());
-  if (!rows.length) return [];
-
-  const headers = rows[0].map((h) => h.trim());
-  const out: Record<string, any>[] = [];
-  for (let i = 1; i < rows.length; i++) {
-    const r = rows[i];
-    if (r.every((c) => c === "")) continue;
-    const obj: any = {};
-    headers.forEach((h, j) => (obj[h] = r[j] ?? ""));
-    out.push(obj);
-  }
-  return out;
-}
-async function fetchCsv(spreadsheetId: string, gid: string | number) {
+async function fetchCsv(spreadsheetId: string, gid: string) {
   const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
   const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`CSV ${res.status}`);
-  const text = await res.text();
-  return parseCsv(text);
-}
-function normalizeGoogleSheetUrl(url: string) {
-  const m = url.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-  const id = m ? m[1] : "";
-  let gid = "0";
-  const g = url.match(/[?&#]gid=([0-9]+)/);
-  if (g) gid = g[1];
-  return { id, gid };
+  const txt = await res.text();
+
+  // CSV simple
+  const rows = txt.split("\n").map((r) => r.split(","));
+  const headers = rows[0];
+  return rows.slice(1).map((r) => {
+    const obj: any = {};
+    headers.forEach((h, i) => (obj[h.trim()] = (r[i] || "").trim()));
+    return obj;
+  });
 }
 
-/* ===================== COMPONENTE ===================== */
+/* ===== Page ===== */
 export default function ClientesInactivos() {
+  // URLs (si cambian en el futuro, basta actualizar aquí)
+  const ventasId = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
+  const comId = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
+  const ventasGid = "871602912";
+  const comGid = "551810728";
+
+  // estado
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+
+  // correo del usuario (persistente)
+  const [email, setEmail] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("kpi.email") || "";
+  });
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("kpi.email", email);
+    }
+  }, [email]);
+
+  // modo admin (?admin=1 ve todo)
+  const [admin, setAdmin] = useState(false);
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const u = new URL(window.location.href);
+      setAdmin(u.searchParams.get("admin") === "1");
+      const qEmail = u.searchParams.get("email");
+      if (qEmail && !email) setEmail(qEmail);
+    }
+  }, []);
+
+  const emailFilter = useMemo(() => normEmail(email), [email]);
+  const showAll = admin || !emailFilter;
 
   useEffect(() => {
     (async () => {
       try {
-        setError("");
         setLoading(true);
 
-        // === Config ===
-        const ventasUrl =
-          "https://docs.google.com/spreadsheets/d/1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s/edit?gid=871602912#gid=871602912";
-        const comodatosUrl =
-          "https://docs.google.com/spreadsheets/d/1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s/edit?gid=551810728#gid=551810728";
-
-        const { id: ventasId, gid: ventasGid } = normalizeGoogleSheetUrl(ventasUrl);
-        const { id: comId, gid: comGid } = normalizeGoogleSheetUrl(comodatosUrl);
-
-        const ventas = await fetchCsv(ventasId, ventasGid);
-        const comodatos = await fetchCsv(comId, comGid);
+        const [ventas, comodatos] = await Promise.all([
+          fetchCsv(ventasId, ventasGid),
+          fetchCsv(comId, comGid),
+        ]);
 
         const cutoff = new Date();
         cutoff.setMonth(cutoff.getMonth() - 6);
 
-        // === Clientes con ventas últimos 6M ===
-        const activos = new Set<string>();
-        const ultimaCompra: Record<string, Date> = {};
+        /* === FILTRO POR EMAIL_COL (si no admin y hay email) === */
+        const ventasFiltradas = showAll
+          ? ventas
+          : ventas.filter(
+              (v) => normEmail(v["EMAIL_COL"] || v["Email"] || "") === emailFilter
+            );
 
-        for (const v of ventas) {
-          const rut = sanitizeRut(
-            v["RUT Cliente"] || v["Rut Cliente"] || v["RUT"] || v["Rut"]
-          );
+        const comodatosFiltrados = showAll
+          ? comodatos
+          : comodatos.filter(
+              (c) => normEmail(c["EMAIL_COL"] || c["Email"] || "") === emailFilter
+            );
+
+        /* === Consolidar ventas por RUT === */
+        const ultimaCompra: Record<string, Date> = {};
+        const activos = new Set<string>();
+
+        for (const v of ventasFiltradas) {
+          const rut = sanitizeRut(v["Rut Cliente"] || v["RUT Cliente"] || v["RUT"]);
           const fecha = parseDateLike(
-            v["DocDate"] || v["Fecha Documento"] || v["Posting Date"] || v["Fecha"]
+            v["DocDate"] || v["Fecha Documento"] || v["Posting Date"] || v["Fecha Doc."]
           );
           if (!rut || !fecha) continue;
-          if (fecha >= cutoff) activos.add(rut);
+
           if (!ultimaCompra[rut] || fecha > ultimaCompra[rut]) {
             ultimaCompra[rut] = fecha;
           }
+          if (fecha >= cutoff) activos.add(rut);
         }
 
-        // === Inactivos con comodatos ===
-        const resultado: any[] = [];
-        for (const c of comodatos) {
-          const rut = sanitizeRut(c["RUT Cliente"] || c["Rut"]);
+        /* === Consolidar comodatos por RUT === */
+        const comodatosPorRut: Record<string, any> = {};
+
+        for (const c of comodatosFiltrados) {
+          const rut = sanitizeRut(c["Rut Cliente"] || c["RUT Cliente"] || c["RUT"]);
           if (!rut) continue;
-          if (activos.has(rut)) continue; // ya compró
+
+          const nombre = c["Nombre Cliente"] || "";
+          const ejecutivo = c["Empleado ventas"] || c["Èmpleado Ventas"] || "";
+          const emailC = c["EMAIL_COL"] || "";
+          const monto = num(c["Total"]);
+
+          if (!comodatosPorRut[rut]) {
+            comodatosPorRut[rut] = {
+              rut,
+              nombre,
+              email: emailC,
+              ejecutivo,
+              monto: 0,
+            };
+          }
+
+          comodatosPorRut[rut].monto += monto;
+        }
+
+        /* === Resultado: con comodato > 0 y sin compras en 6M === */
+        const resultado: any[] = [];
+
+        Object.values(comodatosPorRut).forEach((c: any) => {
+          if (c.monto <= 0) return;
+          if (activos.has(c.rut)) return;
 
           resultado.push({
-            rut,
-            nombre: c["Nombre Cliente"] || c["Cliente"] || "",
-            email: c["EMAIL_COL"] || "",
-            ejecutivo: c["Ejecutivo"] || "",
-            monto: num(c["Total"]),
-            ultimaCompra: ultimaCompra[rut]
-              ? ultimaCompra[rut].toLocaleDateString("es-CL")
+            rut: c.rut,
+            nombre: c.nombre,
+            email: c.email,
+            ejecutivo: c.ejecutivo,
+            monto: c.monto,
+            ultimaCompra: ultimaCompra[c.rut]
+              ? ultimaCompra[c.rut].toLocaleDateString("es-CL")
               : "—",
+            estado: "Sin compras 6M",
           });
-        }
+        });
+
+        // ordenar por monto comodato desc
+        resultado.sort((a, b) => b.monto - a.monto);
 
         setData(resultado);
-      } catch (err: any) {
+      } catch (err) {
         console.error("Error KPI:", err);
-        setError(String(err.message || err));
+        setData([]);
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [emailFilter, showAll]);
 
   return (
     <div className="p-6">
-      <h1 className="text-xl font-bold text-[#2B6CFF] mb-4">
-        📊 Clientes con comodatos vigentes sin compras en 6M
-      </h1>
+      <div className="mb-3 flex items-end gap-3">
+        <h1 className="text-xl font-bold text-[#2B6CFF]">
+          📊 Clientes con comodatos vigentes sin compras de químicos en 6M
+        </h1>
+        <div className="ml-auto flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2">
+            <span className="text-zinc-600">Mi correo</span>
+            <input
+              type="email"
+              className="rounded border px-2 py-1"
+              placeholder="tu@spartan.cl"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </label>
+          {!showAll && (
+            <span className="rounded bg-zinc-100 px-2 py-1 text-xs text-zinc-700">
+              Filtrando por: {emailFilter}
+            </span>
+          )}
+          {admin && (
+            <span className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-800">
+              Admin: sin filtro
+            </span>
+          )}
+        </div>
+      </div>
 
-      {loading && <p>Cargando…</p>}
-      {error && <p className="text-red-600">❌ {error}</p>}
-
-      {!loading && !error && (
-        <table className="min-w-full text-sm border">
+      {loading ? (
+        <p>Cargando…</p>
+      ) : (
+        <table className="min-w-full text-sm border border-zinc-200 shadow-sm">
           <thead className="bg-zinc-100">
             <tr>
-              <th className="px-2 py-1">RUT</th>
-              <th className="px-2 py-1">Cliente</th>
-              <th className="px-2 py-1">Email</th>
-              <th className="px-2 py-1">Ejecutivo</th>
-              <th className="px-2 py-1 text-right">Monto Comodato</th>
-              <th className="px-2 py-1">Última compra</th>
+              <th className="px-2 py-2 text-left">RUT</th>
+              <th className="px-2 py-2 text-left">Cliente</th>
+              <th className="px-2 py-2 text-left">Email</th>
+              <th className="px-2 py-2 text-left">Ejecutivo</th>
+              <th className="px-2 py-2 text-right">Monto Comodato</th>
+              <th className="px-2 py-2 text-left">Última compra</th>
+              <th className="px-2 py-2 text-left">Estado</th>
             </tr>
           </thead>
           <tbody>
             {data.length === 0 && (
               <tr>
-                <td colSpan={6} className="text-center py-3">
+                <td colSpan={7} className="text-center py-4 text-green-700">
                   ✅ No hay clientes inactivos con comodato vigente
                 </td>
               </tr>
@@ -184,6 +232,11 @@ export default function ClientesInactivos() {
                   {d.monto.toLocaleString("es-CL")}
                 </td>
                 <td className="px-2 py-1">{d.ultimaCompra}</td>
+                <td className="px-2 py-1">
+                  <span className="inline-flex items-center gap-1 text-red-600">
+                    🔴 {d.estado}
+                  </span>
+                </td>
               </tr>
             ))}
           </tbody>
