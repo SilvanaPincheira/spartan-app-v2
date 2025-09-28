@@ -1083,7 +1083,7 @@ export default function NotaVentaPage() {
              th:nth-child(7), td:nth-child(7) {
                width: 90px !important;
                text-align: right !important;
-               padding-right: 16px !important;
+               padding-right: 8px !important;
              }
              th:nth-child(8), td:nth-child(8) {
                width: 125px !important;
