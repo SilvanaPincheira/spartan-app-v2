@@ -18,7 +18,7 @@ export default function ClientesInactivosPage() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/clientes-inactivos", { cache: "no-store" });
+        const res = await fetch("/api/kpi/clientes-inactivos", { cache: "no-store" });
         const json = await res.json();
         if (json.data) setData(json.data);
       } catch (err) {
