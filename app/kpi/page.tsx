@@ -120,7 +120,7 @@ export default function ClientesInactivosConComodato() {
         const email = s.session?.user?.email || null;
         setSessionEmail(email);
 
-        // IDs de tus hojas
+        // Hojas
         const ventasId = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
         const comId = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
         const ventasGid = "871602912";
@@ -129,7 +129,7 @@ export default function ClientesInactivosConComodato() {
         const ventasRows = await fetchCsv(ventasId, ventasGid);
         const comRows = await fetchCsv(comId, comGid);
 
-        const cutoff = "2025-03-01"; // últimos 6M desde septiembre 2025
+        const cutoff = "2025-03-01";
 
         // ===== Ventas PT =====
         const ventasMap = new Map<string, { ultima: string }>();
@@ -156,7 +156,7 @@ export default function ClientesInactivosConComodato() {
           const fecha = parseFecha(first(r, ["fecha_contab"]));
           if (fecha && fecha < "2023-01-01") continue;
           const emails = extractEmails(r);
-          if (emails.length === 0) continue; // 🔹 excluir si no hay EMAIL_COL
+          if (emails.length === 0) continue; // 🔹 descartar sin EMAIL_COL
           const total = parseNumber(first(r, ["total"]));
           const nombre = String(first(r, ["nombre_cliente"])) || "";
           const ejecutivo = String(first(r, ["empleado_ventas"])) || "";
@@ -179,7 +179,7 @@ export default function ClientesInactivosConComodato() {
             rut: rutDisplayFromKey(key),
             cliente: info.nombre,
             emails: info.emails,
-            email: info.emails.join(", "), // mostrar todos en la tabla
+            email: info.emails[0] || "",
             ejecutivo: info.ejecutivo,
             comodato: info.total,
             ultimaCompra: ultima || "—",
@@ -187,16 +187,13 @@ export default function ClientesInactivosConComodato() {
         }
 
         // ===== Filtro usuario =====
-        let filtrado: any[] = [];
+        let filtrado = out;
         if (sessionEmail) {
           const me = sessionEmail.toLowerCase().trim();
           const admins = ["silvana.pincheira@spartan.cl", "jorge.beltran@spartan.cl"];
-          if (admins.includes(me)) {
-            filtrado = out; // ven todo
-          } else {
-            // 🔹 Solo clientes cuyo EMAIL_COL incluye exactamente al usuario
+          if (!admins.includes(me)) {
             filtrado = out.filter((r) =>
-              (r.emails || []).some((em: string) => em === me)
+              (r.emails || []).some((em: string) => em.toLowerCase() === me)
             );
           }
         }
@@ -215,7 +212,7 @@ export default function ClientesInactivosConComodato() {
   return (
     <div className="p-6">
       <h1 className="text-xl font-bold text-[#2B6CFF] mb-4">
-        📊 Clientes con Comodatos (desde 2023) sin ventas PT últimos 6M (solo con EMAIL_COL)
+        📊 Clientes con Comodatos (desde 2023) sin ventas  6M 
       </h1>
       {loading ? (
         <p>Cargando…</p>
@@ -225,7 +222,7 @@ export default function ClientesInactivosConComodato() {
             <tr>
               <th className="px-2 py-1">RUT</th>
               <th className="px-2 py-1">Cliente</th>
-              <th className="px-2 py-1">Email(s)</th>
+              <th className="px-2 py-1">Email</th>
               <th className="px-2 py-1">Ejecutivo</th>
               <th className="px-2 py-1 text-right">Comodatos desde 2023</th>
               <th className="px-2 py-1">Última compra</th>
