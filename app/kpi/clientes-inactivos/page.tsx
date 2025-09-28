@@ -5,19 +5,20 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 /* ===== Helpers ===== */
 function normalizarRut(rut: string): string {
-  return (rut || "").replace(/[^0-9Kk]/g, "").toUpperCase();
+  if (!rut) return "";
+  rut = rut.toUpperCase().trim();
+  rut = rut.replace(/[^0-9K]/g, "");
+  // eliminar sufijo de sucursal (C, D, etc.)
+  return rut.replace(/[A-Z]$/, "");
 }
 function parseNumber(v: any): number {
-  const n = Number(v);
+  const n = Number(v?.toString().replace(/\./g, "").replace(",", "."));
   return Number.isFinite(n) ? n : 0;
 }
 function parseFecha(v: string): string {
   if (!v) return "";
-  // intentar parsear como fecha con hora
-  const d1 = new Date(v);
-  if (!isNaN(d1.getTime())) {
-    return d1.toISOString().slice(0, 10); // yyyy-mm-dd
-  }
+  const d = new Date(v);
+  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   return "";
 }
 async function fetchCsv(spreadsheetId: string, gid: string): Promise<Record<string, string>[]> {
@@ -34,111 +35,84 @@ async function fetchCsv(spreadsheetId: string, gid: string): Promise<Record<stri
 }
 
 /* ===== Component ===== */
-export default function ClientesInactivos() {
+export default function ClientesConsolidados() {
   const supabase = createClientComponentClient();
-  const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
       try {
-        // 🔹 Sesión actual
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        const email = session?.user?.email || null;
-        setSessionEmail(email);
-
         const ventasId = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
         const comId = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
         const ventasGid = "871602912";
         const comGid = "551810728";
 
-        const ventasData: Record<string, any>[] = await fetchCsv(ventasId, ventasGid);
-        const comodatosData: Record<string, any>[] = await fetchCsv(comId, comGid);
+        const ventasData = await fetchCsv(ventasId, ventasGid);
+        const comodatosData = await fetchCsv(comId, comGid);
 
-        // 🔹 Map de Ventas por RUT normalizado
-        const ventasMap = new Map<string, { total: number; ultima: string }>();
-        ventasData.forEach((v: Record<string, any>) => {
-          const rutBase = normalizarRut(v["Rut Cliente"] || v["Codigo Cliente"]);
-          if (!rutBase) return;
-
-          const total = parseNumber(v["Global Venta"]);
-          const fecha = parseFecha(v["DocDate"]) || parseFecha(v["Periodo"]);
-
-          if (!ventasMap.has(rutBase)) {
-            ventasMap.set(rutBase, { total: 0, ultima: fecha });
-          }
-
-          const entry = ventasMap.get(rutBase)!;
-          entry.total += total;
-          if (fecha && (!entry.ultima || fecha > entry.ultima)) {
-            entry.ultima = fecha;
-          }
-        });
-
-        // 🔹 Map de Comodatos por RUT
-        const comodatoMap = new Map<
-          string,
-          { total: number; nombre: string; email: string; ejecutivo: string }
-        >();
-        comodatosData.forEach((c: Record<string, any>) => {
-          const rutBase = normalizarRut(c["Rut Cliente"]);
-          if (!rutBase) return;
-
-          const total = parseNumber(c["Total"]);
-          const nombre = c["Nombre Cliente"] || "";
-          const email = c["EMAIL_COL"] || "";
-          const ejecutivo = c["Ejecutivo"] || "";
-
-          if (!comodatoMap.has(rutBase)) {
-            comodatoMap.set(rutBase, { total: 0, nombre, email, ejecutivo });
-          }
-          comodatoMap.get(rutBase)!.total += total;
-        });
-
-        // 🔹 Fecha de corte: últimos 6M
+        // 🔹 Fecha corte: últimos 6 meses
         const cutoff = new Date();
         cutoff.setMonth(cutoff.getMonth() - 6);
         const cutoffStr = cutoff.toISOString().slice(0, 10);
 
-        // 🔹 Construir dataset final
+        // 🔹 Ventas agrupadas por RUT base
+        const ventasMap = new Map<
+          string,
+          { total: number; ultima: string; nombre: string }
+        >();
+        ventasData.forEach((v) => {
+          const rut = normalizarRut(v["Rut Cliente"] || v["Codigo Cliente"]);
+          if (!rut) return;
+
+          const monto = parseNumber(v["Global Venta"]);
+          const fecha = parseFecha(v["DocDate"]) || parseFecha(v["Periodo"]);
+          if (!fecha) return;
+
+          if (!ventasMap.has(rut)) {
+            ventasMap.set(rut, { total: 0, ultima: fecha, nombre: v["Nombre Cliente"] || "" });
+          }
+
+          const entry = ventasMap.get(rut)!;
+          if (fecha >= cutoffStr) entry.total += monto;
+          if (fecha > entry.ultima) entry.ultima = fecha;
+        });
+
+        // 🔹 Comodatos desde 2023
+        const comodatoMap = new Map<string, { total: number; nombre: string }>();
+        comodatosData.forEach((c) => {
+          const rut = normalizarRut(c["Rut Cliente"]);
+          if (!rut) return;
+
+          const fecha = parseFecha(c["Fecha Inicio"]) || parseFecha(c["Fecha"]);
+          if (fecha && fecha < "2023-01-01") return; // solo >= 2023
+
+          const total = parseNumber(c["Total"]);
+          if (!comodatoMap.has(rut)) {
+            comodatoMap.set(rut, { total: 0, nombre: c["Nombre Cliente"] || "" });
+          }
+          comodatoMap.get(rut)!.total += total;
+        });
+
+        // 🔹 Consolidar dataset final
         const resultado: any[] = [];
-        for (const [rut, info] of comodatoMap) {
+        const allRuts = new Set([...ventasMap.keys(), ...comodatoMap.keys()]);
+        allRuts.forEach((rut) => {
           const venta = ventasMap.get(rut);
-          const ultima = venta?.ultima || "—";
-          const inactivo = !venta || (ultima && ultima < cutoffStr);
+          const comodato = comodatoMap.get(rut);
 
-          if (inactivo) {
-            resultado.push({
-              rut,
-              nombre: info.nombre,
-              email: info.email,
-              ejecutivo: info.ejecutivo,
-              monto: info.total,
-              ultimaCompra: ultima,
-            });
-          }
-        }
+          resultado.push({
+            rut,
+            cliente: venta?.nombre || comodato?.nombre || "",
+            ventas: venta?.total || 0,
+            ultimaCompra: venta?.ultima || "—",
+            comodato: comodato?.total || 0,
+          });
+        });
 
-        // 🔹 Filtrado por email del usuario logueado
-        let filtrado = resultado;
-        if (sessionEmail) {
-          const emailLower = sessionEmail.toLowerCase();
-
-          // Administradores → ven todo
-          if (!["silvana.pincheira@spartan.cl", "jorge.beltran@spartan.cl"].includes(emailLower)) {
-            // Ejecutivos → filtrar por EMAIL_COL de comodatos
-            filtrado = resultado.filter(
-              (r) => r.email?.toLowerCase() === emailLower
-            );
-          }
-        }
-
-        setData(filtrado);
+        setData(resultado);
       } catch (err) {
-        console.error("Error KPI:", err);
+        console.error("Error:", err);
       } finally {
         setLoading(false);
       }
@@ -148,7 +122,7 @@ export default function ClientesInactivos() {
   return (
     <div className="p-6">
       <h1 className="text-xl font-bold text-[#2B6CFF] mb-4">
-        📊 Clientes con comodatos vigentes sin compras en 6M
+        📊 Consolidado: Ventas últimos 6M y Comodatos desde 2023
       </h1>
       {loading ? (
         <p>Cargando…</p>
@@ -158,30 +132,30 @@ export default function ClientesInactivos() {
             <tr>
               <th className="px-2 py-1">RUT</th>
               <th className="px-2 py-1">Cliente</th>
-              <th className="px-2 py-1">Email</th>
-              <th className="px-2 py-1">Ejecutivo</th>
-              <th className="px-2 py-1">Monto Comodato</th>
+              <th className="px-2 py-1 text-right">Ventas 6M</th>
               <th className="px-2 py-1">Última compra</th>
+              <th className="px-2 py-1 text-right">Comodatos desde 2023</th>
             </tr>
           </thead>
           <tbody>
             {data.length === 0 && (
               <tr>
-                <td colSpan={6} className="text-center py-3">
-                  ✅ No hay clientes inactivos con comodato vigente
+                <td colSpan={5} className="text-center py-3">
+                  ✅ No hay registros
                 </td>
               </tr>
             )}
             {data.map((d, i) => (
               <tr key={i} className="border-t">
                 <td className="px-2 py-1">{d.rut}</td>
-                <td className="px-2 py-1">{d.nombre}</td>
-                <td className="px-2 py-1">{d.email}</td>
-                <td className="px-2 py-1">{d.ejecutivo}</td>
+                <td className="px-2 py-1">{d.cliente}</td>
                 <td className="px-2 py-1 text-right">
-                  {d.monto.toLocaleString("es-CL")}
+                  {d.ventas.toLocaleString("es-CL")}
                 </td>
                 <td className="px-2 py-1">{d.ultimaCompra}</td>
+                <td className="px-2 py-1 text-right">
+                  {d.comodato.toLocaleString("es-CL")}
+                </td>
               </tr>
             ))}
           </tbody>
