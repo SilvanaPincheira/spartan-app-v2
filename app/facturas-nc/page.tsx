@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 /* ============================================================================
    Helpers
@@ -55,7 +56,18 @@ export default function FacturasNCPage() {
   const [search, setSearch] = useState("");
   const [detalle, setDetalle] = useState<Record<string, string>[]>([]);
   const [error, setError] = useState("");
+  const [me, setMe] = useState("");
 
+  // 🔹 Obtener usuario logueado
+  useEffect(() => {
+    const supabase = createClientComponentClient();
+    supabase.auth.getUser().then(({ data }) => {
+      const email = data.user?.email || "";
+      setMe(email.toLowerCase());
+    });
+  }, []);
+
+  // 🔹 Cargar datos del sheet
   useEffect(() => {
     (async () => {
       try {
@@ -72,7 +84,11 @@ export default function FacturasNCPage() {
     })();
   }, []);
 
+  // 🔹 Filtro por búsqueda + EMAIL_COL
   const filtrados = rows.filter((r) => {
+    if (!r["email_col"] || !me) return false; // sin email -> no se muestra
+    if (r["email_col"].toLowerCase() !== me) return false;
+
     if (!search) return true;
     const s = normalize(search);
     return (
