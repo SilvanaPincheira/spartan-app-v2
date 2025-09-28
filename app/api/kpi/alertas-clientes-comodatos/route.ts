@@ -1,107 +1,61 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
+import Papa from "papaparse";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 
-/* 🔹 Parser de fechas */
-function parseFecha(v: string): string {
-  if (!v) return "";
-  const s = v.trim();
+const URL =
+  "https://docs.google.com/spreadsheets/d/1_gD_uYjBh3NlWogDqiiU_kkrZTDueQ98kSrGfc92vSg/export?format=csv&gid=0";
 
-  // mm/dd/yy o mm/dd/yyyy
-  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
-  if (m) {
-    const mm = m[1].padStart(2, "0");
-    const dd = m[2].padStart(2, "0");
-    const yyyy = m[3].length === 2 ? "20" + m[3] : m[3];
-    return `${yyyy}-${mm}-${dd}`;
-  }
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-
-  const d = new Date(s);
-  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-
-  return "";
+function normalize(val: string) {
+  return val?.toLowerCase().trim().replace(/\s+/g, "_").replace(/[^\w_]/g, "");
 }
 
 export async function GET() {
   try {
     // 1️⃣ Usuario logueado
     const supabase = createRouteHandlerClient({ cookies });
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "No autenticado" }, { status: 401 });
+    }
+    const email = user.email?.toLowerCase() ?? "";
 
-    // 2️⃣ Base URL desde variable de entorno
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-
-    // 3️⃣ Consumir APIs base
-    const ventasRes = await fetch(`${baseUrl}/api/ventas`, { cache: "no-store" });
-    const comodatosRes = await fetch(`${baseUrl}/api/comodatos`, { cache: "no-store" });
-
-    if (!ventasRes.ok || !comodatosRes.ok) {
-      return NextResponse.json({ error: "Error al cargar datos base" }, { status: 500 });
+    // 2️⃣ Leer Google Sheet en CSV
+    const res = await fetch(URL, { cache: "no-store" });
+    if (!res.ok) {
+      return NextResponse.json(
+        { error: "Error al leer hoja de Alertas" },
+        { status: 500 }
+      );
     }
 
-    const ventasRaw = (await ventasRes.json()).data || [];
-    const comodatosRaw = (await comodatosRes.json()).data || [];
+    const text = await res.text();
+    const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
 
-    // 4️⃣ Normalizar datos
-    const ventas = ventasRaw.map((v: any) => ({
-      rut: v.rut_cliente,
-      fecha: parseFecha(v.docdate),
-      itemcode: v.itemcode,
-    }));
+    const headers = parsed.meta.fields?.map(normalize) || [];
+    const data = (parsed.data as any[]).map((row) => {
+      const obj: any = {};
+      headers.forEach((h, i) => {
+        obj[h] = row[parsed.meta.fields?.[i] || ""] ?? "";
+      });
+      return obj;
+    });
 
-    const comodatos = comodatosRaw.map((c: any) => ({
-      rut: c.rut_cliente,
-      cliente: c.nombre_cliente,
-      ejecutivo: c.empleado_ventas,
-      email: c.email_col,
-      total: Number(c.total || 0),
-      fecha: parseFecha(c.fecha_contab),
-    }));
+    // 3️⃣ Filtrar por usuario logueado (EMAIL_COL)
+    const filtered = data.filter(
+      (row) => row["email_col"]?.toString().trim().toLowerCase() === email
+    );
 
-    // 5️⃣ Fecha de corte (6M atrás desde septiembre 2025)
-    const cutoff = new Date("2025-09-01");
-    cutoff.setMonth(cutoff.getMonth() - 6);
-    const cutoffStr = cutoff.toISOString().slice(0, 10);
-
-    // 6️⃣ Última venta PT por RUT
-    const ventasMap = new Map<string, string>();
-    for (const v of ventas) {
-      if (!v.rut || !v.fecha) continue;
-      if (!v.itemcode?.toUpperCase().startsWith("PT")) continue;
-      if (!ventasMap.has(v.rut) || v.fecha > ventasMap.get(v.rut)!) {
-        ventasMap.set(v.rut, v.fecha);
-      }
-    }
-
-    // 7️⃣ Consolidar
-    const resultado: any[] = [];
-    for (const c of comodatos) {
-      if (!c.rut) continue;
-      if (c.fecha && c.fecha < "2023-01-01") continue;
-
-      const ultima = ventasMap.get(c.rut) || null;
-      const sinVentas = !ultima || ultima < cutoffStr;
-
-      if (sinVentas) {
-        resultado.push({
-          rut: c.rut,
-          cliente: c.cliente,
-          ejecutivo: c.ejecutivo,
-          email: c.email,
-          comodato: c.total,
-          ultimaCompra: ultima || "—",
-        });
-      }
-    }
-
-    return NextResponse.json({ data: resultado });
+    return NextResponse.json({ data: filtered });
   } catch (err) {
-    console.error("🔥 Error en KPI alertas-clientes-comodatos:", err);
-    return NextResponse.json({ error: "Error en servidor" }, { status: 500 });
+    console.error("🔥 Error API Alertas Clientes Comodatos:", err);
+    return NextResponse.json(
+      { error: "No se pudo leer Alertas" },
+      { status: 500 }
+    );
   }
 }
