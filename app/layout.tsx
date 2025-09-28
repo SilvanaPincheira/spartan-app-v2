@@ -15,7 +15,7 @@ const menuItems = [
   { name: "KPI", href: "/kpi", icon: "📊" },
   { name: "Metas", href: "/metas", icon: "🎯" },
   { name: "Facturas y NC", href: "/facturas", icon: "🧾" },
-  { name: "Comisiones", href: "/comisiones", icon: "💰" }, // nuevo módulo
+  { name: "Comisiones", href: "/comisiones", icon: "💰" }, // ✅ nuevo módulo
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -39,7 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="es">
       <body className="flex min-h-screen bg-gray-50 text-zinc-900">
-        {/* ==== Sidebar fijo en escritorio ==== */}
+        {/* ==== Sidebar fijo (PC) ==== */}
         <aside className="hidden md:flex w-64 bg-white border-r shadow-sm flex-col print:hidden">
           <div className="px-4 py-6 border-b">
             <h1 className="text-xl font-bold text-[#1f4ed8]">Panel Spartan</h1>
@@ -77,6 +77,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             ))}
           </nav>
 
+          {/* Botón login/logout (PC) */}
           <div className="p-4 border-t">
             {session ? (
               <button
@@ -96,7 +97,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </aside>
 
-        {/* ==== Menú hamburguesa en móvil ==== */}
+        {/* ==== Barra superior móvil ==== */}
         <div className="md:hidden fixed top-0 left-0 right-0 bg-white border-b flex items-center justify-between px-4 py-3 shadow-sm z-20">
           <h1 className="text-lg font-bold text-[#1f4ed8]">Panel Spartan</h1>
           <button
@@ -107,18 +108,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </button>
         </div>
 
-        {/* Overlay menú móvil */}
+        {/* ==== Menú desplegable móvil ==== */}
         {mobileOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-30 z-30">
             <aside className="absolute top-0 left-0 w-64 h-full bg-white shadow-md flex flex-col">
               <div className="px-4 py-6 border-b flex justify-between items-center">
-                <h1 className="text-xl font-bold text-[#1f4ed8]">
-                  Panel Spartan
-                </h1>
+                <h1 className="text-xl font-bold text-[#1f4ed8]">Panel Spartan</h1>
                 <button onClick={() => setMobileOpen(false)}>✖️</button>
               </div>
 
-              {/* mismo menú vertical que en PC */}
               <div className="px-2 pt-3">
                 <Link
                   href="/"
@@ -142,8 +140,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     href={item.href}
                     onClick={() => setMobileOpen(false)}
                     className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition ${
-                      pathname === item.href ||
-                      pathname.startsWith(item.href + "/")
+                      pathname === item.href || pathname.startsWith(item.href + "/")
                         ? "bg-[#1f4ed8] text-white"
                         : "text-gray-700 hover:bg-blue-50 hover:text-[#1f4ed8]"
                     }`}
@@ -153,17 +150,39 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   </Link>
                 ))}
               </nav>
+
+              {/* Botón login/logout (Móvil) */}
+              <div className="p-4 border-t">
+                {session ? (
+                  <button
+                    onClick={() => {
+                      handleLogout();
+                      setMobileOpen(false);
+                    }}
+                    className="w-full flex items-center justify-center gap-2 rounded-md bg-[#1f4ed8] px-3 py-2 text-sm font-medium text-white hover:bg-[#163bb8] transition"
+                  >
+                    🚪 Cerrar sesión
+                  </button>
+                ) : (
+                  <Link
+                    href="/login"
+                    onClick={() => setMobileOpen(false)}
+                    className="w-full flex items-center justify-center gap-2 rounded-md bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 transition"
+                  >
+                    🔑 Iniciar sesión
+                  </Link>
+                )}
+              </div>
             </aside>
           </div>
         )}
 
         {/* ==== Contenido principal ==== */}
-        <main className="flex-1 p-6 mt-14 md:mt-0 overflow-y-auto">
-          {children}
-        </main>
+        <main className="flex-1 p-6 mt-14 md:mt-0 overflow-y-auto">{children}</main>
       </body>
     </html>
   );
 }
+
 
 
