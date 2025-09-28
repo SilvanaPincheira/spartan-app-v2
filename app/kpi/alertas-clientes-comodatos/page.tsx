@@ -61,28 +61,24 @@ export default function AlertasClientesComodatos() {
   useEffect(() => {
     (async () => {
       try {
-        // usuario logueado
         const { data: s } = await supabase.auth.getSession();
         const email = s.session?.user?.email || null;
         setSessionEmail(email);
 
-        // leer hoja
         const spreadsheetId = "1_gD_uYjBh3NlWogDqiiU_kkrZTDueQ98kSrGfc92vSg"; // tu hoja
         const gid = "0";
         const data = await fetchCsv(spreadsheetId, gid);
 
-        // normalizar
         const cleaned = data.map((r) => ({
           rut: r["rut_cliente"],
           cliente: r["nombre_cliente"],
           ejecutivo: r["empleado_ventas"],
           ventas: parseNumberCL(r["ventas_quimicos_2025"]),
           comodatos: parseNumberCL(r["comodatos_activos_2021"]),
-          alerta: r["alerta_final"] || "",
+          alerta: (r["alerta_final"] || "").toUpperCase(),
           email: r["email_col"] || "",
         }));
 
-        // filtro por email del usuario
         const filtrado = email
           ? cleaned.filter(
               (r) => (r.email || "").toLowerCase() === email.toLowerCase()
@@ -98,17 +94,25 @@ export default function AlertasClientesComodatos() {
     })();
   }, []);
 
-  const totalVentas = rows
-    .filter((r) => !filtro || r.alerta.toLowerCase() === filtro.toLowerCase())
-    .reduce((acc, r) => acc + (r.ventas || 0), 0);
-
-  const totalComodatos = rows
-    .filter((r) => !filtro || r.alerta.toLowerCase() === filtro.toLowerCase())
-    .reduce((acc, r) => acc + (r.comodatos || 0), 0);
-
   const visibles = rows.filter(
     (r) => !filtro || r.alerta.toLowerCase() === filtro.toLowerCase()
   );
+
+  const totalVentas = visibles.reduce((acc, r) => acc + (r.ventas || 0), 0);
+  const totalComodatos = visibles.reduce((acc, r) => acc + (r.comodatos || 0), 0);
+
+  // 🔹 Semáforo minimalista
+  function renderSemaforo(estado: string) {
+    let color = "bg-gray-400";
+    if (estado === "ALERTA") color = "bg-red-500";
+    else if (estado === "OK") color = "bg-green-500";
+    return (
+      <span
+        className={`inline-block w-3 h-3 rounded-full ${color}`}
+        title={estado}
+      ></span>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -163,7 +167,7 @@ export default function AlertasClientesComodatos() {
                   <td className="px-2 py-1">{r.ejecutivo}</td>
                   <td className="px-2 py-1 text-right">{money(r.ventas)}</td>
                   <td className="px-2 py-1 text-right">{money(r.comodatos)}</td>
-                  <td className="px-2 py-1">{r.alerta}</td>
+                  <td className="px-2 py-1">{renderSemaforo(r.alerta)}</td>
                 </tr>
               ))}
             </tbody>
