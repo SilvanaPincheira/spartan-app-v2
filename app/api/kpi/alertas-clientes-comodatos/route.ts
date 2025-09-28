@@ -4,19 +4,29 @@ import { NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 
+/* 🔹 Parser de fechas
+   Convierte:
+   - "1/23/25 0:00" → "2025-01-23"
+   - "2025-01-23"   → "2025-01-23"
+*/
 function parseFecha(v: string): string {
   if (!v) return "";
   const s = v.trim();
-  const parts = s.split("/");
-  if (parts.length === 3) {
-    // dd/mm/yyyy → yyyy-mm-dd
-    return `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+
+  // mm/dd/yy o mm/dd/yyyy
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (m) {
+    const mm = m[1].padStart(2, "0");
+    const dd = m[2].padStart(2, "0");
+    const yyyy = m[3].length === 2 ? "20" + m[3] : m[3];
+    return `${yyyy}-${mm}-${dd}`;
   }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-    return s; // ya viene en ISO yyyy-mm-dd
-  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
   const d = new Date(s);
   if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+
   return "";
 }
 
@@ -24,16 +34,14 @@ export async function GET() {
   try {
     // 1️⃣ Usuario logueado
     const supabase = createRouteHandlerClient({ cookies });
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
 
     const email = user.email?.toLowerCase() ?? "";
 
     // 2️⃣ Consumir APIs base
-    const ventasRes = await fetch("http://localhost:3000/api/ventas", { cache: "no-store" });
-    const comodatosRes = await fetch("http://localhost:3000/api/comodatos", { cache: "no-store" });
+    const ventasRes = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/ventas`, { cache: "no-store" });
+    const comodatosRes = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/comodatos`, { cache: "no-store" });
 
     if (!ventasRes.ok || !comodatosRes.ok) {
       return NextResponse.json({ error: "Error al cargar datos base" }, { status: 500 });
@@ -42,18 +50,12 @@ export async function GET() {
     const ventasRaw = (await ventasRes.json()).data || [];
     const comodatosRaw = (await comodatosRes.json()).data || [];
 
-    // 🔎 Logs para depuración
-    console.log("👉 Usuario logueado:", email);
-    console.log("👉 Ejemplo Ventas:", ventasRaw[0]);
-    console.log("👉 Ejemplo Comodatos:", comodatosRaw[0]);
-
     // 3️⃣ Normalizar datos
     const ventas = ventasRaw.map((v: any) => ({
       rut: v.rut_cliente,
       fecha: parseFecha(v.docdate),
       itemcode: v.itemcode,
       total: Number(v.global_venta || 0),
-      email: v.email_col,
     }));
 
     const comodatos = comodatosRaw.map((c: any) => ({
@@ -69,7 +71,6 @@ export async function GET() {
     const cutoff = new Date("2025-09-01");
     cutoff.setMonth(cutoff.getMonth() - 6);
     const cutoffStr = cutoff.toISOString().slice(0, 10);
-    console.log("👉 Fecha de corte:", cutoffStr);
 
     // 5️⃣ Última venta PT por RUT
     const ventasMap = new Map<string, string>();
@@ -102,16 +103,12 @@ export async function GET() {
       }
     }
 
-    console.log("👉 Resultado consolidado:", resultado.length);
-
     // 7️⃣ Filtro por usuario logueado (excepto admins)
     const admins = ["silvana.pincheira@spartan.cl", "jorge.beltran@spartan.cl"];
     let filtrado = resultado;
     if (!admins.includes(email)) {
       filtrado = resultado.filter((r) => (r.email || "").toLowerCase() === email);
     }
-
-    console.log("👉 Resultado final filtrado:", filtrado.length);
 
     return NextResponse.json({ data: filtrado });
   } catch (err) {
