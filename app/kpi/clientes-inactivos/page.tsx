@@ -144,7 +144,7 @@ export default function ClientesInactivosConComodato() {
   return (
     <div className="p-6">
       <h1 className="text-xl font-bold text-[#2B6CFF] mb-4">
-        📊 Clientes con Comodatos (>=2023) sin ventas últimos 6M
+        📊 Clientes con Comodatos (desde =2023) sin ventas últimos 6M
       </h1>
       {loading ? (
         <p>Cargando…</p>
