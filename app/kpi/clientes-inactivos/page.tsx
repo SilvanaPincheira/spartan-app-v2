@@ -7,20 +7,27 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 function normalizarRut(rut: string): string {
   return (rut || "").replace(/[^0-9Kk]/g, "").toUpperCase();
 }
+function esRutValido(rut: string): boolean {
+  if (!rut) return false;
+  // formato simple: números + guion + dígito verificador
+  return /^[0-9]+-[0-9K]$/.test(rut);
+}
 function parseNumber(v: any): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
 function parseFecha(v: string): string {
   if (!v) return "";
-  // intentar parsear como fecha con hora
   const d1 = new Date(v);
   if (!isNaN(d1.getTime())) {
     return d1.toISOString().slice(0, 10); // yyyy-mm-dd
   }
   return "";
 }
-async function fetchCsv(spreadsheetId: string, gid: string): Promise<Record<string, string>[]> {
+async function fetchCsv(
+  spreadsheetId: string,
+  gid: string
+): Promise<Record<string, string>[]> {
   const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
   const res = await fetch(url, { cache: "no-store" });
   const txt = await res.text();
@@ -44,7 +51,9 @@ export default function ClientesInactivos() {
     (async () => {
       try {
         // 🔹 Sesión actual
-        const { data: { session } } = await supabase.auth.getSession();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
         const email = session?.user?.email || null;
         setSessionEmail(email);
 
@@ -53,17 +62,29 @@ export default function ClientesInactivos() {
         const ventasGid = "871602912";
         const comGid = "551810728";
 
-        const ventasData: Record<string, any>[] = await fetchCsv(ventasId, ventasGid);
-        const comodatosData: Record<string, any>[] = await fetchCsv(comId, comGid);
+        const ventasData: Record<string, any>[] = await fetchCsv(
+          ventasId,
+          ventasGid
+        );
+        const comodatosData: Record<string, any>[] = await fetchCsv(
+          comId,
+          comGid
+        );
 
         // 🔹 Map de Ventas por RUT normalizado
-        const ventasMap = new Map<string, { total: number; ultima: string }>();
+        const ventasMap = new Map<
+          string,
+          { total: number; ultima: string }
+        >();
         ventasData.forEach((v: Record<string, any>) => {
-          const rutBase = normalizarRut(v["Rut Cliente"] || v["Codigo Cliente"]);
-          if (!rutBase) return;
+          const rutBase = normalizarRut(
+            v["Rut Cliente"] || v["Codigo Cliente"]
+          );
+          if (!esRutValido(rutBase)) return; // 👈 filtro extra
 
           const total = parseNumber(v["Global Venta"]);
-          const fecha = parseFecha(v["DocDate"]) || parseFecha(v["Periodo"]);
+          const fecha =
+            parseFecha(v["DocDate"]) || parseFecha(v["Periodo"]);
 
           if (!ventasMap.has(rutBase)) {
             ventasMap.set(rutBase, { total: 0, ultima: fecha });
@@ -77,10 +98,13 @@ export default function ClientesInactivos() {
         });
 
         // 🔹 Map de Comodatos por RUT
-        const comodatoMap = new Map<string, { total: number; nombre: string; email: string; ejecutivo: string }>();
+        const comodatoMap = new Map<
+          string,
+          { total: number; nombre: string; email: string; ejecutivo: string }
+        >();
         comodatosData.forEach((c: Record<string, any>) => {
           const rutBase = normalizarRut(c["Rut Cliente"]);
-          if (!rutBase) return;
+          if (!esRutValido(rutBase)) return; // 👈 filtro extra
 
           const total = parseNumber(c["Total"]);
           const nombre = c["Nombre Cliente"] || "";
@@ -120,7 +144,10 @@ export default function ClientesInactivos() {
         // 🔹 Filtrado por email del usuario logueado
         let filtrado = resultado;
         if (sessionEmail && !sessionEmail.endsWith("@spartan.cl")) {
-          filtrado = resultado.filter((r) => r.email?.toLowerCase() === sessionEmail.toLowerCase());
+          filtrado = resultado.filter(
+            (r) =>
+              r.email?.toLowerCase() === sessionEmail.toLowerCase()
+          );
         }
 
         setData(filtrado);
