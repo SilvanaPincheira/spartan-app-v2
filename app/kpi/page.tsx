@@ -43,10 +43,10 @@ function parseFecha(v: any): string {
 function rutKey(raw: string): string {
   if (!raw) return "";
   let s = raw.toUpperCase().trim();
-  s = s.replace(/^[^0-9]+/, "");   // quita prefijos como "C"
-  s = s.replace(/[A-Z]+$/, "");    // quita sufijos de sucursal al final
+  s = s.replace(/^[^0-9]+/, "");
+  s = s.replace(/[A-Z]+$/, "");
   s = s.replace(/[^0-9K-]/g, "");
-  return s.replace(/-/g, "");      // clave sin guion
+  return s.replace(/-/g, "");
 }
 function rutDisplayFromKey(key: string): string {
   if (!key) return "";
@@ -61,7 +61,7 @@ function first(row: Record<string, any>, candidates: string[]): any {
   return "";
 }
 
-// Extrae TODOS los emails válidos de columnas EMAIL_COL (incluye duplicadas)
+// Extrae TODOS los emails válidos de columnas EMAIL_COL
 function extractEmails(row: Record<string, any>): string[] {
   const emailRegex = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
   const keys = Object.keys(row).filter(
@@ -81,7 +81,7 @@ function extractEmails(row: Record<string, any>): string[] {
   return Array.from(set);
 }
 
-// CSV: intenta papaparse; si no, fallback manual que respeta comillas
+// CSV parser (papaparse si existe; fallback manual si no)
 async function parseCsv(text: string): Promise<Record<string, string>[]> {
   try {
     const Papa = (await import("papaparse")).default;
@@ -101,6 +101,7 @@ async function parseCsv(text: string): Promise<Record<string, string>[]> {
       return o;
     });
   } catch {
+    // fallback simple (respeta comillas)
     const rows: string[][] = [];
     let cur = "";
     let inQ = false;
@@ -161,7 +162,7 @@ export default function ClientesInactivosConComodato() {
         const email = s.session?.user?.email || null;
         setSessionEmail(email);
 
-        // Hojas
+        // IDs de tus hojas
         const ventasId = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
         const comId = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
         const ventasGid = "871602912";
@@ -170,62 +171,40 @@ export default function ClientesInactivosConComodato() {
         const ventasRows = await fetchCsv(ventasId, ventasGid);
         const comRows = await fetchCsv(comId, comGid);
 
-        // Corte 6M desde sep-2025 -> 2025-03-01
-        const cutoff = "2025-03-01";
+        const cutoff = "2025-03-01"; // 6M hacia atrás desde sep-2025
 
-        // ===== Ventas PT por RUT
-        const ventasMap = new Map<
-          string,
-          { total: number; ultima: string; nombre: string; emails: string[]; ejecutivo: string }
-        >();
-
+        // ===== VENTAS PT =====
+        const ventasMap = new Map<string, { ultima: string }>();
         for (const r of ventasRows) {
-          const rutRaw = first(r, ["rut_cliente"]);
-          const key = rutKey(String(rutRaw || ""));
+          const key = rutKey(first(r, ["rut_cliente"]));
           if (!key) continue;
 
           const fecha = parseFecha(first(r, ["docdate"]));
           if (!fecha) continue;
 
           const itemCode = String(first(r, ["itemcode", "codigo_producto"])).toUpperCase();
-          if (!itemCode.startsWith("PT")) continue; // solo químicos
+          if (!itemCode.startsWith("PT")) continue;
 
-          const monto = parseNumber(first(r, ["global_venta"]));
-          const nombre = String(first(r, ["nombre_cliente"])) || "";
-          const emails = extractEmails(r); // por si se requiere fallback
-          // Variantes de "Empleado Ventas"
-          const ejKey = Object.keys(r).find((k) => k.includes("empleado") && k.includes("ventas")) || "empleado_ventas";
-          const ejecutivo = String(r[ejKey] ?? "") || "";
-
-          if (!ventasMap.has(key)) {
-            ventasMap.set(key, { total: 0, ultima: fecha, nombre, emails, ejecutivo });
-          }
+          if (!ventasMap.has(key)) ventasMap.set(key, { ultima: fecha });
           const entry = ventasMap.get(key)!;
-          entry.total += monto;
           if (fecha > entry.ultima) entry.ultima = fecha;
-          if (emails.length) {
-            // acumula posibles correos
-            entry.emails = Array.from(new Set([...entry.emails, ...emails]));
-          }
         }
 
-        // ===== Comodatos vigentes (EMAIL_COL base del filtro)
+        // ===== COMODATOS (EMAIL_COL base para filtro) =====
         const comMap = new Map<
           string,
           { total: number; nombre: string; emails: string[]; ejecutivo: string }
         >();
-
         for (const r of comRows) {
-          const rutRaw = first(r, ["rut_cliente"]);
-          const key = rutKey(String(rutRaw || ""));
+          const key = rutKey(first(r, ["rut_cliente"]));
           if (!key) continue;
 
           const fecha = parseFecha(first(r, ["fecha_contab"]));
-          if (fecha && fecha < "2023-01-01") continue; // solo >= 2023
+          if (fecha && fecha < "2023-01-01") continue;
 
           const total = parseNumber(first(r, ["total"]));
           const nombre = String(first(r, ["nombre_cliente"])) || "";
-          const emails = extractEmails(r); // ← AQUÍ TOMAMOS EMAIL_COL (y duplicadas)
+          const emails = extractEmails(r);
           const ejecutivo = String(first(r, ["empleado_ventas"])) || "";
 
           if (!comMap.has(key)) {
@@ -233,12 +212,10 @@ export default function ClientesInactivosConComodato() {
           }
           const entry = comMap.get(key)!;
           entry.total += total;
-          if (emails.length) {
-            entry.emails = Array.from(new Set([...(entry.emails || []), ...emails]));
-          }
+          entry.emails = Array.from(new Set([...(entry.emails || []), ...emails]));
         }
 
-        // ===== Consolidado: comodato y SIN ventas PT últimos 6M
+        // ===== CONSOLIDADO =====
         const out: any[] = [];
         for (const [key, info] of comMap) {
           const v = ventasMap.get(key);
@@ -246,37 +223,32 @@ export default function ClientesInactivosConComodato() {
           const sinVentas = !v || (ultima && ultima < cutoff);
           if (!sinVentas) continue;
 
-          // Email para filtro y display:
-          // prioriza EMAIL_COL de COMODATOS; si no hay, cae a Ventas
-          const emails = (info.emails && info.emails.length ? info.emails : (v?.emails || [])).map((e) => e.toLowerCase());
-          const emailDisplay = emails[0] || "";
-
           out.push({
-            rutKey: key,
             rut: rutDisplayFromKey(key),
-            cliente: info.nombre || v?.nombre || "",
-            emails,                         // <-- lista normalizada
-            email: emailDisplay,            // <-- primero para mostrar
-            ejecutivo: info.ejecutivo || v?.ejecutivo || "",
-            comodato: info.total || 0,
+            cliente: info.nombre,
+            emails: info.emails,
+            email: info.emails[0] || "",
+            ejecutivo: info.ejecutivo,
+            comodato: info.total,
             ultimaCompra: ultima || "—",
           });
         }
 
-        // ===== Filtro por usuario logueado (EMAIL_COL de comodatos prioridad)
+        // ===== FILTRO POR USUARIO =====
         let filtrado = out;
         if (sessionEmail) {
           const me = sessionEmail.toLowerCase().trim();
           const admins = ["silvana.pincheira@spartan.cl", "jorge.beltran@spartan.cl"];
           if (!admins.includes(me)) {
-            filtrado = out.filter((r) => (r.emails || []).includes(me));
+            filtrado = out.filter((r) =>
+              (r.emails || []).some((em: string) => em.toLowerCase() === me)
+            );
           }
         }
 
-        filtrado.sort((a, b) => (b.comodato || 0) - (a.comodato || 0) || a.cliente.localeCompare(b.cliente));
         setData(filtrado);
-      } catch (e) {
-        console.error("Error:", e);
+      } catch (err) {
+        console.error("Error:", err);
       } finally {
         setLoading(false);
       }
