@@ -1083,7 +1083,7 @@ export default function NotaVentaPage() {
           th:nth-child(7), td:nth-child(7) { /* Precio venta */
            width: 100px !important;   /* antes 100px */
            text-align: right !important;
-           padding-right: 8px !important; /* 🔹 empuja un poco hacia la izquierda */
+           padding-right: 16px !important; /* 🔹 empuja un poco hacia la izquierda */
 }
 
           th:nth-child(8), td:nth-child(8) { /* $ Presentación */
