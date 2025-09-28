@@ -4,6 +4,22 @@ import { NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 
+function parseFecha(v: string): string {
+  if (!v) return "";
+  const s = v.trim();
+  const parts = s.split("/");
+  if (parts.length === 3) {
+    // dd/mm/yyyy → yyyy-mm-dd
+    return `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return s; // ya viene en ISO yyyy-mm-dd
+  }
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  return "";
+}
+
 export async function GET() {
   try {
     // 1️⃣ Usuario logueado
@@ -26,10 +42,15 @@ export async function GET() {
     const ventasRaw = (await ventasRes.json()).data || [];
     const comodatosRaw = (await comodatosRes.json()).data || [];
 
+    // 🔎 Logs para depuración
+    console.log("👉 Usuario logueado:", email);
+    console.log("👉 Ejemplo Ventas:", ventasRaw[0]);
+    console.log("👉 Ejemplo Comodatos:", comodatosRaw[0]);
+
     // 3️⃣ Normalizar datos
     const ventas = ventasRaw.map((v: any) => ({
       rut: v.rut_cliente,
-      fecha: v.docdate, // string tipo 2025-01-12 o 12/01/2025
+      fecha: parseFecha(v.docdate),
       itemcode: v.itemcode,
       total: Number(v.global_venta || 0),
       email: v.email_col,
@@ -41,13 +62,14 @@ export async function GET() {
       ejecutivo: c.empleado_ventas,
       email: c.email_col,
       total: Number(c.total || 0),
-      fecha: c.fecha_contab,
+      fecha: parseFecha(c.fecha_contab),
     }));
 
     // 4️⃣ Fecha de corte = últimos 6 meses desde septiembre 2025
     const cutoff = new Date("2025-09-01");
     cutoff.setMonth(cutoff.getMonth() - 6);
     const cutoffStr = cutoff.toISOString().slice(0, 10);
+    console.log("👉 Fecha de corte:", cutoffStr);
 
     // 5️⃣ Última venta PT por RUT
     const ventasMap = new Map<string, string>();
@@ -63,8 +85,7 @@ export async function GET() {
     const resultado: any[] = [];
     for (const c of comodatos) {
       if (!c.rut) continue;
-      // Solo comodatos vigentes (>= 2023-01-01)
-      if (c.fecha && c.fecha < "2023-01-01") continue;
+      if (c.fecha && c.fecha < "2023-01-01") continue; // solo vigentes desde 2023
 
       const ultima = ventasMap.get(c.rut) || null;
       const sinVentas = !ultima || ultima < cutoffStr;
@@ -81,12 +102,16 @@ export async function GET() {
       }
     }
 
+    console.log("👉 Resultado consolidado:", resultado.length);
+
     // 7️⃣ Filtro por usuario logueado (excepto admins)
     const admins = ["silvana.pincheira@spartan.cl", "jorge.beltran@spartan.cl"];
     let filtrado = resultado;
     if (!admins.includes(email)) {
       filtrado = resultado.filter((r) => (r.email || "").toLowerCase() === email);
     }
+
+    console.log("👉 Resultado final filtrado:", filtrado.length);
 
     return NextResponse.json({ data: filtrado });
   } catch (err) {
