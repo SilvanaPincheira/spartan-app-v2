@@ -1,119 +1,144 @@
 // app/facturas-nc/page.tsx
+// -----------------------------------------------------------------------------
+// FACTURAS Y NOTAS DE CRÉDITO — CLIENT COMPONENT (Next.js / React)
+// -----------------------------------------------------------------------------
+// ✔ Carga desde Google Sheets (CSV).
+// ✔ Filtro por usuario logueado (EMAIL_COL).
+// ✔ Admin (silvana.pincheira@spartan.cl) puede ver todo.
+// ✔ Búsqueda por RUT, Cliente o Folio.
+// ✔ Tabla principal: Tipo_DTE, Periodo, Empleado Ventas, Cliente, Folio, etc.
+// ✔ Botón Detalle → abre modal con todas las líneas del Folio (ItemCode, Cantidad, etc).
+// ✔ Formato CLP en Global Venta.
+// -----------------------------------------------------------------------------
+
 "use client";
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 /* ============================================================================
-   Helpers
+   [A] HELPERS
    ============================================================================ */
+// Normaliza strings para comparación sin mayúsculas/acentos
 function normalize(s: string) {
-  return (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  return (s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
 }
 
-function money(v: any) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return "-";
-  return n.toLocaleString("es-CL", {
+// Convierte CSV plano a array de objetos
+function parseCsv(text: string): Record<string, string>[] {
+  const rows = text.replace(/\r/g, "").split("\n").map(r => r.split(","));
+  if (!rows.length) return [];
+  const headers = rows[0].map(h => h.trim());
+  const out: Record<string, string>[] = [];
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.every(c => !c.trim())) continue;
+    const obj: Record<string, string> = {};
+    headers.forEach((h, j) => (obj[h] = (row[j] ?? "").trim()));
+    out.push(obj);
+  }
+  return out;
+}
+
+// Formato moneda CLP
+function money(n: any) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "-";
+  return v.toLocaleString("es-CL", {
     style: "currency",
     currency: "CLP",
     maximumFractionDigits: 0,
   });
 }
 
-function parseCsv(text: string): Record<string, string>[] {
-  const rows = text.replace(/\r/g, "").split("\n").map((r) => r.split(","));
-  if (!rows.length) return [];
-  const headers = rows[0].map((h) =>
-    h.trim().toLowerCase().replace(/\s+/g, "_")
-  );
-  return rows.slice(1).map((r) =>
-    Object.fromEntries(r.map((v, i) => [headers[i], (v ?? "").trim()]))
-  );
-}
-
-async function fetchCsv(url: string) {
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Error ${res.status}`);
-  const text = await res.text();
-  return parseCsv(text);
-}
-
-function normalizeGoogleSheetUrl(url: string) {
-  const m = (url || "").match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-  const id = m ? m[1] : "";
-  let gid = "0";
-  const g = (url || "").match(/[?&#]gid=([0-9]+)/);
-  if (g) gid = g[1];
-  return { id, gid };
-}
-
 /* ============================================================================
-   Component
+   [B] COMPONENTE PRINCIPAL
    ============================================================================ */
 export default function FacturasNCPage() {
+  /* ----- Estado global ----- */
   const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [search, setSearch] = useState("");
-  const [detalle, setDetalle] = useState<Record<string, string>[]>([]);
-  const [error, setError] = useState("");
-  const [me, setMe] = useState("");
+  const [detalle, setDetalle] = useState<Record<string, string>[] | null>(null);
+  const [userEmail, setUserEmail] = useState("");
 
-  // 🔹 Obtener usuario logueado
-  useEffect(() => {
-    const supabase = createClientComponentClient();
-    supabase.auth.getUser().then(({ data }) => {
-      const email = data.user?.email || "";
-      setMe(email.toLowerCase());
-    });
-  }, []);
+  /* ----- Configuración ----- */
+  const SHEET_URL =
+    "https://docs.google.com/spreadsheets/d/1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s/export?format=csv&gid=871602912";
 
-  // 🔹 Cargar datos del sheet
+  const ADMIN_EMAIL = "silvana.pincheira@spartan.cl";
+
+  /* ==========================================================================
+     [C] EFECTOS: carga de datos
+     ========================================================================== */
   useEffect(() => {
     (async () => {
       try {
-        const { id, gid } = normalizeGoogleSheetUrl(
-          "https://docs.google.com/spreadsheets/d/1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s/edit?gid=871602912#gid=871602912"
-        );
-        if (!id) return;
-        const url = `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
-        const data = await fetchCsv(url);
-        setRows(data);
-      } catch (e: any) {
-        setError(e.message || "Error al cargar datos");
+        // Leer usuario logueado
+        const supabase = createClientComponentClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        const me = (user?.email || "").toLowerCase().trim();
+        setUserEmail(me);
+
+        // Leer CSV
+        const res = await fetch(SHEET_URL, { cache: "no-store" });
+        const txt = await res.text();
+        const data = parseCsv(txt);
+
+        // Filtrar según EMAIL_COL
+        const filtrado =
+          me === ADMIN_EMAIL || !me
+            ? data
+            : data.filter(
+                (r) => (r.EMAIL_COL || "").toLowerCase().trim() === me
+              );
+
+        setRows(filtrado);
+      } catch (err) {
+        console.error("Error cargando CSV:", err);
       }
     })();
   }, []);
 
-  // 🔹 Filtro por búsqueda + EMAIL_COL
-  const filtrados = rows.filter((r) => {
-    if (!r["email_col"] || !me) return false; // sin email -> no se muestra
-    if (r["email_col"].toLowerCase() !== me) return false;
-
+  /* ==========================================================================
+     [D] FILTRADO DE BÚSQUEDA
+     ========================================================================== */
+  const filtered = rows.filter((r) => {
     if (!search) return true;
     const s = normalize(search);
     return (
-      normalize(r["rut_cliente"] || "").includes(s) ||
-      normalize(r["nombre_cliente"] || "").includes(s) ||
-      normalize(r["folionum"] || "").includes(s)
+      normalize(r["Codigo Cliente"]).includes(s) ||
+      normalize(r["Nombre Cliente"]).includes(s) ||
+      normalize(r["Folio"]).includes(s) ||
+      normalize(r["RUT Cliente"] || "").includes(s)
     );
   });
 
+  /* ==========================================================================
+     [E] RENDER
+     ========================================================================== */
   return (
-    <div className="p-6 bg-white min-h-screen">
+    <div className="p-6">
+      {/* ===== Título ===== */}
       <h1 className="text-xl font-bold mb-4 flex items-center gap-2">
         📑 Facturas y Notas de Crédito
       </h1>
 
+      {/* ===== Filtro ===== */}
       <input
         type="text"
+        className="w-full border rounded px-3 py-2 mb-4"
         placeholder="Buscar por RUT, Cliente o Folio..."
-        className="border rounded px-3 py-2 w-full mb-4"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
       />
 
-      {error && <div className="text-red-600 mb-2">{error}</div>}
-
+      {/* ===== Tabla principal ===== */}
       <div className="overflow-x-auto">
         <table className="min-w-full border text-sm">
           <thead className="bg-zinc-100">
@@ -121,7 +146,7 @@ export default function FacturasNCPage() {
               <th className="px-2 py-1 border">Tipo DTE</th>
               <th className="px-2 py-1 border">Periodo</th>
               <th className="px-2 py-1 border">Empleado Ventas</th>
-              <th className="px-2 py-1 border">Código Cliente</th>
+              <th className="px-2 py-1 border">Codigo Cliente</th>
               <th className="px-2 py-1 border">Nombre Cliente</th>
               <th className="px-2 py-1 border">Dirección</th>
               <th className="px-2 py-1 border">Comuna</th>
@@ -132,54 +157,54 @@ export default function FacturasNCPage() {
             </tr>
           </thead>
           <tbody>
-            {filtrados.map((r, i) => (
-              <tr key={i} className="border-t">
-                <td className="px-2 py-1 border">{r["tipo_dte"]}</td>
-                <td className="px-2 py-1 border">{r["periodo"]}</td>
-                <td className="px-2 py-1 border">{r["empleado_ventas"]}</td>
-                <td className="px-2 py-1 border">{r["codigo_cliente"]}</td>
-                <td className="px-2 py-1 border">{r["nombre_cliente"]}</td>
-                <td className="px-2 py-1 border">{r["direccion"]}</td>
-                <td className="px-2 py-1 border">{r["comuna"]}</td>
-                <td className="px-2 py-1 border">{r["ciudad"]}</td>
-                <td className="px-2 py-1 border">{r["folionum"]}</td>
-                <td className="px-2 py-1 border">{money(r["global_venta"])}</td>
+            {filtered.map((r, i) => (
+              <tr key={i} className="border-t hover:bg-zinc-50">
+                <td className="px-2 py-1 border">{r["Tipo_DTE"]}</td>
+                <td className="px-2 py-1 border">{r["Periodo"]}</td>
+                <td className="px-2 py-1 border">{r["Empleado Ventas"]}</td>
+                <td className="px-2 py-1 border">{r["Codigo Cliente"]}</td>
+                <td className="px-2 py-1 border">{r["Nombre Cliente"]}</td>
+                <td className="px-2 py-1 border">{r["Direccion"]}</td>
+                <td className="px-2 py-1 border">{r["Comuna"]}</td>
+                <td className="px-2 py-1 border">{r["Ciudad"]}</td>
+                <td className="px-2 py-1 border">{r["Folio"]}</td>
                 <td className="px-2 py-1 border">
-                  <button
-                    className="text-blue-600 underline"
-                    onClick={() =>
-                      setDetalle(rows.filter((x) => x["folionum"] === r["folionum"]))
-                    }
-                  >
-                    Detalle
-                  </button>
+                  {money(r["Global Venta"])}
+                </td>
+                <td
+                  className="px-2 py-1 border text-blue-600 underline cursor-pointer"
+                  onClick={() =>
+                    setDetalle(filtered.filter((x) => x["Folio"] === r["Folio"]))
+                  }
+                >
+                  Detalle
                 </td>
               </tr>
             ))}
-            {filtrados.length === 0 && (
-              <tr>
-                <td colSpan={11} className="text-center py-4 text-zinc-500">
-                  No se encontraron resultados.
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
       </div>
 
-      {/* Modal de Detalle */}
-      {detalle.length > 0 && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded p-6 max-w-3xl w-full shadow-lg">
+      {/* ===== Modal detalle ===== */}
+      {detalle && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center p-4">
+          <div className="bg-white rounded shadow-lg max-w-4xl w-full p-6 relative">
+            <button
+              onClick={() => setDetalle(null)}
+              className="absolute top-2 right-2 text-gray-600"
+            >
+              ✖
+            </button>
             <h2 className="text-lg font-bold mb-4">
-              Detalle — Folio {detalle[0]["folionum"]}
+              Detalle — Folio {detalle[0]["Folio"]}
             </h2>
-            <table className="min-w-full border text-sm mb-4">
+
+            <table className="min-w-full border text-sm">
               <thead className="bg-zinc-100">
                 <tr>
                   <th className="px-2 py-1 border">ItemCode</th>
-                  <th className="px-2 py-1 border">Descripción</th>
-                  <th className="px-2 py-1 border">Cantidad</th>
+                  <th className="px-2 py-1 border">Dscription</th>
+                  <th className="px-2 py-1 border">Quantity</th>
                   <th className="px-2 py-1 border">Cantidad Kilos</th>
                   <th className="px-2 py-1 border">Global Venta</th>
                 </tr>
@@ -187,21 +212,17 @@ export default function FacturasNCPage() {
               <tbody>
                 {detalle.map((d, i) => (
                   <tr key={i}>
-                    <td className="px-2 py-1 border">{d["itemcode"]}</td>
-                    <td className="px-2 py-1 border">{d["dscription"]}</td>
-                    <td className="px-2 py-1 border">{d["quantity"]}</td>
-                    <td className="px-2 py-1 border">{d["cantidad_kilos"]}</td>
-                    <td className="px-2 py-1 border">{money(d["global_venta"])}</td>
+                    <td className="px-2 py-1 border">{d["ItemCode"]}</td>
+                    <td className="px-2 py-1 border">{d["Dscription"]}</td>
+                    <td className="px-2 py-1 border">{d["Quantity"]}</td>
+                    <td className="px-2 py-1 border">{d["Cantidad Kilos"]}</td>
+                    <td className="px-2 py-1 border">
+                      {money(d["Global Venta"])}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            <button
-              className="bg-red-500 text-white px-4 py-2 rounded"
-              onClick={() => setDetalle([])}
-            >
-              Cerrar
-            </button>
           </div>
         </div>
       )}
