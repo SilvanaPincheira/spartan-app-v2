@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
-/* ===================== Helpers ===================== */
-
+/* ===== Helpers ===== */
 function normKey(k: string) {
   return (k || "")
     .normalize("NFD")
@@ -13,7 +12,6 @@ function normKey(k: string) {
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_|_$/g, "");
 }
-
 function parseNumber(v: any): number {
   if (v == null) return 0;
   const s = String(v).replace(/[^0-9,.\-]/g, "").trim();
@@ -26,7 +24,6 @@ function parseNumber(v: any): number {
   const n = Number(t);
   return Number.isFinite(n) ? n : 0;
 }
-
 function parseFecha(v: any): string {
   if (!v) return "";
   const s = String(v).trim();
@@ -39,7 +36,6 @@ function parseFecha(v: any): string {
   if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   return "";
 }
-
 function rutKey(raw: string): string {
   if (!raw) return "";
   let s = raw.toUpperCase().trim();
@@ -53,14 +49,12 @@ function rutDisplayFromKey(key: string): string {
   if (key.length < 2) return key;
   return `${key.slice(0, -1)}-${key.slice(-1)}`;
 }
-
 function first(row: Record<string, any>, candidates: string[]): any {
   for (const c of candidates) {
     if (row[c] != null && String(row[c]).trim() !== "") return row[c];
   }
   return "";
 }
-
 // Extrae TODOS los emails válidos de columnas EMAIL_COL
 function extractEmails(row: Record<string, any>): string[] {
   const emailRegex = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
@@ -81,7 +75,7 @@ function extractEmails(row: Record<string, any>): string[] {
   return Array.from(set);
 }
 
-// CSV parser (papaparse si existe; fallback manual si no)
+// CSV parser
 async function parseCsv(text: string): Promise<Record<string, string>[]> {
   try {
     const Papa = (await import("papaparse")).default;
@@ -101,44 +95,9 @@ async function parseCsv(text: string): Promise<Record<string, string>[]> {
       return o;
     });
   } catch {
-    // fallback simple (respeta comillas)
-    const rows: string[][] = [];
-    let cur = "";
-    let inQ = false;
-    let row: string[] = [];
-    const pushField = () => { row.push(cur); cur = ""; };
-    const pushRow = () => { rows.push(row); row = []; };
-    for (let i = 0; i < text.length; i++) {
-      const ch = text[i], nx = text[i + 1];
-      if (ch === '"') {
-        if (inQ && nx === '"') { cur += '"'; i++; }
-        else inQ = !inQ;
-      } else if (ch === "," && !inQ) {
-        pushField();
-      } else if ((ch === "\n" || ch === "\r") && !inQ) {
-        if (ch === "\r" && nx === "\n") i++;
-        pushField(); pushRow();
-      } else cur += ch;
-    }
-    if (cur.length || row.length) { pushField(); pushRow(); }
-    const headers = (rows[0] || []).map(normKey);
-    const out: Record<string, string>[] = [];
-    for (let r = 1; r < rows.length; r++) {
-      const obj: Record<string, string> = {};
-      (rows[r] || []).forEach((v, i) => {
-        const key = headers[i] || `col_${i}`;
-        if (obj.hasOwnProperty(key)) {
-          let j = 1;
-          while (obj.hasOwnProperty(`${key}_${j}`)) j++;
-          obj[`${key}_${j}`] = v;
-        } else obj[key] = v;
-      });
-      out.push(obj);
-    }
-    return out;
+    return [];
   }
 }
-
 async function fetchCsv(spreadsheetId: string, gid: string): Promise<Record<string, string>[]> {
   const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
   const res = await fetch(url, { cache: "no-store" });
@@ -146,8 +105,7 @@ async function fetchCsv(spreadsheetId: string, gid: string): Promise<Record<stri
   return parseCsv(txt);
 }
 
-/* ===================== Component ===================== */
-
+/* ===== Component ===== */
 export default function ClientesInactivosConComodato() {
   const supabase = createClientComponentClient();
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
@@ -162,7 +120,7 @@ export default function ClientesInactivosConComodato() {
         const email = s.session?.user?.email || null;
         setSessionEmail(email);
 
-        // IDs de tus hojas
+        // Hojas
         const ventasId = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
         const comId = "1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s";
         const ventasGid = "871602912";
@@ -171,26 +129,23 @@ export default function ClientesInactivosConComodato() {
         const ventasRows = await fetchCsv(ventasId, ventasGid);
         const comRows = await fetchCsv(comId, comGid);
 
-        const cutoff = "2025-03-01"; // 6M hacia atrás desde sep-2025
+        const cutoff = "2025-03-01";
 
-        // ===== VENTAS PT =====
+        // ===== Ventas PT =====
         const ventasMap = new Map<string, { ultima: string }>();
         for (const r of ventasRows) {
           const key = rutKey(first(r, ["rut_cliente"]));
           if (!key) continue;
-
           const fecha = parseFecha(first(r, ["docdate"]));
           if (!fecha) continue;
-
           const itemCode = String(first(r, ["itemcode", "codigo_producto"])).toUpperCase();
           if (!itemCode.startsWith("PT")) continue;
-
           if (!ventasMap.has(key)) ventasMap.set(key, { ultima: fecha });
           const entry = ventasMap.get(key)!;
           if (fecha > entry.ultima) entry.ultima = fecha;
         }
 
-        // ===== COMODATOS (EMAIL_COL base para filtro) =====
+        // ===== Comodatos vigentes (EMAIL_COL obligatorio) =====
         const comMap = new Map<
           string,
           { total: number; nombre: string; emails: string[]; ejecutivo: string }
@@ -198,15 +153,13 @@ export default function ClientesInactivosConComodato() {
         for (const r of comRows) {
           const key = rutKey(first(r, ["rut_cliente"]));
           if (!key) continue;
-
           const fecha = parseFecha(first(r, ["fecha_contab"]));
           if (fecha && fecha < "2023-01-01") continue;
-
+          const emails = extractEmails(r);
+          if (emails.length === 0) continue; // 🔹 descartar sin EMAIL_COL
           const total = parseNumber(first(r, ["total"]));
           const nombre = String(first(r, ["nombre_cliente"])) || "";
-          const emails = extractEmails(r);
           const ejecutivo = String(first(r, ["empleado_ventas"])) || "";
-
           if (!comMap.has(key)) {
             comMap.set(key, { total: 0, nombre, emails, ejecutivo });
           }
@@ -215,14 +168,13 @@ export default function ClientesInactivosConComodato() {
           entry.emails = Array.from(new Set([...(entry.emails || []), ...emails]));
         }
 
-        // ===== CONSOLIDADO =====
+        // ===== Consolidado =====
         const out: any[] = [];
         for (const [key, info] of comMap) {
           const v = ventasMap.get(key);
           const ultima = v?.ultima || null;
           const sinVentas = !v || (ultima && ultima < cutoff);
           if (!sinVentas) continue;
-
           out.push({
             rut: rutDisplayFromKey(key),
             cliente: info.nombre,
@@ -234,7 +186,7 @@ export default function ClientesInactivosConComodato() {
           });
         }
 
-        // ===== FILTRO POR USUARIO =====
+        // ===== Filtro usuario =====
         let filtrado = out;
         if (sessionEmail) {
           const me = sessionEmail.toLowerCase().trim();
@@ -260,7 +212,7 @@ export default function ClientesInactivosConComodato() {
   return (
     <div className="p-6">
       <h1 className="text-xl font-bold text-[#2B6CFF] mb-4">
-        📊 Clientes con Comodatos (desde 2023) sin ventas PT últimos 6M
+        📊 Clientes con Comodatos (desde 2023) sin ventas PT últimos 6M (solo con EMAIL_COL)
       </h1>
       {loading ? (
         <p>Cargando…</p>
@@ -288,7 +240,7 @@ export default function ClientesInactivosConComodato() {
               <tr key={i} className="border-t">
                 <td className="px-2 py-1">{d.rut}</td>
                 <td className="px-2 py-1">{d.cliente}</td>
-                <td className="px-2 py-1">{d.email || "—"}</td>
+                <td className="px-2 py-1">{d.email}</td>
                 <td className="px-2 py-1">{d.ejecutivo || "—"}</td>
                 <td className="px-2 py-1 text-right">{d.comodato.toLocaleString("es-CL")}</td>
                 <td className="px-2 py-1">{d.ultimaCompra}</td>
