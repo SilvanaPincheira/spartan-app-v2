@@ -14,7 +14,7 @@ const menuItems = [
   { name: "Promociones", href: "/promociones", icon: "🎯" },
   { name: "KPI", href: "/kpi", icon: "📊" },
   { name: "Metas", href: "/metas", icon: "🎯" },
-  { name: "Facturas y NC", href: "/facturas", icon: "🧾" },
+  { name: "Facturas y NC", href: "/facturas-nc", icon: "🧾" },
   { name: "Comisiones", href: "/comisiones", icon: "💰" }, // ✅ nuevo módulo
 ];
 
