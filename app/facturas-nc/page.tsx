@@ -2,14 +2,6 @@
 // -----------------------------------------------------------------------------
 // FACTURAS Y NOTAS DE CRÉDITO — CLIENT COMPONENT (Next.js / React)
 // -----------------------------------------------------------------------------
-// ✔ Carga desde Google Sheets (CSV).
-// ✔ Filtro por usuario logueado (EMAIL_COL).
-// ✔ Admin (silvana.pincheira@spartan.cl) puede ver todo.
-// ✔ Búsqueda por RUT, Cliente o Folio.
-// ✔ Tabla principal: Tipo_DTE, Periodo, Empleado Ventas, Cliente, Folio, etc.
-// ✔ Botón Detalle → abre modal con todas las líneas del Folio (ItemCode, Cantidad, etc).
-// ✔ Formato CLP en Global Venta.
-// -----------------------------------------------------------------------------
 
 "use client";
 
@@ -19,7 +11,6 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 /* ============================================================================
    [A] HELPERS
    ============================================================================ */
-// Normaliza strings para comparación sin mayúsculas/acentos
 function normalize(s: string) {
   return (s || "")
     .toLowerCase()
@@ -27,8 +18,6 @@ function normalize(s: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .trim();
 }
-
-// Convierte CSV plano a array de objetos
 function parseCsv(text: string): Record<string, string>[] {
   const rows = text.replace(/\r/g, "").split("\n").map(r => r.split(","));
   if (!rows.length) return [];
@@ -43,11 +32,9 @@ function parseCsv(text: string): Record<string, string>[] {
   }
   return out;
 }
-
-// Formato moneda CLP
 function money(n: any) {
   const v = Number(n);
-  if (!Number.isFinite(v)) return "-";
+  if (!Number.isFinite(v) || v === 0) return "-";
   return v.toLocaleString("es-CL", {
     style: "currency",
     currency: "CLP",
@@ -59,13 +46,11 @@ function money(n: any) {
    [B] COMPONENTE PRINCIPAL
    ============================================================================ */
 export default function FacturasNCPage() {
-  /* ----- Estado global ----- */
   const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [search, setSearch] = useState("");
   const [detalle, setDetalle] = useState<Record<string, string>[] | null>(null);
   const [userEmail, setUserEmail] = useState("");
 
-  /* ----- Configuración ----- */
   const SHEET_URL =
     "https://docs.google.com/spreadsheets/d/1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s/export?format=csv&gid=871602912";
 
@@ -77,7 +62,6 @@ export default function FacturasNCPage() {
   useEffect(() => {
     (async () => {
       try {
-        // Leer usuario logueado
         const supabase = createClientComponentClient();
         const {
           data: { user },
@@ -85,12 +69,10 @@ export default function FacturasNCPage() {
         const me = (user?.email || "").toLowerCase().trim();
         setUserEmail(me);
 
-        // Leer CSV
         const res = await fetch(SHEET_URL, { cache: "no-store" });
         const txt = await res.text();
         const data = parseCsv(txt);
 
-        // Filtrar según EMAIL_COL
         const filtrado =
           me === ADMIN_EMAIL || !me
             ? data
@@ -106,7 +88,7 @@ export default function FacturasNCPage() {
   }, []);
 
   /* ==========================================================================
-     [D] FILTRADO DE BÚSQUEDA
+     [D] FILTRO DE BÚSQUEDA
      ========================================================================== */
   const filtered = rows.filter((r) => {
     if (!search) return true;
@@ -114,7 +96,7 @@ export default function FacturasNCPage() {
     return (
       normalize(r["Codigo Cliente"]).includes(s) ||
       normalize(r["Nombre Cliente"]).includes(s) ||
-      normalize(r["Folio"]).includes(s) ||
+      normalize(r["FolioNum"]).includes(s) ||
       normalize(r["RUT Cliente"] || "").includes(s)
     );
   });
@@ -148,10 +130,10 @@ export default function FacturasNCPage() {
               <th className="px-2 py-1 border">Empleado Ventas</th>
               <th className="px-2 py-1 border">Codigo Cliente</th>
               <th className="px-2 py-1 border">Nombre Cliente</th>
-              <th className="px-2 py-1 border">Dirección</th>
+              <th className="px-2 py-1 border">Direccion</th>
               <th className="px-2 py-1 border">Comuna</th>
               <th className="px-2 py-1 border">Ciudad</th>
-              <th className="px-2 py-1 border">Folio</th>
+              <th className="px-2 py-1 border">FolioNum</th>
               <th className="px-2 py-1 border">Global Venta</th>
               <th className="px-2 py-1 border">Acción</th>
             </tr>
@@ -167,14 +149,14 @@ export default function FacturasNCPage() {
                 <td className="px-2 py-1 border">{r["Direccion"]}</td>
                 <td className="px-2 py-1 border">{r["Comuna"]}</td>
                 <td className="px-2 py-1 border">{r["Ciudad"]}</td>
-                <td className="px-2 py-1 border">{r["Folio"]}</td>
-                <td className="px-2 py-1 border">
-                  {money(r["Global Venta"])}
-                </td>
+                <td className="px-2 py-1 border">{r["FolioNum"]}</td>
+                <td className="px-2 py-1 border">{money(r["Global Venta"])}</td>
                 <td
                   className="px-2 py-1 border text-blue-600 underline cursor-pointer"
                   onClick={() =>
-                    setDetalle(filtered.filter((x) => x["Folio"] === r["Folio"]))
+                    setDetalle(
+                      filtered.filter((x) => x["FolioNum"] === r["FolioNum"])
+                    )
                   }
                 >
                   Detalle
@@ -196,7 +178,7 @@ export default function FacturasNCPage() {
               ✖
             </button>
             <h2 className="text-lg font-bold mb-4">
-              Detalle — Folio {detalle[0]["Folio"]}
+              Detalle — Folio {detalle[0]["FolioNum"]}
             </h2>
 
             <table className="min-w-full border text-sm">
