@@ -4,7 +4,7 @@ import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 
 const URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ5pwU5ejrJxqeIqhK4rE3S6II3jPMZAetsoA2ZjaV3XspsxMmVneryY5HeyhwsbaZP22eOfFsF1toL/pub?output=csv&sheet=Ventas";
+  "https://docs.google.com/spreadsheets/d/1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s/export?format=csv&gid=871602912";
 
 function normalize(val: string) {
   return val?.toLowerCase().trim().replace(/\s+/g, "_").replace(/[^\w_]/g, "");
@@ -12,20 +12,23 @@ function normalize(val: string) {
 
 export async function GET() {
   try {
+    // 1️⃣ Usuario autenticado
     const supabase = createRouteHandlerClient({ cookies });
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
 
     const email = user.email?.toLowerCase() ?? "";
 
+    // 2️⃣ Descargar CSV
     const res = await fetch(URL, { cache: "no-store" });
     if (!res.ok) {
-      return NextResponse.json({ error: "Error al leer hoja de Ventas" }, { status: 500 });
+      return NextResponse.json({ error: "Error al leer hoja Ventas" }, { status: 500 });
     }
 
     const text = await res.text();
     const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
 
+    // 3️⃣ Normalizar headers y filas
     const headers = parsed.meta.fields?.map(normalize) || [];
     const data = (parsed.data as any[]).map((row) => {
       const obj: any = {};
@@ -35,13 +38,12 @@ export async function GET() {
       return obj;
     });
 
-    // Admins → ven todo
+    // 4️⃣ Filtrar por EMAIL_COL
     const admins = ["silvana.pincheira@spartan.cl", "jorge.beltran@spartan.cl"];
     let filtered = data;
     if (!admins.includes(email)) {
-      const emailColKey = headers.find((h) => h.startsWith("email"));
       filtered = data.filter(
-        (row) => row[emailColKey || ""]?.toString().trim().toLowerCase() === email
+        (row) => (row["email_col"] || "").toString().trim().toLowerCase() === email
       );
     }
 
@@ -51,3 +53,4 @@ export async function GET() {
     return NextResponse.json({ error: "No se pudo leer Ventas" }, { status: 500 });
   }
 }
+

@@ -12,16 +12,16 @@ function normalize(val: string) {
 
 export async function GET() {
   try {
+    // 1️⃣ Usuario logueado
     const supabase = createRouteHandlerClient({ cookies });
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       return NextResponse.json({ error: "No autenticado" }, { status: 401 });
     }
 
     const email = user.email?.toLowerCase() ?? "";
 
+    // 2️⃣ Leer CSV desde Google Sheets
     const res = await fetch(URL, { cache: "no-store" });
     if (!res.ok) {
       return NextResponse.json({ error: "Error al leer hoja Comodatos" }, { status: 500 });
@@ -30,6 +30,7 @@ export async function GET() {
     const text = await res.text();
     const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
 
+    // 3️⃣ Normalizar cabeceras
     const headers = parsed.meta.fields?.map(normalize) || [];
     const data = (parsed.data as any[]).map((row) => {
       const obj: any = {};
@@ -39,11 +40,12 @@ export async function GET() {
       return obj;
     });
 
+    // 4️⃣ Filtrar por usuario logueado (EMAIL_COL)
     const admins = ["silvana.pincheira@spartan.cl", "jorge.beltran@spartan.cl"];
     let filtered = data;
     if (!admins.includes(email)) {
       filtered = data.filter(
-        (row) => row["email_col"]?.toString().trim().toLowerCase() === email
+        (row) => (row["email_col"] || "").toString().trim().toLowerCase() === email
       );
     }
 
