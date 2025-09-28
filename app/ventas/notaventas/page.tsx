@@ -1081,14 +1081,14 @@ export default function NotaVentaPage() {
                text-align: center !important;
              }
              th:nth-child(7), td:nth-child(7) {
-               width: 90px !important;
+               width: 70px !important;
                text-align: right !important;
-               padding-right: 8px !important;
+               padding-right: 4px !important;
              }
              th:nth-child(8), td:nth-child(8) {
-               width: 125px !important;
+               width: 135px !important;
                text-align: right !important;
-               padding-left: 6px !important;
+               padding-left: 4px !important;
              }
              th:nth-child(9), td:nth-child(9) {
                width: 125px !important;
