@@ -8,7 +8,7 @@ function normalizarRut(rut: string): string {
   if (!rut) return "";
   rut = rut.toUpperCase().trim();
   rut = rut.replace(/[^0-9K]/g, "");
-  return rut.replace(/[A-Z]$/, ""); // eliminar sufijo de sucursal
+  return rut.replace(/[A-Z]$/, ""); // eliminar sufijo sucursal
 }
 function parseNumber(v: any): number {
   const n = Number(v?.toString().replace(/\./g, "").replace(",", "."));
@@ -59,71 +59,80 @@ export default function ClientesInactivosConComodato() {
         const ventasData = await fetchCsv(ventasId, ventasGid);
         const comodatosData = await fetchCsv(comId, comGid);
 
-        // 🔹 Fecha corte: últimos 6 meses a partir de septiembre 2025
-        const cutoff = new Date("2025-09-01");
-        cutoff.setMonth(cutoff.getMonth() - 6); // marzo 2025
-        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        // 🔹 Mapas de datos
+        const ventasMap = new Map<string, { total: number; ultima: string; nombre: string; email: string; ejecutivo: string }>();
+        const comodatoMap = new Map<string, { total: number; nombre: string; email: string; ejecutivo: string }>();
 
-        // 🔹 Ventas agrupadas por RUT
-        const ventasMap = new Map<string, { ultima: string }>();
+        // 🔹 Corte: últimos 6M desde septiembre 2025 → marzo 2025
+        const cutoff = "2025-03-01";
+
+        /* ===== VENTAS ===== */
         ventasData.forEach((v) => {
           const rut = normalizarRut(v["Rut Cliente"] || v["Codigo Cliente"]);
           if (!rut) return;
 
-          const fecha = parseFecha(v["DocDate"]) || parseFecha(v["Periodo"]);
+          const fecha = parseFecha(v["DocDate"]);
           if (!fecha) return;
 
-          if (!ventasMap.has(rut)) ventasMap.set(rut, { ultima: fecha });
+          // Solo productos PT (químicos)
+          const itemCode = (v["ItemCode"] || v["Codigo Producto"] || "").toUpperCase();
+          if (!itemCode.startsWith("PT")) return;
+
+          const monto = parseNumber(v["Global Venta"]);
+          const nombre = v["Nombre Cliente"] || "";
+          const email = v["EMAIL_COL"] || "";
+          const ejecutivo = v["Émpleado Ventas"] || v["Empleado Ventas"] || "";
+
+          if (!ventasMap.has(rut)) {
+            ventasMap.set(rut, { total: 0, ultima: fecha, nombre, email, ejecutivo });
+          }
+
           const entry = ventasMap.get(rut)!;
+          entry.total += monto;
           if (fecha > entry.ultima) entry.ultima = fecha;
         });
 
-        // 🔹 Comodatos desde 2023
-        const comodatoMap = new Map<
-          string,
-          { total: number; nombre: string; email: string; ejecutivo: string }
-        >();
+        /* ===== COMODATOS ===== */
         comodatosData.forEach((c) => {
-          const rut = normalizarRut(c["Rut Cliente"]);
+          const rut = normalizarRut(c["Rut Cliente"] || c["Codigo Cliente"]);
           if (!rut) return;
 
-          const fecha = parseFecha(c["Fecha Inicio"]) || parseFecha(c["Fecha"]);
-          if (fecha && fecha < "2023-01-01") return; // solo vigentes desde 2023
+          const fecha = parseFecha(c["Fecha Contab"]);
+          if (fecha && fecha < "2023-01-01") return; // solo vigentes >= 2023
 
-          const total = parseNumber(c["Total"]);
+          const monto = parseNumber(c["Total"]);
           const nombre = c["Nombre Cliente"] || "";
-          const emailCol = c["EMAIL_COL"] || "";
-          const ejecutivo = c["Ejecutivo"] || "";
+          const email = c["EMAIL_COL"] || "";
+          const ejecutivo = c["Empleado ventas"] || "";
 
           if (!comodatoMap.has(rut)) {
-            comodatoMap.set(rut, { total: 0, nombre, email: emailCol, ejecutivo });
+            comodatoMap.set(rut, { total: 0, nombre, email, ejecutivo });
           }
-          comodatoMap.get(rut)!.total += total;
+          comodatoMap.get(rut)!.total += monto;
         });
 
-        // 🔹 Construcción dataset final
+        /* ===== CONSOLIDADO ===== */
         const resultado: any[] = [];
         for (const [rut, info] of comodatoMap) {
           const venta = ventasMap.get(rut);
           const ultima = venta?.ultima || null;
 
-          // condición: no ventas en últimos 6M
-          const sinVentas =
-            !ultima || (ultima && ultima < cutoffStr);
+          // condición: sin ventas en últimos 6M
+          const sinVentas = !venta || (ultima && ultima < cutoff);
 
           if (sinVentas) {
             resultado.push({
               rut,
-              cliente: info.nombre,
-              email: info.email,
-              ejecutivo: info.ejecutivo,
+              cliente: info.nombre || venta?.nombre || "",
+              email: info.email || venta?.email || "",
+              ejecutivo: info.ejecutivo || venta?.ejecutivo || "",
               comodato: info.total,
               ultimaCompra: ultima || "—",
             });
           }
         }
 
-        // 🔹 Filtrado por usuario logueado
+        /* ===== FILTRO POR USUARIO LOGUEADO ===== */
         let filtrado = resultado;
         if (sessionEmail) {
           const emailLower = sessionEmail.toLowerCase();
@@ -141,10 +150,13 @@ export default function ClientesInactivosConComodato() {
     })();
   }, []);
 
+  /* ===== Totales ===== */
+  const totalComodato = data.reduce((acc, d) => acc + d.comodato, 0);
+
   return (
     <div className="p-6">
       <h1 className="text-xl font-bold text-[#2B6CFF] mb-4">
-        📊 Clientes con Comodatos (desde =2023) sin ventas últimos 6M
+        📊 Clientes con Comodatos (desde 2023) sin ventas PT últimos 6M
       </h1>
       {loading ? (
         <p>Cargando…</p>
@@ -172,8 +184,8 @@ export default function ClientesInactivosConComodato() {
               <tr key={i} className="border-t">
                 <td className="px-2 py-1">{d.rut}</td>
                 <td className="px-2 py-1">{d.cliente}</td>
-                <td className="px-2 py-1">{d.email}</td>
-                <td className="px-2 py-1">{d.ejecutivo}</td>
+                <td className="px-2 py-1">{d.email || "—"}</td>
+                <td className="px-2 py-1">{d.ejecutivo || "—"}</td>
                 <td className="px-2 py-1 text-right">
                   {d.comodato.toLocaleString("es-CL")}
                 </td>
@@ -181,6 +193,19 @@ export default function ClientesInactivosConComodato() {
               </tr>
             ))}
           </tbody>
+          {data.length > 0 && (
+            <tfoot className="bg-zinc-100 font-bold">
+              <tr>
+                <td colSpan={4} className="px-2 py-1 text-right">
+                  Total
+                </td>
+                <td className="px-2 py-1 text-right">
+                  {totalComodato.toLocaleString("es-CL")}
+                </td>
+                <td></td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       )}
     </div>
