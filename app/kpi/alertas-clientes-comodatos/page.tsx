@@ -4,12 +4,15 @@ import { useEffect, useState } from "react";
 
 /* ===== Helpers ===== */
 function money(v: any) {
-  const n = Number(v);
-  if (!isFinite(n)) return "—";
+  if (v == null || v === "") return "—";
+  const s = String(v).replace(/\./g, "").replace(/,/g, "").trim();
+  const n = Number(s);
+  if (!isFinite(n) || n === 0) return "$0";
   return n.toLocaleString("es-CL", {
     style: "currency",
     currency: "CLP",
     minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
   });
 }
 
@@ -27,6 +30,7 @@ export default function AlertasClientesComodatos() {
   const [data, setData] = useState<Cliente[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [filtroAlerta, setFiltroAlerta] = useState("Todos");
 
   useEffect(() => {
     (async () => {
@@ -44,12 +48,27 @@ export default function AlertasClientesComodatos() {
 
   const filtered = data.filter((r) => {
     const q = search.toLowerCase();
-    return (
+    const matchSearch =
       r.rut_cliente?.toLowerCase().includes(q) ||
       r.nombre_cliente?.toLowerCase().includes(q) ||
-      r.empleado_ventas?.toLowerCase().includes(q)
-    );
+      r.empleado_ventas?.toLowerCase().includes(q);
+
+    const matchFiltro =
+      filtroAlerta === "Todos" || r.alerta_final?.toUpperCase() === filtroAlerta.toUpperCase();
+
+    return matchSearch && matchFiltro;
   });
+
+  // Totales
+  const totalVentas = filtered.reduce((acc, c) => {
+    const s = String(c.ventas_quimicos_2025 || "").replace(/\./g, "").replace(/,/g, "");
+    return acc + (parseInt(s) || 0);
+  }, 0);
+
+  const totalComodatos = filtered.reduce((acc, c) => {
+    const s = String(c.comodatos_activos_2021 || "").replace(/\./g, "").replace(/,/g, "");
+    return acc + (parseInt(s) || 0);
+  }, 0);
 
   return (
     <div className="p-6">
@@ -57,14 +76,26 @@ export default function AlertasClientesComodatos() {
         🚨 Alertas Clientes con Comodatos (desde 2023) sin ventas PT últimos 6M
       </h1>
 
-      {/* Buscador */}
-      <input
-        type="text"
-        placeholder="Buscar cliente, RUT o ejecutivo..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="mb-4 w-full rounded border px-3 py-2 text-sm"
-      />
+      {/* Buscador + Filtro */}
+      <div className="flex gap-2 mb-4">
+        <input
+          type="text"
+          placeholder="Buscar cliente, RUT o ejecutivo..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="flex-1 rounded border px-3 py-2 text-sm"
+        />
+        <select
+          value={filtroAlerta}
+          onChange={(e) => setFiltroAlerta(e.target.value)}
+          className="rounded border px-2 py-2 text-sm"
+        >
+          <option value="Todos">Todos</option>
+          <option value="ALERTA">Alerta</option>
+          <option value="OK">OK</option>
+          <option value="SIN COMODATO">Sin Comodato</option>
+        </select>
+      </div>
 
       {loading ? (
         <p>Cargando…</p>
@@ -87,20 +118,31 @@ export default function AlertasClientesComodatos() {
             </thead>
             <tbody>
               {filtered.map((c, i) => (
-                <tr key={i} className="border-t">
+                <tr
+                  key={i}
+                  className={`border-t ${
+                    c.alerta_final?.toUpperCase() === "ALERTA" ? "bg-red-100" : ""
+                  }`}
+                >
                   <td className="px-2 py-1">{c.rut_cliente}</td>
                   <td className="px-2 py-1">{c.nombre_cliente}</td>
                   <td className="px-2 py-1">{c.empleado_ventas}</td>
-                  <td className="px-2 py-1 text-right">
-                    {money(c.ventas_quimicos_2025)}
-                  </td>
-                  <td className="px-2 py-1 text-right">
-                    {money(c.comodatos_activos_2021)}
-                  </td>
+                  <td className="px-2 py-1 text-right">{money(c.ventas_quimicos_2025)}</td>
+                  <td className="px-2 py-1 text-right">{money(c.comodatos_activos_2021)}</td>
                   <td className="px-2 py-1">{c.alerta_final}</td>
                 </tr>
               ))}
             </tbody>
+            <tfoot className="bg-zinc-100 font-semibold">
+              <tr>
+                <td colSpan={3} className="px-2 py-1 text-right">
+                  Totales:
+                </td>
+                <td className="px-2 py-1 text-right">{money(totalVentas)}</td>
+                <td className="px-2 py-1 text-right">{money(totalComodatos)}</td>
+                <td />
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}
