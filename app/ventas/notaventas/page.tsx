@@ -1081,14 +1081,15 @@ export default function NotaVentaPage() {
           }
 
           th:nth-child(7), td:nth-child(7) { /* Precio venta */
-            width: 100px !important;
-            text-align: right !important;
-          }
+           width: 80px !important;   /* antes 100px */
+           text-align: right !important;
+           padding-right: 4px !important; /* 🔹 empuja un poco hacia la izquierda */
+}
 
           th:nth-child(8), td:nth-child(8) { /* $ Presentación */
-            width: 120px !important;
-            text-align: right !important;
-          }
+           width: 130px !important;  /* antes 120px */
+           text-align: right !important;
+}
 
           th:nth-child(9), td:nth-child(9) { /* Total */
             width: 120px !important;
