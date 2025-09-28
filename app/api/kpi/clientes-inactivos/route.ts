@@ -155,7 +155,11 @@ export async function GET() {
     const admins = ["silvana.pincheira@spartan.cl", "jorge.beltran@spartan.cl"];
     let filtrado = resultado;
     if (!admins.includes(email)) {
-      filtrado = resultado.filter((r) => r.emails.includes(email));
+      filtrado = resultado.filter((r) =>
+  (r.emails || []).some(
+    (em: string) => em.toLowerCase().trim() === email.toLowerCase().trim()
+  )
+);
     }
 
     return NextResponse.json({ data: filtrado });
