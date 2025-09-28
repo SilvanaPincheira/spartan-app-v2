@@ -15,45 +15,31 @@ const menuItems = [
   { name: "KPI", href: "/kpi", icon: "📊" },
   { name: "Metas", href: "/metas", icon: "🎯" },
   { name: "Facturas y NC", href: "/facturas", icon: "🧾" },
+  { name: "Comisiones", href: "/comisiones", icon: "💰" }, // nuevo módulo
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [session, setSession] = useState<any>(null);
-
-  // ⚡ Debug: verificar si las variables existen
-  console.log("SUPABASE_URL:", process.env.NEXT_PUBLIC_SUPABASE_URL);
-  console.log(
-    "SUPABASE_KEY:",
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.slice(0, 10) + "..."
-  );
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    try {
-      const supabase = createClientComponentClient();
-
-      supabase.auth.getSession().then(({ data }) => {
-        setSession(data.session);
-      });
-    } catch (err) {
-      console.warn("⚠️ Supabase client no inicializado:", err);
-    }
+    const supabase = createClientComponentClient();
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+    });
   }, []);
 
   async function handleLogout() {
-    try {
-      const supabase = createClientComponentClient();
-      await supabase.auth.signOut();
-      window.location.href = "/login";
-    } catch (err) {
-      console.warn("⚠️ Error al cerrar sesión:", err);
-    }
+    const supabase = createClientComponentClient();
+    await supabase.auth.signOut();
+    window.location.href = "/login";
   }
 
   return (
     <html lang="es">
       <body className="flex min-h-screen bg-gray-50 text-zinc-900">
-        {/* ==== Menú lateral ==== */}
+        {/* ==== Sidebar fijo en escritorio ==== */}
         <aside className="hidden md:flex w-64 bg-white border-r shadow-sm flex-col print:hidden">
           <div className="px-4 py-6 border-b">
             <h1 className="text-xl font-bold text-[#1f4ed8]">Panel Spartan</h1>
@@ -91,7 +77,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             ))}
           </nav>
 
-          {/* Botón según login */}
           <div className="p-4 border-t">
             {session ? (
               <button
@@ -111,6 +96,67 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </aside>
 
+        {/* ==== Menú hamburguesa en móvil ==== */}
+        <div className="md:hidden fixed top-0 left-0 right-0 bg-white border-b flex items-center justify-between px-4 py-3 shadow-sm z-20">
+          <h1 className="text-lg font-bold text-[#1f4ed8]">Panel Spartan</h1>
+          <button
+            onClick={() => setMobileOpen(!mobileOpen)}
+            className="p-2 rounded-md border text-gray-700"
+          >
+            {mobileOpen ? "✖️" : "☰"}
+          </button>
+        </div>
+
+        {/* Overlay menú móvil */}
+        {mobileOpen && (
+          <div className="fixed inset-0 bg-black bg-opacity-30 z-30">
+            <aside className="absolute top-0 left-0 w-64 h-full bg-white shadow-md flex flex-col">
+              <div className="px-4 py-6 border-b flex justify-between items-center">
+                <h1 className="text-xl font-bold text-[#1f4ed8]">
+                  Panel Spartan
+                </h1>
+                <button onClick={() => setMobileOpen(false)}>✖️</button>
+              </div>
+
+              {/* mismo menú vertical que en PC */}
+              <div className="px-2 pt-3">
+                <Link
+                  href="/"
+                  onClick={() => setMobileOpen(false)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition
+                    ${
+                      pathname === "/"
+                        ? "bg-[#1f4ed8] text-white"
+                        : "text-gray-700 hover:bg-blue-50 hover:text-[#1f4ed8]"
+                    }`}
+                >
+                  <span>🏠</span>
+                  Inicio
+                </Link>
+              </div>
+
+              <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto">
+                {menuItems.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setMobileOpen(false)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition ${
+                      pathname === item.href ||
+                      pathname.startsWith(item.href + "/")
+                        ? "bg-[#1f4ed8] text-white"
+                        : "text-gray-700 hover:bg-blue-50 hover:text-[#1f4ed8]"
+                    }`}
+                  >
+                    <span>{item.icon}</span>
+                    {item.name}
+                  </Link>
+                ))}
+              </nav>
+            </aside>
+          </div>
+        )}
+
         {/* ==== Contenido principal ==== */}
         <main className="flex-1 p-6 mt-14 md:mt-0 overflow-y-auto">
           {children}
@@ -119,4 +165,5 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
+
 
