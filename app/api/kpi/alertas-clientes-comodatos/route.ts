@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 
-/* 🔹 Parser de fechas (maneja mm/dd/yy y yyyy-mm-dd) */
+/* 🔹 Parser de fechas */
 function parseFecha(v: string): string {
   if (!v) return "";
   const s = v.trim();
@@ -30,14 +30,22 @@ export async function GET() {
   try {
     // 1️⃣ Usuario logueado
     const supabase = createRouteHandlerClient({ cookies });
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
 
     const me = (user.email || "").trim().toLowerCase();
 
-    // 2️⃣ Consumir APIs base
-    const ventasRes = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/ventas`, { cache: "no-store" });
-    const comodatosRes = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/comodatos`, { cache: "no-store" });
+    // 2️⃣ Base URL dinámica (Vercel o Localhost)
+    const baseUrl =
+      process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : "http://localhost:3000";
+
+    // 3️⃣ Consumir APIs base
+    const ventasRes = await fetch(`${baseUrl}/api/ventas`, { cache: "no-store" });
+    const comodatosRes = await fetch(`${baseUrl}/api/comodatos`, { cache: "no-store" });
 
     if (!ventasRes.ok || !comodatosRes.ok) {
       return NextResponse.json({ error: "Error al cargar datos base" }, { status: 500 });
@@ -46,11 +54,7 @@ export async function GET() {
     const ventasRaw = (await ventasRes.json()).data || [];
     const comodatosRaw = (await comodatosRes.json()).data || [];
 
-    console.log("👉 Usuario logueado:", me);
-    console.log("👉 Ventas recibidas:", ventasRaw.length);
-    console.log("👉 Comodatos recibidos:", comodatosRaw.length);
-
-    // 3️⃣ Normalizar datos
+    // 4️⃣ Normalizar datos
     const ventas = ventasRaw.map((v: any) => ({
       rut: v.rut_cliente,
       fecha: parseFecha(v.docdate),
@@ -66,12 +70,12 @@ export async function GET() {
       fecha: parseFecha(c.fecha_contab),
     }));
 
-    // 4️⃣ Fecha de corte (6M atrás desde septiembre 2025)
+    // 5️⃣ Fecha de corte (6M atrás desde septiembre 2025)
     const cutoff = new Date("2025-09-01");
     cutoff.setMonth(cutoff.getMonth() - 6);
     const cutoffStr = cutoff.toISOString().slice(0, 10);
 
-    // 5️⃣ Última venta PT por RUT
+    // 6️⃣ Última venta PT por RUT
     const ventasMap = new Map<string, string>();
     for (const v of ventas) {
       if (!v.rut || !v.fecha) continue;
@@ -81,7 +85,7 @@ export async function GET() {
       }
     }
 
-    // 6️⃣ Consolidar
+    // 7️⃣ Consolidar
     const resultado: any[] = [];
     for (const c of comodatos) {
       if (!c.rut) continue;
@@ -102,7 +106,7 @@ export async function GET() {
       }
     }
 
-    // 7️⃣ Filtro admins
+    // 8️⃣ Filtro admins
     const admins = ["silvana.pincheira@spartan.cl", "jorge.beltran@spartan.cl"];
     let filtrado = resultado;
 
@@ -111,9 +115,6 @@ export async function GET() {
         (r) => (r.email || "").trim().toLowerCase() === me
       );
     }
-
-    console.log("👉 Resultado antes del filtro:", resultado.length);
-    console.log("👉 Resultado después del filtro:", filtrado.length);
 
     return NextResponse.json({ data: filtrado });
   } catch (err) {
