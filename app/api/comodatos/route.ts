@@ -13,12 +13,20 @@ function normalize(val: string) {
 export async function GET() {
   try {
     const supabase = createRouteHandlerClient({ cookies });
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "No autenticado" }, { status: 401 });
+    }
 
     const email = user.email?.toLowerCase() ?? "";
 
-    const res = await fetch(URL);
+    const res = await fetch(URL, { cache: "no-store" });
+    if (!res.ok) {
+      return NextResponse.json({ error: "Error al leer hoja Comodatos" }, { status: 500 });
+    }
+
     const text = await res.text();
     const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
 
@@ -31,12 +39,17 @@ export async function GET() {
       return obj;
     });
 
-    const filtered = data.filter(
-      (row) => row["email_col"]?.toString().trim().toLowerCase() === email
-    );
+    const admins = ["silvana.pincheira@spartan.cl", "jorge.beltran@spartan.cl"];
+    let filtered = data;
+    if (!admins.includes(email)) {
+      filtered = data.filter(
+        (row) => row["email_col"]?.toString().trim().toLowerCase() === email
+      );
+    }
 
     return NextResponse.json({ data: filtered });
   } catch (err) {
-    return NextResponse.json({ error: "No se pudo leer Metas" }, { status: 500 });
+    console.error("🔥 Error API Comodatos:", err);
+    return NextResponse.json({ error: "No se pudo leer Comodatos" }, { status: 500 });
   }
 }

@@ -1,34 +1,8 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import Papa from "papaparse";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
-
-// Normalizar cabeceras
-function normKey(k: string) {
-  return (k || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_|_$/g, "");
-}
-
-async function fetchCsv(url: string) {
-  const res = await fetch(url, { cache: "no-store" });
-  const txt = await res.text();
-  const parsed = Papa.parse(txt, { header: true, skipEmptyLines: true });
-  const headers = parsed.meta.fields?.map(normKey) || [];
-  return (parsed.data as any[]).map((row) => {
-    const o: any = {};
-    headers.forEach((h, i) => {
-      const original = parsed.meta.fields?.[i] || "";
-      o[h] = row[original] ?? "";
-    });
-    return o;
-  });
-}
 
 export async function GET() {
   try {
@@ -42,39 +16,60 @@ export async function GET() {
     }
     const email = user.email?.toLowerCase() ?? "";
 
-    // 2️⃣ Leer la hoja de Google Sheets
-    const url =
-      "https://docs.google.com/spreadsheets/d/1_gD_uYjBh3NlWogDqiiU_kkrZTDueQ98kSrGfc92vSg/edit?gid=0#gid=0"; // 👈 reemplaza con tu ID real
-    const rows = await fetchCsv(url);
+    // 2️⃣ Consumir APIs base
+    const ventasRes = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/ventas`, { cache: "no-store" });
+    const comodatosRes = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/comodatos`, { cache: "no-store" });
 
-    // 3️⃣ Filtrar por EMAIL_COL
-    const admins = ["silvana.pincheira@spartan.cl", "jorge.beltran@spartan.cl"];
-    let filtrado = rows;
-    if (!admins.includes(email)) {
-      filtrado = rows.filter(
-        (r) => (r.email_col || "").toLowerCase().trim() === email
-      );
+    if (!ventasRes.ok || !comodatosRes.ok) {
+      return NextResponse.json({ error: "Error al cargar datos base" }, { status: 500 });
     }
 
-    // 4️⃣ Devolver columnas relevantes
-    const columnas = [
-      "rut_cliente",
-      "nombre_cliente",
-      "empleado_ventas",
-      "ventas_quimicos_2025",
-      "comodatos_activos_2021",
-      "alerta_final",
-      "email_col",
-    ];
-    const data = filtrado.map((r) => {
-      const o: any = {};
-      columnas.forEach((c) => (o[c] = r[c] ?? ""));
-      return o;
-    });
+    const ventas = (await ventasRes.json()).data || [];
+    const comodatos = (await comodatosRes.json()).data || [];
 
-    return NextResponse.json({ data });
+    // 3️⃣ Fecha de corte = últimos 6 meses desde septiembre 2025
+    const cutoff = new Date("2025-09-01");
+    cutoff.setMonth(cutoff.getMonth() - 6);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+    // 4️⃣ Última venta PT por RUT
+    const ventasMap = new Map<string, string>();
+    for (const v of ventas) {
+      if (!v.rut || !v.fecha) continue;
+      if (!ventasMap.has(v.rut) || v.fecha > ventasMap.get(v.rut)!) {
+        ventasMap.set(v.rut, v.fecha);
+      }
+    }
+
+    // 5️⃣ Construir dataset KPI
+    const resultado: any[] = [];
+    for (const c of comodatos) {
+      if (!c.rut) continue;
+      const ultima = ventasMap.get(c.rut) || null;
+      const sinVentas = !ultima || ultima < cutoffStr;
+
+      if (sinVentas) {
+        resultado.push({
+          rut: c.rut,
+          cliente: c.cliente,
+          ejecutivo: c.ejecutivo,
+          email: c.email,
+          comodato: c.total,
+          ultimaCompra: ultima || "—",
+        });
+      }
+    }
+
+    // 6️⃣ Filtrar por usuario logueado (excepto admins)
+    const admins = ["silvana.pincheira@spartan.cl", "jorge.beltran@spartan.cl"];
+    let filtrado = resultado;
+    if (!admins.includes(email)) {
+      filtrado = resultado.filter((r) => (r.email || "").toLowerCase() === email);
+    }
+
+    return NextResponse.json({ data: filtrado });
   } catch (err) {
-    console.error("🔥 Error en API alertas-clientes-comodatos:", err);
+    console.error("🔥 Error en KPI alertas-clientes-comodatos:", err);
     return NextResponse.json({ error: "Error en servidor" }, { status: 500 });
   }
 }

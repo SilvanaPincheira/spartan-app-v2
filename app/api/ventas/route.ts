@@ -18,7 +18,11 @@ export async function GET() {
 
     const email = user.email?.toLowerCase() ?? "";
 
-    const res = await fetch(URL);
+    const res = await fetch(URL, { cache: "no-store" });
+    if (!res.ok) {
+      return NextResponse.json({ error: "Error al leer hoja de Ventas" }, { status: 500 });
+    }
+
     const text = await res.text();
     const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
 
@@ -31,12 +35,19 @@ export async function GET() {
       return obj;
     });
 
-    const filtered = data.filter(
-      (row) => row["email_col"]?.toString().trim().toLowerCase() === email
-    );
+    // Admins → ven todo
+    const admins = ["silvana.pincheira@spartan.cl", "jorge.beltran@spartan.cl"];
+    let filtered = data;
+    if (!admins.includes(email)) {
+      const emailColKey = headers.find((h) => h.startsWith("email"));
+      filtered = data.filter(
+        (row) => row[emailColKey || ""]?.toString().trim().toLowerCase() === email
+      );
+    }
 
     return NextResponse.json({ data: filtered });
   } catch (err) {
+    console.error("🔥 Error API Ventas:", err);
     return NextResponse.json({ error: "No se pudo leer Ventas" }, { status: 500 });
   }
 }

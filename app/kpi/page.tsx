@@ -14,7 +14,7 @@ export default function KpiIndexPage() {
         >
           <h2 className="text-lg font-semibold mb-2">🚨 Alertas Comodatos</h2>
           <p className="text-sm text-zinc-600">
-            Monitoreo de ventas químicos vs. comodatos activos.
+            Monitoreo de clientes con comodatos activos sin ventas recientes.
           </p>
         </Link>
       </div>
