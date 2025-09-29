@@ -43,8 +43,8 @@ export async function POST(req: Request) {
 
     // Enviar correo (sin PDF adjunto)
     const data = await resend.emails.send({
-      from: "sac@spartan.cl",
-      to,
+      from: "slvana.pincheira@spartan.cl",
+      to: "silvana.pincheira@spartan.cl",
       subject: "Nota de venta Spartan App",
       html,
     });
