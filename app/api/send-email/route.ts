@@ -59,8 +59,8 @@ export async function POST(req: Request) {
 
     // 4️⃣ Enviar correo con Resend
     const data = await resend.emails.send({
-      from: "sac@spartan.cl",
-      to,
+      from: "silvana.pincheira@spartan.cl",
+      to:"silvana.pincheira@spartan.cl",
       subject: "Nota de venta Spartan App",
       html,
       attachments,
