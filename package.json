@@ -13,6 +13,7 @@
     "@supabase/auth-helpers-nextjs": "^0.10.0",
     "@supabase/supabase-js": "^2.57.0",
     "autoprefixer": "10.4.14",
+    "d3": "^7.9.0",
     "file-saver": "^2.0.5",
     "googleapis": "^160.0.0",
     "html2canvas": "^1.4.1",
