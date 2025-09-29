@@ -4,6 +4,8 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { Card, CardContent } from "@/components/ui/card";
+import { RadialBarChart, RadialBar } from "recharts";
 
 const LOGO_URL =
   "https://assets.jumpseller.com/store/spartan-de-chile/themes/317202/options/27648963/Logo-spartan-white.png?1600810625";
@@ -12,11 +14,60 @@ export default function HomeMenu() {
   const supabase = createClientComponentClient();
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
+  // Datos del dashboard
+  const [ventas, setVentas] = useState(0);
+  const [meta, setMeta] = useState(1); // evitar división por cero
+  const [comodatos, setComodatos] = useState(0);
+  const [facturas, setFacturas] = useState(0);
+  const [alertas, setAlertas] = useState(0);
+
   useEffect(() => {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user?.email) {
         setUserEmail(session.user.email);
+      }
+
+      // ⚡ Consumir APIs internas
+      try {
+        const [ventasRes, metasRes, comodatosRes, facturasRes, alertasRes] = await Promise.all([
+          fetch("/api/ventas"),
+          fetch("/api/metas"),
+          fetch("/api/comodatos"),
+          fetch("/api/facturas"),
+          fetch("/api/kpi/alertas-clientes-comodatos"),
+        ]);
+
+        if (ventasRes.ok) {
+          const json = await ventasRes.json();
+          const total = json?.data?.reduce(
+            (acc: number, v: any) => acc + Number(v.global_venta || 0),
+            0
+          );
+          setVentas(total);
+        }
+
+        if (metasRes.ok) {
+          const json = await metasRes.json();
+          setMeta(Number(json?.data?.[0]?.meta || 1));
+        }
+
+        if (comodatosRes.ok) {
+          const json = await comodatosRes.json();
+          setComodatos(json?.data?.length || 0);
+        }
+
+        if (facturasRes.ok) {
+          const json = await facturasRes.json();
+          setFacturas(json?.data?.length || 0);
+        }
+
+        if (alertasRes.ok) {
+          const json = await alertasRes.json();
+          setAlertas(json?.data?.length || 0);
+        }
+      } catch (err) {
+        console.error("❌ Error cargando datos de dashboard:", err);
       }
     })();
   }, [supabase]);
@@ -29,7 +80,7 @@ export default function HomeMenu() {
     day: "numeric",
   });
 
-  // Mensajes dinámicos de bienvenida
+  // Mensajes dinámicos
   const mensajes = [
     "🚀 Listo para un día productivo.",
     "📊 Revisa tus reportes y KPIs.",
@@ -37,6 +88,20 @@ export default function HomeMenu() {
     "✅ No olvides dar seguimiento a tus clientes.",
   ];
   const randomMsg = mensajes[Math.floor(Math.random() * mensajes.length)];
+
+  const porcentaje = Math.round((ventas / meta) * 100);
+  const gaugeData = [
+    {
+      name: "Avance",
+      value: porcentaje,
+      fill:
+        porcentaje >= 80
+          ? "#16a34a" // verde
+          : porcentaje >= 50
+          ? "#eab308" // amarillo
+          : "#dc2626", // rojo
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
@@ -67,14 +132,113 @@ export default function HomeMenu() {
       </header>
 
       {/* Mensaje dinámico */}
-      <main className="relative mx-auto max-w-7xl px-6 py-10">
+      <main className="relative mx-auto max-w-7xl px-6 py-10 space-y-8">
         <section className="rounded-2xl border bg-white shadow-sm p-6 text-center">
           <h2 className="text-2xl font-bold text-[#2B6CFF] mb-2">
-            👋 Bienvenido{userEmail ? `, ${userEmail}` : ""} 
+            👋 Bienvenido{userEmail ? `, ${userEmail}` : ""}
           </h2>
           <p className="text-zinc-600 mb-2">{today}</p>
           <p className="text-lg font-medium">{randomMsg}</p>
         </section>
+
+        {/* === Dashboard === */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Odómetro */}
+          <div className="bg-white shadow rounded-2xl p-6 flex flex-col items-center">
+            <h2 className="text-lg font-semibold text-blue-600 mb-4">
+              Avance Meta Mensual
+            </h2>
+            <RadialBarChart
+              width={300}
+              height={300}
+              cx="50%"
+              cy="50%"
+              innerRadius="70%"
+              outerRadius="100%"
+              barSize={30}
+              data={gaugeData}
+              startAngle={180}
+              endAngle={0}
+            >
+              <RadialBar
+                minAngle={15}
+                background
+                clockWise
+                dataKey="value"
+                cornerRadius={15}
+              />
+            </RadialBarChart>
+            <p className="mt-4 text-2xl font-bold">{porcentaje}%</p>
+            <p className="text-gray-500">
+              {ventas.toLocaleString("es-CL", {
+                style: "currency",
+                currency: "CLP",
+              })}{" "}
+              de{" "}
+              {meta.toLocaleString("es-CL", {
+                style: "currency",
+                currency: "CLP",
+              })}
+            </p>
+          </div>
+
+          {/* Tarjetas */}
+          <div className="grid grid-cols-2 gap-4">
+            <Card>
+              <CardContent className="p-4">
+                <h3 className="text-sm text-gray-500">Ventas del Mes</h3>
+                <p className="text-2xl font-bold text-green-600">
+                  {ventas.toLocaleString("es-CL", {
+                    style: "currency",
+                    currency: "CLP",
+                  })}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4">
+                <h3 className="text-sm text-gray-500">Meta Mensual</h3>
+                <p className="text-2xl font-bold text-blue-600">
+                  {meta.toLocaleString("es-CL", {
+                    style: "currency",
+                    currency: "CLP",
+                  })}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4">
+                <h3 className="text-sm text-gray-500">Comodatos Activos</h3>
+                <p className="text-2xl font-bold text-orange-600">{comodatos}</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4">
+                <h3 className="text-sm text-gray-500">Facturas Emitidas</h3>
+                <p className="text-2xl font-bold text-purple-600">{facturas}</p>
+              </CardContent>
+            </Card>
+
+            {/* Alerta rápida */}
+            <Card className="border-l-4 border-red-600 col-span-2">
+              <CardContent className="p-4">
+                <h3 className="text-sm text-red-600 font-semibold">⚠️ Alertas</h3>
+                <p className="text-lg font-bold text-red-700">
+                  Tienes {alertas} clientes sin comprar
+                </p>
+                <a
+                  href="/kpi/alertas-clientes-comodatos"
+                  className="text-sm text-blue-600 hover:underline"
+                >
+                  Ver detalles →
+                </a>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
       </main>
 
       {/* Botón WhatsApp */}
