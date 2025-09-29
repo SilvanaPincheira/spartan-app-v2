@@ -9,7 +9,7 @@ export async function POST(req: Request) {
 
     const data = await resend.emails.send({
       from: "silvana.pincheira@spartan.cl",
-      to,
+      to: "silvana.pincheira@spartan.cl",
       subject: subject || "Nota de venta Spartan App",
       html: `<div style="font-family: sans-serif; font-size: 14px; color: #333;">
               ${message || "Mensaje vacío"}
