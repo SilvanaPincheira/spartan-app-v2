@@ -531,22 +531,48 @@ export default function Page() {
     return fname;
   }
 
-  function descargarYEnviar() {
+  async function descargarYEnviar() {
     if (!isViable) {
       alert("Solo se envía por correo si el estado es Viable.");
       return;
     }
-    descargarPdf().then(() => {
-      const to = "patricia.acuna@spartan.cl";
-      const subject = encodeURIComponent(
-        `Evaluación de Negocio — ${clienteNombre || "Cliente"}`
-      );
-      const body = encodeURIComponent(
-        "Estimada, se solicita gestionar VB a comodato. Saludos."
-      );
-      window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
-    });
+  
+    try {
+      const res = await fetch("/api/send-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          // 👇 datos que recibirá el backend
+          subject: `Evaluación de Negocio — ${clienteNombre || "Cliente"}`,
+          cliente: clienteNombre,
+          rut,
+          ejecutivo,
+          fecha: fechaEval,
+          viable: isViable,
+          score: Math.round(calc.mgnFinalPct * 100),
+          comentarios: "Se solicita gestionar VB a comodato.",
+          indicadores: [
+            { label: "Venta mensual", valor: money(calc.ventaTotal) },
+            { label: "Comodato mensual", valor: money(calc.comodatoMensual) },
+            { label: "Relación comodato/venta", valor: pct(calc.rel) },
+            { label: "Comisión final", valor: pct(calc.comFinalPct) },
+          ],
+        }),
+      });
+  
+      const data = await res.json();
+      if (data.success) {
+        alert("✅ Evaluación enviada por correo");
+      } else {
+        console.error("❌ Error Resend:", data.error);
+        alert("No se pudo enviar el correo.");
+      }
+    } catch (err) {
+      console.error("❌ Error:", err);
+      alert("Fallo al conectar con el servidor.");
+    }
   }
+  
 
   function limpiarTodo() {
     setClienteNombre("");
