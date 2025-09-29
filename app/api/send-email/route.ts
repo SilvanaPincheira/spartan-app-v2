@@ -24,15 +24,11 @@ function buildEvaluacionHTML(payload: any) {
         ? `<span style="background:#059669;color:#fff;padding:2px 8px;border-radius:9999px;font-size:12px">Viable</span>`
         : `<span style="background:#dc2626;color:#fff;padding:2px 8px;border-radius:9999px;font-size:12px">No viable</span>`;
 
-  const indicadoresRows = (indicadores || [])
-    .map(
-      (i) => `
-      <tr>
-        <td style="border:1px solid #e5e7eb;padding:8px">${i.label ?? ""}</td>
-        <td style="border:1px solid #e5e7eb;padding:8px;text-align:right">${i.valor ?? ""}</td>
-      </tr>`
-    )
-    .join("");
+        const indicadoresRows = (indicadores || [])
+  .map((i: { label: string; valor: string | number }) =>
+    `<tr><td style="border:1px solid #e5e7eb;padding:8px">${i.label ?? ""}</td><td style="border:1px solid #e5e7eb;padding:8px;text-align:right">${i.valor ?? ""}</td></tr>`
+  )
+  .join("");
 
   return `
   <div style="font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; color:#111827">
