@@ -1,16 +1,13 @@
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
-import fs from "fs";
-import path from "path";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: Request) {
   try {
-    // 1️⃣ Recibir datos de la Nota de Venta
     const { to, cliente, fecha, items, total } = await req.json();
 
-    // 2️⃣ Generar HTML dinámico
+    // HTML dinámico de la Nota de Venta
     const html = `
       <div style="font-family: Arial, sans-serif; padding: 20px;">
         <h2 style="color:#0056b3;">Nota de Venta - Spartan App</h2>
@@ -44,26 +41,12 @@ export async function POST(req: Request) {
       </div>
     `;
 
-    // 3️⃣ Preparar PDF (aquí como ejemplo desde carpeta local)
-    const pdfPath = path.join(process.cwd(), "nota_venta.pdf");
-    let attachments = [];
-
-    if (fs.existsSync(pdfPath)) {
-      const fileContent = fs.readFileSync(pdfPath).toString("base64");
-      attachments.push({
-        filename: "Nota_Venta.pdf",
-        content: fileContent,
-        contentType: "application/pdf",
-      });
-    }
-
-    // 4️⃣ Enviar correo con Resend
+    // Enviar correo (sin PDF adjunto)
     const data = await resend.emails.send({
-      from: "silvana.pincheira@spartan.cl",
-      to:"silvana.pincheira@spartan.cl",
+      from: "sac@spartan.cl",
+      to,
       subject: "Nota de venta Spartan App",
       html,
-      attachments,
     });
 
     return NextResponse.json({ success: true, data });
