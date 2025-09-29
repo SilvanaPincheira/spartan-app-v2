@@ -8,7 +8,7 @@ export async function POST(req: Request) {
     const { to, subject, message } = await req.json();
 
     const data = await resend.emails.send({
-      from: "onboarding@resend.dev", // 👈 luego cambiaremos a sac@spartan.cl
+      from: "silvana.pincheira@spartan.cl", // 👈 luego cambiaremos a sac@spartan.cl
       to: [to],
       subject,
       html: `<div style="font-family: sans-serif; font-size: 14px; color: #333;">
