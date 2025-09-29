@@ -4,8 +4,8 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
-import { Card, CardContent } from "@/components/ui/card";
 import GaugeChart from "react-gauge-chart";
+import { Card, CardContent } from "@/components/ui/card";
 
 const LOGO_URL =
   "https://assets.jumpseller.com/store/spartan-de-chile/themes/317202/options/27648963/Logo-spartan-white.png?1600810625";
@@ -16,7 +16,8 @@ export default function HomeMenu() {
 
   // Datos del dashboard
   const [ventas, setVentas] = useState(0);
-  const [meta, setMeta] = useState(1); // evitar división por cero
+  const [meta, setMeta] = useState(1);
+  const [cumplimiento, setCumplimiento] = useState(0); // porcentaje
   const [comodatos, setComodatos] = useState(0);
   const [facturas, setFacturas] = useState(0);
   const [alertas, setAlertas] = useState(0);
@@ -31,27 +32,20 @@ export default function HomeMenu() {
       }
 
       try {
-        const [ventasRes, metasRes, comodatosRes, facturasRes, alertasRes] =
+        const [metasRes, comodatosRes, facturasRes, alertasRes] =
           await Promise.all([
-            fetch("/api/ventas"),
             fetch("/api/metas"),
             fetch("/api/comodatos"),
             fetch("/api/facturas"),
             fetch("/api/kpi/alertas-clientes-comodatos"),
           ]);
 
-        if (ventasRes.ok) {
-          const json = await ventasRes.json();
-          const total = json?.data?.reduce(
-            (acc: number, v: any) => acc + Number(v.global_venta || 0),
-            0
-          );
-          setVentas(total);
-        }
-
         if (metasRes.ok) {
           const json = await metasRes.json();
-          setMeta(Number(json?.data?.[0]?.meta || 1));
+          const fila = json?.data?.[0] || {};
+          setVentas(Number(fila.cumplimiento_monto || 0));
+          setMeta(Number(fila.meta_mes || 1));
+          setCumplimiento(Number(fila.cumplimiento_pct || 0));
         }
 
         if (comodatosRes.ok) {
@@ -74,7 +68,7 @@ export default function HomeMenu() {
     })();
   }, [supabase]);
 
-  // Fecha actual
+  // Fecha
   const today = new Date().toLocaleDateString("es-CL", {
     weekday: "long",
     year: "numeric",
@@ -91,13 +85,12 @@ export default function HomeMenu() {
   ];
   const randomMsg = mensajes[Math.floor(Math.random() * mensajes.length)];
 
-  // Porcentaje de avance
-  const porcentaje = Math.round((ventas / meta) * 100);
-  const gaugePercent = ventas / meta; // react-gauge-chart usa [0,1]
+  // % avance
+  const porcentaje = cumplimiento || Math.round((ventas / meta) * 100);
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-      {/* Header corporativo */}
+      {/* Header */}
       <header className="relative overflow-hidden">
         <div className="absolute inset-0 bg-[#1f4ed8]" />
         <div className="absolute inset-y-0 right-[-20%] w-[60%] rotate-[-8deg] bg-sky-400/60" />
@@ -111,11 +104,11 @@ export default function HomeMenu() {
               unoptimized
               className="h-12 w-auto md:h-28 object-contain drop-shadow-sm"
             />
-            <div className="min-w-0">
+            <div>
               <h1 className="text-white uppercase font-semibold tracking-widest text-2xl md:text-3xl">
                 Spartan — Panel Principal
               </h1>
-              <p className="mt-1 text-white/80 text-sm max-w-2xl">
+              <p className="mt-1 text-white/80 text-sm">
                 Bienvenido al panel central de gestión y reportes.
               </p>
             </div>
@@ -123,7 +116,7 @@ export default function HomeMenu() {
         </div>
       </header>
 
-      {/* Mensaje dinámico */}
+      {/* Main */}
       <main className="relative mx-auto max-w-7xl px-6 py-10 space-y-8">
         <section className="rounded-2xl border bg-white shadow-sm p-6 text-center">
           <h2 className="text-2xl font-bold text-[#2B6CFF] mb-2">
@@ -133,7 +126,7 @@ export default function HomeMenu() {
           <p className="text-lg font-medium">{randomMsg}</p>
         </section>
 
-        {/* === Dashboard === */}
+        {/* Dashboard */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Odómetro */}
           <div className="bg-white shadow rounded-2xl p-6 flex flex-col items-center">
@@ -145,10 +138,8 @@ export default function HomeMenu() {
               nrOfLevels={20}
               colors={["#dc2626", "#eab308", "#16a34a"]}
               arcWidth={0.3}
-              percent={gaugePercent > 1 ? 1 : gaugePercent}
-              textColor="#000"
-              needleColor="#000"
-              animate={false}
+              percent={Math.min(porcentaje / 100, 1)}
+              textColor="#000000"
             />
             <p className="mt-4 text-2xl font-bold">{porcentaje}%</p>
             <p className="text-gray-500">
@@ -204,7 +195,6 @@ export default function HomeMenu() {
               </CardContent>
             </Card>
 
-            {/* Alerta rápida */}
             <Card className="border-l-4 border-red-600 col-span-2">
               <CardContent className="p-4">
                 <h3 className="text-sm text-red-600 font-semibold">⚠️ Alertas</h3>
@@ -223,7 +213,7 @@ export default function HomeMenu() {
         </div>
       </main>
 
-      {/* Botón WhatsApp */}
+      {/* WhatsApp */}
       <a
         href="https://wa.me/56075290961?text=Hola%20Silvana,%20necesito%20m%C3%A1s%20informaci%C3%B3n"
         target="_blank"
@@ -231,12 +221,7 @@ export default function HomeMenu() {
         className="fixed bottom-6 right-6 bg-[#25D366] hover:bg-[#1ebe5b] text-white rounded-full p-4 shadow-lg print:hidden"
         title="Escríbenos por WhatsApp"
       >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          fill="currentColor"
-          viewBox="0 0 24 24"
-          className="w-6 h-6"
-        >
+        <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" className="w-6 h-6">
           <path d="M20.52 3.48A11.86 11.86 0 0012.07 0C5.58 0 .07 5.52.07 12c0 2.1.55 4.15 1.6 5.96L0 24l6.21-1.63A11.9 11.9 0 0012.07 24c6.49 0 11.93-5.52 11.93-12 0-3.18-1.24-6.17-3.48-8.52zm-8.45 18.07c-1.96 0-3.87-.53-5.54-1.54l-.39-.23-3.69.97.99-3.6-.25-.37a9.7 9.7 0 01-1.48-5.23c0-5.35 4.38-9.7 9.79-9.7a9.7 9.7 0 019.79 9.7c0 5.36-4.38 9.7-9.79 9.7zm5.36-7.3c-.29-.14-1.71-.84-1.97-.94-.26-.1-.45-.14-.64.14-.19.29-.74.94-.91 1.13-.17.19-.34.21-.63.07-.29-.14-1.22-.45-2.32-1.43-.86-.77-1.44-1.72-1.61-2.01-.17-.29-.02-.45.13-.59.13-.13.29-.34.43-.51.14-.17.19-.29.29-.48.1-.19.05-.36-.02-.51-.07-.14-.64-1.54-.88-2.11-.23-.55-.47-.48-.64-.49h-.55c-.19 0-.5.07-.76.36s-1 1-1 2.43 1.02 2.82 1.16 3.01c.14.19 2 3.06 4.84 4.29.68.29 1.21.46 1.63.59.68.22 1.29.19 1.77.12.54-.08 1.71-.7 1.95-1.37.24-.67.24-1.24.17-1.37-.07-.13-.26-.2-.55-.34z" />
         </svg>
       </a>
