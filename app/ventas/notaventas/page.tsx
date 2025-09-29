@@ -536,83 +536,120 @@ export default function NotaVentaPage() {
     }
   }
 
-  /* ==========================================================================
-     [I] ACCIONES (imprimir/guardar/limpiar)
-     ========================================================================== */
-  function limpiarTodo() {
-    setClientName("");
-    setClientRut("");
-    setClientCode("");
-    setEjecutivo("");
-    setDireccion("");
-    setDireccionNueva("");
-    setComuna("");
-    setEmailEjecutivo("");
-    setComentarios("");
-    setLines([]);
-    setErrorMsg("");
-    setNumeroNV(generarNumeroNV());
-    setListaSeleccionada(1);
-    setSaveMsg("");
+ /* ==========================================================================
+   [I] ACCIONES (imprimir/guardar/limpiar/enviarEmail)
+   ========================================================================== */
+function limpiarTodo() {
+  setClientName("");
+  setClientRut("");
+  setClientCode("");
+  setEjecutivo("");
+  setDireccion("");
+  setDireccionNueva("");
+  setComuna("");
+  setEmailEjecutivo("");
+  setComentarios("");
+  setLines([]);
+  setErrorMsg("");
+  setNumeroNV(generarNumeroNV());
+  setListaSeleccionada(1);
+  setSaveMsg("");
+}
+
+function imprimir() {
+  window.print();
+}
+
+async function guardarEnGoogleSheets() {
+  setSaveMsg("");
+  setErrorMsg("");
+  try {
+    if (!clientName || !clientRut || !clientCode)
+      throw new Error("Faltan datos del cliente (Nombre, RUT y Código Cliente).");
+    if (lines.length === 0) throw new Error("Agrega al menos un ítem antes de guardar.");
+    if (lines.some((l) => l.isBloqueado))
+      throw new Error("No puedes guardar: hay precios especiales vencidos en la tabla.");
+
+    setSaving(true);
+    const fecha = new Date().toLocaleDateString("es-CL");
+
+    const payload = lines.map((item) => ({
+      numeroNV,
+      fecha,
+      cliente: clientName,
+      rut: clientRut,
+      codigoCliente: clientCode,
+      ejecutivo,
+      direccionDespacho: direccion,
+      direccionNueva,
+      comuna,
+      correoEjecutivo: emailEjecutivo,
+      comentarios,
+      subtotal,
+      total: subtotal,
+      codigo: item.code,
+      descripcion: item.name,
+      kilos: item.kilos,
+      cantidad: item.qty,
+      precioBase: Math.round(item.priceBase || 0),
+      descuento: item.isEspecial ? 0 : item.descuento,
+      precioVenta: Math.round(item.precioVenta || 0),
+      precioPresentacion: Math.round((item.precioVenta || 0) * (item.kilos || 1)),
+      totalItem: Math.round(item.total || 0),
+      especialVigente: !!item.isEspecial,
+      especialBloqueado: !!item.isBloqueado,
+    }));
+
+    const res = await fetch("/api/save-to-sheets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error("Error al guardar en Google Sheets.");
+    const json = await res.json();
+    const rows = Number(json?.rows ?? payload.length) || payload.length;
+    setSaveMsg(`✅ Nota de venta guardada con ${rows} ítem(s) en Google Sheets.`);
+  } catch (e: any) {
+    setErrorMsg(e?.message || "Error desconocido al guardar en Google Sheets.");
+  } finally {
+    setSaving(false);
   }
-  function imprimir() {
-    window.print();
-  }
-  async function guardarEnGoogleSheets() {
-    setSaveMsg("");
-    setErrorMsg("");
-    try {
-      if (!clientName || !clientRut || !clientCode)
-        throw new Error("Faltan datos del cliente (Nombre, RUT y Código Cliente).");
-      if (lines.length === 0) throw new Error("Agrega al menos un ítem antes de guardar.");
-      if (lines.some((l) => l.isBloqueado))
-        throw new Error("No puedes guardar: hay precios especiales vencidos en la tabla.");
+}
 
-      setSaving(true);
-      const fecha = new Date().toLocaleDateString("es-CL");
+async function enviarEmail() {
+  try {
+    const res = await fetch("/api/send-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        asunto: `Nueva Nota de Venta ${numeroNV}`,
+        mensaje: `
+          Se ha generado una Nota de Venta:<br/>
+          <b>Número:</b> ${numeroNV}<br/>
+          <b>Cliente:</b> ${clientName}<br/>
+          <b>RUT:</b> ${clientRut}<br/>
+          <b>Total:</b> ${subtotal.toLocaleString("es-CL", {
+            style: "currency",
+            currency: "CLP",
+          })}
+        `,
+        to: ["silvana.pincheira@spartan.cl", emailEjecutivo], // 📧 Destinatarios
+      }),
+    });
 
-      const payload = lines.map((item) => ({
-        numeroNV,
-        fecha,
-        cliente: clientName,
-        rut: clientRut,
-        codigoCliente: clientCode,
-        ejecutivo,
-        direccionDespacho: direccion,
-        direccionNueva,
-        comuna,
-        correoEjecutivo: emailEjecutivo,
-        comentarios,
-        subtotal,
-        total: subtotal,
-        codigo: item.code,
-        descripcion: item.name,
-        kilos: item.kilos,
-        cantidad: item.qty,
-        precioBase: Math.round(item.priceBase || 0),
-        descuento: item.isEspecial ? 0 : item.descuento,
-        precioVenta: Math.round(item.precioVenta || 0),
-        precioPresentacion: Math.round((item.precioVenta || 0) * (item.kilos || 1)),
-        totalItem: Math.round(item.total || 0),
-        especialVigente: !!item.isEspecial,
-        especialBloqueado: !!item.isBloqueado,
-      }));
-
-      const res = await fetch("/api/save-to-sheets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error("Error al guardar en Google Sheets.");
-      const json = await res.json();
-      const rows = Number(json?.rows ?? payload.length) || payload.length;
-      setSaveMsg(`✅ Nota de venta guardada con ${rows} ítem(s) en Google Sheets.`);
-    } catch (e: any) {
-      setErrorMsg(e?.message || "Error desconocido al guardar en Google Sheets.");
-    } finally {
-      setSaving(false);
+    const data = await res.json();
+    if (!res.ok) {
+      console.error("❌ Error al enviar email:", data);
+      alert("Error al enviar correo");
+    } else {
+      console.log("📧 Email enviado:", data);
+      alert("Correo enviado correctamente ✅");
     }
+  } catch (err) {
+    console.error("🔥 Error en enviarEmail:", err);
+    alert("Error en el envío de correo");
   }
+}
 
   /* ==========================================================================
      [J] UI
@@ -960,23 +997,39 @@ export default function NotaVentaPage() {
       </div>
       
            {/* ===== BOTONES (solo pantalla) ===== */}
-           <div className="flex flex-wrap gap-2 print:hidden px-6 pb-8">
-           <button className="bg-zinc-200 px-3 py-1 rounded" onClick={imprimir}>
-             🖨️ Imprimir / PDF
-           </button>
-           <button
-             className={`px-3 py-1 rounded text-white ${
-               saving ? "bg-zinc-400" : "bg-emerald-600 hover:bg-emerald-700"
-             }`}
-             onClick={guardarEnGoogleSheets}
-             disabled={saving}
-           >
-             {saving ? "Guardando..." : "💾 Guardar"}
-           </button>
-           <button className="bg-zinc-200 px-3 py-1 rounded" onClick={limpiarTodo}>
-             🧹 Nueva NV
-           </button>
-         </div>
+<div className="flex flex-wrap gap-2 print:hidden px-6 pb-8">
+  <button
+    className="bg-zinc-200 px-3 py-1 rounded"
+    onClick={imprimir}
+  >
+    🖨️ Imprimir / PDF
+  </button>
+
+  <button
+    className={`px-3 py-1 rounded text-white ${
+      saving ? "bg-zinc-400" : "bg-emerald-600 hover:bg-emerald-700"
+    }`}
+    onClick={guardarEnGoogleSheets}
+    disabled={saving}
+  >
+    {saving ? "Guardando..." : "💾 Guardar"}
+  </button>
+
+  <button
+    className="bg-zinc-200 px-3 py-1 rounded"
+    onClick={limpiarTodo}
+  >
+    🧹 Nueva NV
+  </button>
+
+  <button
+    className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
+    onClick={enviarEmail}
+  >
+    📧 Enviar Email
+  </button>
+</div>
+
    
          {/* =========================================================================
    [K] ESTILOS DE IMPRESIÓN — PDF profesional
