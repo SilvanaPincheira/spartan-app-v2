@@ -24,11 +24,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 
-
 /* ============================================================================
    [A] HELPERS GENERALES
    ============================================================================ */
-// Normaliza strings (búsquedas/igualdades sin tildes/mayúsculas)
 function normalize(s: string) {
   return (s || "")
     .toLowerCase()
@@ -36,10 +34,8 @@ function normalize(s: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .trim();
 }
-// Convierte lo que venga a número (0 si NaN)
 function num(x: unknown) {
   if (typeof x === "string") {
-    // permitir que escriban con puntos/commas
     const cleaned = x.replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
     const v = Number(cleaned);
     return Number.isFinite(v) ? v : 0;
@@ -47,11 +43,9 @@ function num(x: unknown) {
   const v = Number(x);
   return Number.isFinite(v) ? v : 0;
 }
-// Limita un número al rango [min, max]
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
-// Formato moneda CLP (sin decimales)
 function money(n: number) {
   return (n || 0).toLocaleString("es-CL", {
     style: "currency",
@@ -59,7 +53,6 @@ function money(n: number) {
     maximumFractionDigits: 0,
   });
 }
-// Parse fecha “dd-mm-aaaa” / “dd/mm/aaaa” / ISO
 function parseFecha(v?: string): Date | null {
   const s = (v || "").trim();
   if (!s) return null;
@@ -173,7 +166,7 @@ type Client = {
   rut: string;
   codigo: string;
   ejecutivo: string;
-  direccion: string; // Dirección de despacho (readonly)
+  direccion: string;
 };
 type Product = { code: string; name: string; price_list: number; kilos: number };
 type PrecioEspecial = {
@@ -192,8 +185,8 @@ type Line = {
   descuento: number;
   precioVenta: number;
   total: number;
-  isEspecial: boolean;   // especial vigente (aplica)
-  isBloqueado: boolean;  // especial VENCIDO -> bloquea guardar
+  isEspecial: boolean;
+  isBloqueado: boolean;
 };
 
 /* ============================================================================
@@ -222,6 +215,7 @@ export default function NotaVentaPage() {
   const [errorMsg, setErrorMsg] = useState("");
   const [saveMsg, setSaveMsg] = useState("");
   const [saving, setSaving] = useState(false);
+  const [procesando, setProcesando] = useState(false);
   const [numeroNV, setNumeroNV] = useState("");
 
   /* ----- Helpers internos ----- */
@@ -239,97 +233,9 @@ export default function NotaVentaPage() {
     if (!pe.vencimiento) return true;
     const f = parseFecha(pe.vencimiento);
     if (!f) return true;
-    // vigente si HOY ≤ fecha de vencimiento (día completo)
     const fv = new Date(f.getFullYear(), f.getMonth(), f.getDate()).getTime();
     return hoySinHora().getTime() <= fv;
   }
-  /* ----- PDF desde printArea ----- */
-async function generarPdfNotaVenta() {
-  const input = document.getElementById("printArea");
-  if (!input) return;
-
-  const canvas = await html2canvas(input, { scale: 2 });
-  const imgData = canvas.toDataURL("image/png");
-
-  const pdf = new jsPDF("p", "mm", "a4");
-  const pageWidth = pdf.internal.pageSize.getWidth();
-  const pageHeight = pdf.internal.pageSize.getHeight();
-
-  const imgWidth = pageWidth;
-  const imgHeight = (canvas.height * imgWidth) / canvas.width;
-
-  let heightLeft = imgHeight;
-  let position = 0;
-
-  // Primera página
-  pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-  heightLeft -= pageHeight;
-
-  // Páginas extra si el contenido es largo
-  while (heightLeft > 0) {
-    position = heightLeft - imgHeight;
-    pdf.addPage();
-    pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-    heightLeft -= pageHeight;
-  }
-
-  pdf.save(`Nota_Venta_${numeroNV || "sin_numero"}.pdf`);
-}
-/* ----- PDF y envío por email ----- */
-async function enviarPdfNotaVentaPorEmail() {
-  const input = document.getElementById("printArea");
-  if (!input) return;
-
-  const canvas = await html2canvas(input, { scale: 2 });
-  const imgData = canvas.toDataURL("image/png");
-
-  const pdf = new jsPDF("p", "mm", "a4");
-  const pageWidth = pdf.internal.pageSize.getWidth();
-  const pageHeight = pdf.internal.pageSize.getHeight();
-
-  const imgWidth = pageWidth;
-  const imgHeight = (canvas.height * imgWidth) / canvas.width;
-
-  let heightLeft = imgHeight;
-  let position = 0;
-
-  pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-  heightLeft -= pageHeight;
-
-  while (heightLeft > 0) {
-    position = heightLeft - imgHeight;
-    pdf.addPage();
-    pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-    heightLeft -= pageHeight;
-  }
-
-  // 🔹 Convertir a base64 para adjuntar
-  const pdfBase64 = pdf.output("datauristring").split(",")[1];
-
-  try {
-    const res = await fetch("/api/send-notaventa", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        to: emailEjecutivo || "silvana.pincheira@spartan.cl",
-        subject: `Nota de Venta ${numeroNV}`,
-        message: `Adjunto PDF de la Nota de Venta ${numeroNV}`,
-        attachment: {
-          filename: `Nota_Venta_${numeroNV}.pdf`,
-          content: pdfBase64,
-        },
-      }),
-    });
-    
-
-    if (!res.ok) throw new Error("Error al enviar correo");
-    alert("📧 Correo con PDF enviado correctamente ✅");
-  } catch (err) {
-    console.error("❌ Error en enviarPdfNotaVentaPorEmail:", err);
-    alert("Error al enviar correo");
-  }
-}
-
 
   /* ==========================================================================
      [E] EFECTOS: Inicialización y carga de datos
@@ -399,7 +305,6 @@ async function enviarPdfNotaVentaPorEmail() {
     if (lista === 2) return baseLista1 * 0.97; // -3%
     return baseLista1 * 0.97 * 0.97;           // -3% adicional
   }
-
   function precioBaseSegunLista(row: Line) {
     let base = row.priceBase;
     if ((row.code || "").toUpperCase().startsWith("PT")) {
@@ -407,12 +312,10 @@ async function enviarPdfNotaVentaPorEmail() {
     }
     return base;
   }
-
   function computeLine(row: Line): Line {
     const out = { ...row };
 
     if (out.isBloqueado) {
-      // Si está bloqueado por especial vencido, lo dejamos en 0 para no sumar.
       out.precioVenta = 0;
       out.total = 0;
       return out;
@@ -424,19 +327,16 @@ async function enviarPdfNotaVentaPorEmail() {
     } else {
       const base = precioBaseSegunLista(out);
       if (out.precioVenta && out.precioVenta > 0) {
-        // 👉 Respeta precio manual y sincroniza %Desc
         out.precioVenta = Math.round(out.precioVenta);
         const descCalc = base > 0 ? ((base - out.precioVenta) / base) * 100 : 0;
-        out.descuento = Math.round(clamp(descCalc, -20, 20) * 100) / 100; // 🔹 redondeo a 2 decimales
+        out.descuento = Math.round(clamp(descCalc, -20, 20) * 100) / 100;
       } else {
-        // 👉 Si no hay precio manual, deriva desde %Desc
         const desc = clamp(num(out.descuento), -20, 20);
         out.precioVenta = Math.round(base * (1 - desc / 100));
-        out.descuento = Math.round(desc * 100) / 100; // 🔹 redondeo a 2 decimales
+        out.descuento = Math.round(desc * 100) / 100;
       }
     }
 
-    // $ Presentación = $/kg * kg ; Total = $ Presentación * cantidad
     const precioPresentacion = out.precioVenta * (num(out.kilos) || 1);
     out.total = precioPresentacion * (num(out.qty) || 0);
     return out;
@@ -454,7 +354,7 @@ async function enviarPdfNotaVentaPorEmail() {
         kilos: 1,
         qty: 1,
         priceBase: 0,
-        especialPrice: 0, 
+        especialPrice: 0,
         descuento: 0,
         precioVenta: 0,
         total: 0,
@@ -463,12 +363,9 @@ async function enviarPdfNotaVentaPorEmail() {
       },
     ]);
   }
-
   function rmLine(i: number) {
     setLines((old) => old.filter((_, idx) => idx !== i));
   }
-
-  // Al salir del código, llenar datos y evaluar especial
   function fillFromCode(i: number, code: string) {
     const prod = productos.find((p) => p.code === code);
     if (!prod) return;
@@ -494,7 +391,6 @@ async function enviarPdfNotaVentaPorEmail() {
             esp = pe.precio || 0;
             isEsp = true;
           } else {
-            // Precio especial existe pero está VENCIDO -> BLOQUEA la línea
             bloqueado = true;
           }
         }
@@ -503,22 +399,20 @@ async function enviarPdfNotaVentaPorEmail() {
       row.especialPrice = esp;
       row.isEspecial = isEsp;
       row.isBloqueado = bloqueado;
-      row.descuento = isEsp ? 0 : Math.round(clamp(num(row.descuento), -20, 20) *100) / 100;
+      row.descuento = isEsp ? 0 : Math.round(clamp(num(row.descuento), -20, 20) * 100) / 100;
 
       n[i] = computeLine(row);
       return n;
     });
   }
-
-  // Actualiza cualquier campo y recalcula
   function updateLine(i: number, field: keyof Line, value: unknown) {
     setLines((old) => {
       const n = [...old];
       const current = n[i];
       if (!current) return old;
-  
+
       const row: Line = { ...current };
-  
+
       if (field === "precioVenta") {
         if (value === "" || value === undefined) {
           row.precioVenta = 0;
@@ -526,11 +420,8 @@ async function enviarPdfNotaVentaPorEmail() {
         } else {
           const pv = Math.round(num(value));
           const base = precioBaseSegunLista(row);
-  
-          // calcular % desc relativo al BASE
           const descCalc = base > 0 ? ((base - pv) / base) * 100 : 0;
-  
-          // ❌ validar: si descuento es mayor a 20%, no dejar pasar
+
           if (descCalc > 20) {
             if (typeof window !== "undefined") {
               alert(
@@ -548,36 +439,31 @@ async function enviarPdfNotaVentaPorEmail() {
                   `El precio no puede ser menor al 80% del base.`
               );
             }
-            return old; // 🚫 no aplicar cambios
+            return old;
           }
-  
-          // ✅ válido: guardar lo que digitó el usuario
+
           row.precioVenta = pv;
           row.descuento = Math.round(clamp(descCalc, -20, 20) * 100) / 100;
         }
       } else {
-        // resto de campos como siempre
         (row as any)[field] = value as any;
         row.kilos = num(row.kilos) || 1;
         row.qty = num(row.qty) || 0;
         row.priceBase = num(row.priceBase) || 0;
         row.especialPrice = num(row.especialPrice) || 0;
-        row.descuento = row.isEspecial
-          ? 0
-          : Math.round(clamp(num(row.descuento), -20, 20) * 100)/100;
-  
-        // Si el cambio fue en %Desc, recalculamos precioVenta según base (lista)
+        row.descuento = row.isEspecial ? 0 : Math.round(clamp(num(row.descuento), -20, 20) * 100) / 100;
+
         if (field === "descuento") {
           const base = precioBaseSegunLista(row);
           row.precioVenta = Math.round(base * (1 - row.descuento / 100));
         }
       }
-  
+
       n[i] = computeLine(row);
       return n;
     });
   }
-  
+
   // Recalcula al cambiar lista
   useEffect(() => {
     setLines((old) => old.map((r) => computeLine(r)));
@@ -586,11 +472,7 @@ async function enviarPdfNotaVentaPorEmail() {
 
   // Subtotal
   const subtotal = useMemo(
-    () =>
-      lines.reduce(
-        (a, r) => a + (Number.isFinite(r.total) ? r.total : 0),
-        0
-      ),
+    () => lines.reduce((a, r) => a + (Number.isFinite(r.total) ? r.total : 0), 0),
     [lines]
   );
 
@@ -626,120 +508,164 @@ async function enviarPdfNotaVentaPorEmail() {
     }
   }
 
- /* ==========================================================================
-   [I] ACCIONES (imprimir/guardar/limpiar/enviarEmail)
-   ========================================================================== */
-function limpiarTodo() {
-  setClientName("");
-  setClientRut("");
-  setClientCode("");
-  setEjecutivo("");
-  setDireccion("");
-  setDireccionNueva("");
-  setComuna("");
-  setEmailEjecutivo("");
-  setComentarios("");
-  setLines([]);
-  setErrorMsg("");
-  setNumeroNV(generarNumeroNV());
-  setListaSeleccionada(1);
-  setSaveMsg("");
-}
-
-function imprimir() {
-  window.print();
-}
-
-async function guardarEnGoogleSheets() {
-  setSaveMsg("");
-  setErrorMsg("");
-  try {
-    if (!clientName || !clientRut || !clientCode)
-      throw new Error("Faltan datos del cliente (Nombre, RUT y Código Cliente).");
-    if (lines.length === 0) throw new Error("Agrega al menos un ítem antes de guardar.");
-    if (lines.some((l) => l.isBloqueado))
-      throw new Error("No puedes guardar: hay precios especiales vencidos en la tabla.");
-
-    setSaving(true);
-    const fecha = new Date().toLocaleDateString("es-CL");
-
-    const payload = lines.map((item) => ({
-      numeroNV,
-      fecha,
-      cliente: clientName,
-      rut: clientRut,
-      codigoCliente: clientCode,
-      ejecutivo,
-      direccionDespacho: direccion,
-      direccionNueva,
-      comuna,
-      correoEjecutivo: emailEjecutivo,
-      comentarios,
-      subtotal,
-      total: subtotal,
-      codigo: item.code,
-      descripcion: item.name,
-      kilos: item.kilos,
-      cantidad: item.qty,
-      precioBase: Math.round(item.priceBase || 0),
-      descuento: item.isEspecial ? 0 : item.descuento,
-      precioVenta: Math.round(item.precioVenta || 0),
-      precioPresentacion: Math.round((item.precioVenta || 0) * (item.kilos || 1)),
-      totalItem: Math.round(item.total || 0),
-      especialVigente: !!item.isEspecial,
-      especialBloqueado: !!item.isBloqueado,
-    }));
-
-    const res = await fetch("/api/save-to-sheets", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw new Error("Error al guardar en Google Sheets.");
-    const json = await res.json();
-    const rows = Number(json?.rows ?? payload.length) || payload.length;
-    setSaveMsg(`✅ Nota de venta guardada con ${rows} ítem(s) en Google Sheets.`);
-  } catch (e: any) {
-    setErrorMsg(e?.message || "Error desconocido al guardar en Google Sheets.");
-  } finally {
-    setSaving(false);
+  /* ==========================================================================
+     [I] ACCIONES (limpiar/imprimir/guardar+pdf+email)
+     ========================================================================== */
+  function limpiarTodo() {
+    setClientName("");
+    setClientRut("");
+    setClientCode("");
+    setEjecutivo("");
+    setDireccion("");
+    setDireccionNueva("");
+    setComuna("");
+    setEmailEjecutivo("");
+    setComentarios("");
+    setLines([]);
+    setErrorMsg("");
+    setNumeroNV(generarNumeroNV());
+    setListaSeleccionada(1);
+    setSaveMsg("");
   }
-}
+  function imprimir() {
+    window.print();
+  }
 
-async function enviarEmail() {
-  try {
-    const res = await fetch("/api/send-notaventa", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        asunto: `Nueva Nota de Venta ${numeroNV}`,
-        mensaje: `
-          Se ha generado una Nota de Venta:<br/>
-          <b>Número:</b> ${numeroNV}<br/>
-          <b>Cliente:</b> ${clientName}<br/>
-          <b>RUT:</b> ${clientRut}<br/>
-          <b>Total:</b> ${subtotal.toLocaleString("es-CL", {
-            style: "currency",
-            currency: "CLP",
-          })}
-        `,
-        to: ["silvana.pincheira@spartan.cl", emailEjecutivo], // 📧 Destinatarios
-      }),
-    });
+  // 🔻 Helper: genera y DESCARGA PDF desde #printArea y retorna base64 para adjuntar
+  async function crearYDescargarPdfDesdePrintArea(): Promise<{ filename: string; base64: string }> {
+    const input = document.getElementById("printArea") as HTMLElement | null;
+    if (!input) throw new Error("No se encontró el contenedor #printArea");
 
-    const data = await res.json();
-    if (!res.ok) {
-      console.error("❌ Error al enviar email:", data);
-      alert("Error al enviar correo");
-    } else {
-      console.log("📧 Email enviado:", data);
-      alert("Correo enviado correctamente ✅");
+    const canvas = await html2canvas(input, { scale: 2 });
+    const imgData = canvas.toDataURL("image/png");
+
+    const pdf = new jsPDF("p", "mm", "a4");
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+
+    const imgWidth = pageWidth;
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+    let heightLeft = imgHeight;
+    let position = 0;
+
+    pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+    heightLeft -= pageHeight;
+
+    while (heightLeft > 0) {
+      position = heightLeft - imgHeight;
+      pdf.addPage();
+      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
     }
-  } catch (err) {
-    console.error("🔥 Error en enviarEmail:", err);
-    alert("Error en el envío de correo");
+
+    const filename = `Nota_Venta_${numeroNV || "sin_numero"}.pdf`;
+    // Descargar local
+    pdf.save(filename);
+    // Devolver base64 (sin encabezado data:)
+    const base64 = pdf.output("datauristring").split(",")[1];
+    return { filename, base64 };
   }
-}
+
+  // 🔻 ÚNICO BOTÓN: guarda -> genera/descarga PDF -> envía email con adjunto
+  async function guardarPdfYEnviar() {
+    if (procesando) return;
+    setProcesando(true);
+    setErrorMsg("");
+    setSaveMsg("");
+
+    try {
+      // 1) Validaciones básicas
+      if (!clientName || !clientRut || !clientCode)
+        throw new Error("Faltan datos del cliente (Nombre, RUT y Código Cliente).");
+      if (lines.length === 0) throw new Error("Agrega al menos un ítem antes de guardar.");
+      if (lines.some((l) => l.isBloqueado))
+        throw new Error("No puedes guardar: hay precios especiales vencidos en la tabla.");
+
+      // 2) Construir payload y GUARDAR en Google Sheets
+      const fecha = new Date().toLocaleDateString("es-CL");
+      const payload = lines.map((item) => ({
+        numeroNV,
+        fecha,
+        cliente: clientName,
+        rut: clientRut,
+        codigoCliente: clientCode,
+        ejecutivo,
+        direccionDespacho: direccion,
+        direccionNueva,
+        comuna,
+        correoEjecutivo: emailEjecutivo,
+        comentarios,
+        subtotal,
+        total: subtotal,
+        codigo: item.code,
+        descripcion: item.name,
+        kilos: item.kilos,
+        cantidad: item.qty,
+        precioBase: Math.round(item.priceBase || 0),
+        descuento: item.isEspecial ? 0 : item.descuento,
+        precioVenta: Math.round(item.precioVenta || 0),
+        precioPresentacion: Math.round((item.precioVenta || 0) * (item.kilos || 1)),
+        totalItem: Math.round(item.total || 0),
+        especialVigente: !!item.isEspecial,
+        especialBloqueado: !!item.isBloqueado,
+      }));
+
+      setSaving(true);
+      const resSave = await fetch("/api/save-to-sheets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setSaving(false);
+      if (!resSave.ok) throw new Error("Error al guardar en Google Sheets.");
+      const json = await resSave.json();
+      const rows = Number(json?.rows ?? payload.length) || payload.length;
+      setSaveMsg(`✅ Nota de venta guardada con ${rows} ítem(s) en Google Sheets.`);
+
+      // 3) Generar y DESCARGAR PDF + obtener base64
+      const { filename, base64 } = await crearYDescargarPdfDesdePrintArea();
+
+      // 4) Enviar email con adjunto
+      const destinatarios = [emailEjecutivo, "silvana.pincheira@spartan.cl"].filter(Boolean);
+      const subject = `Nota de Venta ${numeroNV}`;
+      const message = `
+        <p>Se ha generado una Nota de Venta.</p>
+        <ul>
+          <li><b>Número:</b> ${numeroNV}</li>
+          <li><b>Cliente:</b> ${clientName}</li>
+          <li><b>RUT:</b> ${clientRut}</li>
+          <li><b>Total:</b> ${subtotal.toLocaleString("es-CL", { style: "currency", currency: "CLP" })}</li>
+        </ul>
+      `;
+
+      const resMail = await fetch("/api/send-notaventa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: destinatarios,
+          subject,
+          message,
+          attachment: {
+            filename,
+            content: base64,
+          },
+        }),
+      });
+      if (!resMail.ok) {
+        const err = await resMail.text();
+        throw new Error(`Error al enviar correo: ${err || resMail.status}`);
+      }
+
+      alert("✅ Guardado en Sheets, PDF descargado y correo enviado.");
+    } catch (e: any) {
+      console.error("❌ Error en guardarPdfYEnviar:", e);
+      setErrorMsg(e?.message || "Ocurrió un error inesperado.");
+      alert(e?.message || "Ocurrió un error inesperado.");
+    } finally {
+      setProcesando(false);
+    }
+  }
 
   /* ==========================================================================
      [J] UI
@@ -780,7 +706,6 @@ async function enviarEmail() {
         {/* ===== CLIENTE ===== */}
         <section className="bg-white shadow p-4 rounded mb-4">
           <h2 className="font-semibold text-[#2B6CFF] mb-2">Cliente</h2>
-          {/* Pantalla: 2 columnas — Impresión: 3 columnas */}
           <div className="client-grid grid grid-cols-2 gap-2 text-[12px] print:grid-cols-3">
             <label className="flex flex-col gap-1">
               <span className="font-medium">Nombre</span>
@@ -856,7 +781,6 @@ async function enviarEmail() {
           <div className="flex justify-between mb-2 items-center">
             <h2 className="font-semibold text-[#2B6CFF]">Productos</h2>
 
-            {/* Botones Lista (solo pantalla) */}
             <div className="flex gap-2 print:hidden">
               {[1, 2, 3].map((n) => (
                 <button
@@ -930,7 +854,6 @@ async function enviarEmail() {
                           ))}
                         </datalist>
 
-                        {/* Etiquetas de estado (solo pantalla) */}
                         {r.isEspecial && !r.isBloqueado && (
                           <div className="text-[10px] text-emerald-700 mt-1 print:hidden">
                             ✅ Precio especial vigente
@@ -992,24 +915,21 @@ async function enviarEmail() {
 
                       {/* Precio venta $/kg (editable) */}
                       <td className="px-2 py-1 text-right">
-                      <input
-  type="number"
-  min={0}
-  step={1}
-  className="w-28 rounded border px-2 py-1 text-right"
-  value={r.precioVenta === 0 ? "" : r.precioVenta}
-  onChange={(e) => {
-    // Solo actualiza el valor en memoria temporal sin validar
-    const n = [...lines];
-    n[i].precioVenta = e.target.value === "" ? 0 : Number(e.target.value);
-    setLines(n);
-  }}
-  onBlur={(e) => {
-    // Cuando tabula o sale del campo -> validar
-    updateLine(i, "precioVenta", e.target.value);
-  }}
-  disabled={r.isEspecial || r.isBloqueado}
-
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          className="w-28 rounded border px-2 py-1 text-right"
+                          value={r.precioVenta === 0 ? "" : r.precioVenta}
+                          onChange={(e) => {
+                            const n = [...lines];
+                            n[i].precioVenta = e.target.value === "" ? 0 : Number(e.target.value);
+                            setLines(n);
+                          }}
+                          onBlur={(e) => {
+                            updateLine(i, "precioVenta", e.target.value);
+                          }}
+                          disabled={r.isEspecial || r.isBloqueado}
                         />
                       </td>
 
@@ -1030,10 +950,8 @@ async function enviarEmail() {
                 })}
               </tbody>
 
-              {/* Pie de tabla (pantalla e impresión) */}
               {lines.length > 0 && (
                 <>
-                  {/* Pie pantalla: respeta columnas visibles en pantalla */}
                   <tfoot className="print:hidden">
                     <tr className="font-semibold bg-zinc-50">
                       <td colSpan={9} className="text-right px-2 py-1 border-t">
@@ -1043,7 +961,6 @@ async function enviarEmail() {
                     </tr>
                   </tfoot>
 
-                  {/* Pie impresión: solo 6 columnas visibles */}
                   <tfoot className="hidden print:table-footer-group">
                     <tr className="font-semibold">
                       <td colSpan={5} className="text-right px-2 py-2" style={{ borderTop: "2px solid #000" }}>
@@ -1085,210 +1002,176 @@ async function enviarEmail() {
           </div>
         </section>
       </div>
-      
 
-{/* ===== BOTONES (solo pantalla) ===== */}
-<div className="flex flex-wrap gap-2 print:hidden px-6 pb-8">
-  <button
-    className="bg-zinc-200 px-3 py-1 rounded"
-    onClick={imprimir}
-  >
-    🖨️ Imprimir / PDF
-  </button>
+      {/* ===== BOTONES (solo pantalla) ===== */}
+      <div className="flex flex-wrap gap-2 print:hidden px-6 pb-8">
+        <button className="bg-zinc-200 px-3 py-1 rounded" onClick={imprimir}>
+          🖨️ Imprimir / PDF
+        </button>
 
-  <button
-    className={`px-3 py-1 rounded text-white ${
-      saving ? "bg-zinc-400" : "bg-emerald-600 hover:bg-emerald-700"
-    }`}
-    onClick={guardarEnGoogleSheets}
-    disabled={saving}
-  >
-    {saving ? "Guardando..." : "💾 Guardar"}
-  </button>
+        {/* 🔹 Botón único: Guarda + descarga PDF + envía email */}
+        <button
+          className={`px-3 py-1 rounded text-white ${
+            procesando ? "bg-zinc-400" : "bg-emerald-600 hover:bg-emerald-700"
+          }`}
+          onClick={guardarPdfYEnviar}
+          disabled={procesando}
+        >
+          {procesando ? "Procesando..." : "💾 Guardar + 📄 PDF + 📧 Email"}
+        </button>
 
-  <button
-    className="bg-zinc-200 px-3 py-1 rounded"
-    onClick={limpiarTodo}
-  >
-    🧹 Nueva NV
-  </button>
+        <button className="bg-zinc-200 px-3 py-1 rounded" onClick={limpiarTodo}>
+          🧹 Nueva NV
+        </button>
+      </div>
 
-  {/* 🔹 Exportar PDF local (desde #printArea) */}
-  <button
-    className="bg-purple-600 text-white px-3 py-1 rounded hover:bg-purple-700"
-    onClick={generarPdfNotaVenta}
-  >
-    📄 Exportar PDF
-  </button>
+      {/* =========================================================================
+         [K] ESTILOS DE IMPRESIÓN — PDF profesional
+         ======================================================================= */}
+      <style jsx>{`
+        :global(html),
+        :global(body),
+        :global(#printArea) {
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
 
-  {/* 🔹 Enviar solo email con HTML (sin adjunto) */}
-  <button
-    className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
-    onClick={enviarEmail}
-  >
-    📧 Enviar Email
-  </button>
+        @media print {
+          body * {
+            visibility: hidden !important;
+          }
+          #printArea,
+          #printArea * {
+            visibility: visible !important;
+          }
+          #printArea {
+            position: absolute !important;
+            left: 0;
+            top: 0;
+            width: 100% !important;
+          }
 
-  {/* 🔹 Enviar email con PDF adjunto */}
-  <button
-    className="bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700"
-    onClick={enviarPdfNotaVentaPorEmail}
-  >
-    📧 Enviar Email con PDF
-  </button>
-  </div>
+          input,
+          select,
+          textarea,
+          button {
+            border: none !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            width: auto !important;
+            color: #000 !important;
+            font-size: 11px !important;
+            appearance: none !important;
+          }
 
-{/* =========================================================================
-   [K] ESTILOS DE IMPRESIÓN — PDF profesional
-   ======================================================================= */}
-<style jsx>{`
-  :global(html),
-  :global(body),
-  :global(#printArea) {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
+          .client-grid > label {
+            display: inline-block !important;
+            width: 32% !important;
+            vertical-align: top !important;
+            margin-right: 1.5% !important;
+          }
+          .client-grid > label.print\\:col-span-2 {
+            width: 66% !important;
+          }
 
-  /* Evitar scroll en impresión */
-  @media print {
-    body * {
-      visibility: hidden !important;
-    }
-    #printArea,
-    #printArea * {
-      visibility: visible !important;
-    }
-    #printArea {
-      position: absolute !important;
-      left: 0;
-      top: 0;
-      width: 100% !important;
-    }
+          .overflow-x-auto {
+            overflow: visible !important;
+          }
+          table {
+            border-collapse: collapse !important;
+            width: 100% !important;
+            table-layout: fixed !important;
+          }
+          th,
+          td {
+            border: 1px solid #e5e5e5 !important;
+            padding: 4px 6px !important;
+            vertical-align: middle !important;
+            font-variant-numeric: tabular-nums !important;
+          }
+          thead th {
+            background: #f5f5f5 !important;
+            text-align: center !important;
+            font-weight: 600 !important;
+          }
 
-    /* Controles como texto plano */
-    input,
-    select,
-    textarea,
-    button {
-      border: none !important;
-      background: transparent !important;
-      box-shadow: none !important;
-      padding: 0 !important;
-      margin: 0 !important;
-      width: auto !important;
-      color: #000 !important;
-      font-size: 11px !important;
-      appearance: none !important;
-    }
+          thead tr th:nth-child(3),
+          thead tr th:nth-child(5),
+          thead tr th:nth-child(6),
+          thead tr th:nth-child(10),
+          tbody tr td:nth-child(3),
+          tbody tr td:nth-child(5),
+          tbody tr td:nth-child(6),
+          tbody tr td:nth-child(10) {
+            display: none !important;
+          }
 
-    /* Distribución cliente: 3 por fila en impresión */
-    .client-grid > label {
-      display: inline-block !important;
-      width: 32% !important;
-      vertical-align: top !important;
-      margin-right: 1.5% !important;
-    }
-    .client-grid > label.print\\:col-span-2 {
-      width: 66% !important;
-    }
+          th:nth-child(1),
+          td:nth-child(1) {
+            width: 70px !important;
+            font-size: 10px !important;
+            text-align: left !important;
+          }
+          th:nth-child(2),
+          td:nth-child(2) {
+            width: auto !important;
+            white-space: normal !important;
+          }
+          th:nth-child(4),
+          td:nth-child(4) {
+            width: 60px !important;
+            text-align: center !important;
+          }
 
-    /* Tabla full width y sin scroll */
-    .overflow-x-auto {
-      overflow: visible !important;
-    }
-    table {
-      border-collapse: collapse !important;
-      width: 100% !important;
-      table-layout: fixed !important;
-    }
-    th,
-    td {
-      border: 1px solid #e5e5e5 !important;
-      padding: 4px 6px !important;
-      vertical-align: middle !important;
-      font-variant-numeric: tabular-nums !important;
-    }
-    thead th {
-      background: #f5f5f5 !important;
-      text-align: center !important;
-      font-weight: 600 !important;
-    }
+          th:nth-child(7),
+          td:nth-child(7) {
+            width: 70px !important;
+            text-align: right !important;
+            padding-right: 2px !important;
+          }
+          td:nth-child(7) input {
+            width: 60px !important;
+            text-align: right !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
 
-    /* Ocultar columnas en impresión */
-    thead tr th:nth-child(3),
-    thead tr th:nth-child(5),
-    thead tr th:nth-child(6),
-    thead tr th:nth-child(10),
-    tbody tr td:nth-child(3),
-    tbody tr td:nth-child(5),
-    tbody tr td:nth-child(6),
-    tbody tr td:nth-child(10) {
-      display: none !important;
-    }
+          th:nth-child(8),
+          td:nth-child(8) {
+            width: 135px !important;
+            text-align: right !important;
+            padding-left: 4px !important;
+          }
 
-    /* Estilos por columna */
-    th:nth-child(1), td:nth-child(1) { /* Código */
-      width: 70px !important;
-      font-size: 10px !important;
-      text-align: left !important;
-    }
-    th:nth-child(2), td:nth-child(2) { /* Descripción */
-      width: auto !important;
-      white-space: normal !important;
-    }
-    th:nth-child(4), td:nth-child(4) { /* Cantidad */
-      width: 60px !important;
-      text-align: center !important;
-    }
+          th:nth-child(9),
+          td:nth-child(9) {
+            width: 125px !important;
+            text-align: right !important;
+          }
 
-    /* Precio venta */
-    th:nth-child(7), td:nth-child(7) {
-      width: 70px !important;
-      text-align: right !important;
-      padding-right: 2px !important;
-    }
-    td:nth-child(7) input {
-      width: 60px !important;   /* 🔹 fuerza ancho más chico */
-      text-align: right !important;
-      padding: 0 !important;
-      margin: 0 !important;
-    }
+          tfoot tr td {
+            border-top: 2px solid #2B6CFF !important;
+            font-weight: 700 !important;
+          }
 
-    /* $ Presentación */
-    th:nth-child(8), td:nth-child(8) {
-      width: 135px !important;
-      text-align: right !important;
-      padding-left: 4px !important;
-    }
-
-    /* Total */
-    th:nth-child(9), td:nth-child(9) {
-      width: 125px !important;
-      text-align: right !important;
-    }
-
-    /* Totales */
-    tfoot tr td {
-      border-top: 2px solid #2B6CFF !important;
-      font-weight: 700 !important;
-    }
-
-    .print\\:hidden {
-      display: none !important;
-    }
-    @page {
-      size: A4;
-      margin: 12mm;
-    }
-    header,
-    section,
-    table,
-    h1,
-    h2 {
-      break-inside: avoid;
-    }
-  }
-`}</style>
-</>
-);
+          .print\\:hidden {
+            display: none !important;
+          }
+          @page {
+            size: A4;
+            margin: 12mm;
+          }
+          header,
+          section,
+          table,
+          h1,
+          h2 {
+            break-inside: avoid;
+          }
+        }
+      `}</style>
+    </>
+  );
 }
