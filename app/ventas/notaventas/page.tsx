@@ -1025,153 +1025,154 @@ export default function NotaVentaPage() {
         </button>
       </div>
 
-      {/* =========================================================================
-         [K] ESTILOS DE IMPRESIÓN — PDF profesional
-         ======================================================================= */}
-      <style jsx>{`
-        :global(html),
-        :global(body),
-        :global(#printArea) {
-          -webkit-print-color-adjust: exact;
-          print-color-adjust: exact;
-        }
+ {/* =========================================================================
+      [K] ESTILOS DE IMPRESIÓN — PDF profesional
+      ======================================================================= */}
+   <style jsx>{`
+     :global(html),
+     :global(body),
+     :global(#printArea) {
+       -webkit-print-color-adjust: exact;
+       print-color-adjust: exact;
+     }
 
-        @media print {
-          body * {
-            visibility: hidden !important;
-          }
-          #printArea,
-          #printArea * {
-            visibility: visible !important;
-          }
-          #printArea {
-            position: absolute !important;
-            left: 0;
-            top: 0;
-            width: 100% !important;
-          }
+     @media print {
+       body * {
+         visibility: hidden !important;
+       }
+       #printArea,
+       #printArea * {
+         visibility: visible !important;
+       }
+       #printArea {
+         position: absolute !important;
+         left: 0;
+         top: 0;
+         width: 100% !important;
+       }
 
-          input,
-          select,
-          textarea,
-          button {
-            border: none !important;
-            background: transparent !important;
-            box-shadow: none !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            width: auto !important;
-            color: #000 !important;
-            font-size: 11px !important;
-            appearance: none !important;
-          }
+       input,
+       select,
+       textarea,
+       button {
+         border: none !important;
+         background: transparent !important;
+         box-shadow: none !important;
+         padding: 0 !important;
+         margin: 0 !important;
+         width: auto !important;
+         color: #000 !important;
+         font-size: 11px !important;
+         appearance: none !important;
+       }
 
-          .client-grid > label {
-            display: inline-block !important;
-            width: 32% !important;
-            vertical-align: top !important;
-            margin-right: 1.5% !important;
-          }
-          .client-grid > label.print\\:col-span-2 {
-            width: 66% !important;
-          }
+       .client-grid > label {
+         display: inline-block !important;
+         width: 32% !important;
+         vertical-align: top !important;
+         margin-right: 1.5% !important;
+       }
+       .client-grid > label.print\\:col-span-2 {
+         width: 66% !important;
+       }
 
-          .overflow-x-auto {
-            overflow: visible !important;
-          }
-          table {
-            border-collapse: collapse !important;
-            width: 100% !important;
-            table-layout: fixed !important;
-          }
-          th,
-          td {
-            border: 1px solid #e5e5e5 !important;
-            padding: 4px 6px !important;
-            vertical-align: middle !important;
-            font-variant-numeric: tabular-nums !important;
-          }
-          thead th {
-            background: #f5f5f5 !important;
-            text-align: center !important;
-            font-weight: 600 !important;
-          }
+       .overflow-x-auto {
+         overflow: visible !important;
+       }
+       table {
+         border-collapse: collapse !important;
+         width: 100% !important;
+         table-layout: fixed !important;
+       }
+       th,
+       td {
+         border: 1px solid #e5e5e5 !important;
+         padding: 4px 6px !important;
+         vertical-align: middle !important;
+         font-variant-numeric: tabular-nums !important;
+       }
+       thead th {
+         background: #f5f5f5 !important;
+         text-align: center !important;
+         font-weight: 600 !important;
+       }
 
-          thead tr th:nth-child(3),
-          thead tr th:nth-child(5),
-          thead tr th:nth-child(6),
-          thead tr th:nth-child(10),
-          tbody tr td:nth-child(3),
-          tbody tr td:nth-child(5),
-          tbody tr td:nth-child(6),
-          tbody tr td:nth-child(10) {
-            display: none !important;
-          }
+       thead tr th:nth-child(3),
+       thead tr th:nth-child(5),
+       thead tr th:nth-child(6),
+       thead tr th:nth-child(10),
+       tbody tr td:nth-child(3),
+       tbody tr td:nth-child(5),
+       tbody tr td:nth-child(6),
+       tbody tr td:nth-child(10) {
+         display: none !important;
+       }
 
-          th:nth-child(1),
-          td:nth-child(1) {
-            width: 70px !important;
-            font-size: 10px !important;
-            text-align: left !important;
-          }
-          th:nth-child(2),
-          td:nth-child(2) {
-            width: auto !important;
-            white-space: normal !important;
-          }
-          th:nth-child(4),
-          td:nth-child(4) {
-            width: 60px !important;
-            text-align: center !important;
-          }
+       th:nth-child(1),
+       td:nth-child(1) {
+         width: 70px !important;
+         font-size: 10px !important;
+         text-align: left !important;
+       }
+       th:nth-child(2),
+       td:nth-child(2) {
+         width: auto !important;
+         white-space: normal !important;
+       }
+       th:nth-child(4),
+       td:nth-child(4) {
+         width: 60px !important;
+         text-align: center !important;
+       }
 
-          th:nth-child(7),
-          td:nth-child(7) {
-            width: 70px !important;
-            text-align: right !important;
-            padding-right: 2px !important;
-          }
-          td:nth-child(7) input {
-            width: 60px !important;
-            text-align: right !important;
-            padding: 0 !important;
-            margin: 0 !important;
-          }
+       th:nth-child(7),
+       td:nth-child(7) {
+         width: 70px !important;
+         text-align: right !important;
+         padding-right: 2px !important;
+       }
+       td:nth-child(7) input {
+         width: 60px !important;
+         text-align: right !important;
+         padding: 0 !important;
+         margin: 0 !important;
+       }
 
-          th:nth-child(8),
-          td:nth-child(8) {
-            width: 135px !important;
-            text-align: right !important;
-            padding-left: 4px !important;
-          }
+       th:nth-child(8),
+       td:nth-child(8) {
+         width: 135px !important;
+         text-align: right !important;
+         padding-left: 4px !important;
+       }
 
-          th:nth-child(9),
-          td:nth-child(9) {
-            width: 125px !important;
-            text-align: right !important;
-          }
+       th:nth-child(9),
+       td:nth-child(9) {
+         width: 125px !important;
+         text-align: right !important;
+       }
 
-          tfoot tr td {
-            border-top: 2px solid #2B6CFF !important;
-            font-weight: 700 !important;
-          }
+       tfoot tr td {
+         border-top: 2px solid #2B6CFF !important;
+         font-weight: 700 !important;
+       }
 
-          .print\\:hidden {
-            display: none !important;
-          }
-          @page {
-            size: A4;
-            margin: 12mm;
-          }
-          header,
-          section,
-          table,
-          h1,
-          h2 {
-            break-inside: avoid;
-          }
-        }
-      `}</style>
-    </>
-  );
-}
+       .print\\:hidden {
+         display: none !important;
+       }
+       @page {
+         size: A4;
+         margin: 12mm;
+       }
+       header,
+       section,
+       table,
+       h1,
+       h2 {
+         break-inside: avoid;
+       }
+     }
+     `}</style>
+     </>   
+   );      {/* cierre del return */}
+   }
+     
