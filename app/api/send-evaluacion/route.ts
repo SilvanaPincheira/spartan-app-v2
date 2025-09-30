@@ -1,4 +1,4 @@
-// app/api/send-email/route.ts
+// app/api/send-evaluacion/route.ts
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
 
@@ -25,9 +25,11 @@ function buildEvaluacionHTML(payload: any) {
       : `<span style="background:#dc2626;color:#fff;padding:2px 8px;border-radius:9999px;font-size:12px">No viable</span>`;
 
   const indicadoresRows = (indicadores || [])
-    .map(
-      (i: { label: string; valor: string | number }) =>
-        `<tr><td style="border:1px solid #e5e7eb;padding:8px">${i.label ?? ""}</td><td style="border:1px solid #e5e7eb;padding:8px;text-align:right">${i.valor ?? ""}</td></tr>`
+    .map((i: { label: string; valor: string | number }, idx: number) =>
+      `<tr>
+        <td style="border:1px solid #e5e7eb;padding:8px">${i.label ?? ""}</td>
+        <td style="border:1px solid #e5e7eb;padding:8px;text-align:right">${i.valor ?? ""}</td>
+      </tr>`
     )
     .join("");
 
@@ -38,22 +40,10 @@ function buildEvaluacionHTML(payload: any) {
       <p style="margin:0 0 16px 0;color:#6b7280">Resumen automático de la evaluación.</p>
 
       <table style="width:100%;border-collapse:collapse;margin-top:8px">
-        <tr>
-          <td style="padding:6px 0;color:#6b7280">Cliente</td>
-          <td style="padding:6px 0;text-align:right"><strong>${cliente}</strong></td>
-        </tr>
-        <tr>
-          <td style="padding:6px 0;color:#6b7280">RUT</td>
-          <td style="padding:6px 0;text-align:right">${rut}</td>
-        </tr>
-        <tr>
-          <td style="padding:6px 0;color:#6b7280">Ejecutivo</td>
-          <td style="padding:6px 0;text-align:right">${ejecutivo}</td>
-        </tr>
-        <tr>
-          <td style="padding:6px 0;color:#6b7280">Fecha</td>
-          <td style="padding:6px 0;text-align:right">${fecha}</td>
-        </tr>
+        <tr><td style="padding:6px 0;color:#6b7280">Cliente</td><td style="padding:6px 0;text-align:right"><strong>${cliente}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280">RUT</td><td style="padding:6px 0;text-align:right">${rut}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280">Ejecutivo</td><td style="padding:6px 0;text-align:right">${ejecutivo}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280">Fecha</td><td style="padding:6px 0;text-align:right">${fecha}</td></tr>
       </table>
 
       <div style="display:flex;gap:12px;align-items:center;margin:18px 0">
@@ -76,9 +66,7 @@ function buildEvaluacionHTML(payload: any) {
               <th style="text-align:right;border:1px solid #e5e7eb;background:#f9fafb;padding:8px">Valor</th>
             </tr>
           </thead>
-          <tbody>
-            ${indicadoresRows}
-          </tbody>
+          <tbody>${indicadoresRows}</tbody>
         </table>`
           : ""
       }
@@ -104,25 +92,8 @@ export async function POST(req: Request) {
       (typeof body.subject === "string" && body.subject.trim()) ||
       "Evaluación de negocio – Spartan App";
 
-    // 🔹 Caso 1: Nota de Venta → email con PDF adjunto
-    if (body.attachment) {
-      const data = await resend.emails.send({
-        from: "silvana.pincheira@spartan.cl", // remitente validado en Resend
-        to,
-        subject,
-        html: body.message || "<p>Adjunto Nota de Venta en PDF</p>",
-        attachments: [
-          {
-            filename: body.attachment.filename,
-            content: body.attachment.content, // Base64 del PDF
-          },
-        ],
-      });
-      return NextResponse.json({ success: true, data });
-    }
-
-    // 🔹 Caso 2: Evaluación de Negocios → HTML formateado
     const html = buildEvaluacionHTML(body);
+
     const data = await resend.emails.send({
       from: "silvana.pincheira@spartan.cl",
       to,

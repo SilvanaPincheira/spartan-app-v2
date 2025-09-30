@@ -307,11 +307,11 @@ async function enviarPdfNotaVentaPorEmail() {
   const pdfBase64 = pdf.output("datauristring").split(",")[1];
 
   try {
-    const res = await fetch("/api/send-email", {
+    const res = await fetch("/api/send-notaventa", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        to: "silvana.pincheira@spartan.cl",
+        to: emailEjecutivo || "silvana.pincheira@spartan.cl",
         subject: `Nota de Venta ${numeroNV}`,
         message: `Adjunto PDF de la Nota de Venta ${numeroNV}`,
         attachment: {
@@ -320,6 +320,7 @@ async function enviarPdfNotaVentaPorEmail() {
         },
       }),
     });
+    
 
     if (!res.ok) throw new Error("Error al enviar correo");
     alert("📧 Correo con PDF enviado correctamente ✅");
