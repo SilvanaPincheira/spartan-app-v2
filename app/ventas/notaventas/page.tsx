@@ -532,41 +532,48 @@ export default function NotaVentaPage() {
   }
 
   // 🔻 Helper: genera y DESCARGA PDF desde #printArea y retorna base64 para adjuntar
-  async function crearYDescargarPdfDesdePrintArea(): Promise<{ filename: string; base64: string }> {
-    const input = document.getElementById("printArea") as HTMLElement | null;
-    if (!input) throw new Error("No se encontró el contenedor #printArea");
+async function crearYDescargarPdfDesdePrintArea(): Promise<{ filename: string; base64: string }> {
+  const input = document.getElementById("printArea") as HTMLElement | null;
+  if (!input) throw new Error("No se encontró el contenedor #printArea");
 
-    const canvas = await html2canvas(input, { scale: 2 });
-    const imgData = canvas.toDataURL("image/png");
+  // ⚡ Reducir escala = menos peso
+  const canvas = await html2canvas(input, { scale: 1 });
 
-    const pdf = new jsPDF("p", "mm", "a4");
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
+  // ⚡ Cambiar a JPEG con compresión
+  const imgData = canvas.toDataURL("image/jpeg", 0.6); // calidad 60%
 
-    const imgWidth = pageWidth;
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+  // Crear PDF
+  const pdf = new jsPDF("p", "mm", "a4");
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
 
-    let heightLeft = imgHeight;
-    let position = 0;
+  const imgWidth = pageWidth;
+  const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-    pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+  let heightLeft = imgHeight;
+  let position = 0;
+
+  // Página 1
+  pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight, undefined, "FAST");
+  heightLeft -= pageHeight;
+
+  // Si se pasa del alto → agregar más páginas
+  while (heightLeft > 0) {
+    position = heightLeft - imgHeight;
+    pdf.addPage();
+    pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight, undefined, "FAST");
     heightLeft -= pageHeight;
-
-    while (heightLeft > 0) {
-      position = heightLeft - imgHeight;
-      pdf.addPage();
-      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
-    }
-
-    const filename = `Nota_Venta_${numeroNV || "sin_numero"}.pdf`;
-    // Descargar local
-    pdf.save(filename);
-    // Devolver base64 (sin encabezado data:)
-    const base64 = pdf.output("datauristring").split(",")[1];
-    return { filename, base64 };
   }
 
+  const filename = `Nota_Venta_${numeroNV || "sin_numero"}.pdf`;
+
+  // Descargar local
+  pdf.save(filename);
+
+  // Devolver base64 (sin encabezado data:)
+  const base64 = pdf.output("datauristring").split(",")[1];
+  return { filename, base64 };
+}
   // 🔻 ÚNICO BOTÓN: guarda -> genera/descarga PDF -> envía email con adjunto
   async function guardarPdfYEnviar() {
     if (procesando) return;
