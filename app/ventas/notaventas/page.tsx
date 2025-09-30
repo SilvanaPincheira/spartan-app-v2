@@ -21,6 +21,9 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
+
 
 /* ============================================================================
    [A] HELPERS GENERALES
@@ -240,6 +243,92 @@ export default function NotaVentaPage() {
     const fv = new Date(f.getFullYear(), f.getMonth(), f.getDate()).getTime();
     return hoySinHora().getTime() <= fv;
   }
+  /* ----- PDF desde printArea ----- */
+async function generarPdfNotaVenta() {
+  const input = document.getElementById("printArea");
+  if (!input) return;
+
+  const canvas = await html2canvas(input, { scale: 2 });
+  const imgData = canvas.toDataURL("image/png");
+
+  const pdf = new jsPDF("p", "mm", "a4");
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+
+  const imgWidth = pageWidth;
+  const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+  let heightLeft = imgHeight;
+  let position = 0;
+
+  // Primera página
+  pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+  heightLeft -= pageHeight;
+
+  // Páginas extra si el contenido es largo
+  while (heightLeft > 0) {
+    position = heightLeft - imgHeight;
+    pdf.addPage();
+    pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+    heightLeft -= pageHeight;
+  }
+
+  pdf.save(`Nota_Venta_${numeroNV || "sin_numero"}.pdf`);
+}
+/* ----- PDF y envío por email ----- */
+async function enviarPdfNotaVentaPorEmail() {
+  const input = document.getElementById("printArea");
+  if (!input) return;
+
+  const canvas = await html2canvas(input, { scale: 2 });
+  const imgData = canvas.toDataURL("image/png");
+
+  const pdf = new jsPDF("p", "mm", "a4");
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+
+  const imgWidth = pageWidth;
+  const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+  let heightLeft = imgHeight;
+  let position = 0;
+
+  pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+  heightLeft -= pageHeight;
+
+  while (heightLeft > 0) {
+    position = heightLeft - imgHeight;
+    pdf.addPage();
+    pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+    heightLeft -= pageHeight;
+  }
+
+  // 🔹 Convertir a base64 para adjuntar
+  const pdfBase64 = pdf.output("datauristring").split(",")[1];
+
+  try {
+    const res = await fetch("/api/send-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: "silvana.pincheira@spartan.cl",
+        subject: `Nota de Venta ${numeroNV}`,
+        message: `Adjunto PDF de la Nota de Venta ${numeroNV}`,
+        attachment: {
+          filename: `Nota_Venta_${numeroNV}.pdf`,
+          content: pdfBase64,
+        },
+      }),
+    });
+
+    if (!res.ok) throw new Error("Error al enviar correo");
+    alert("📧 Correo con PDF enviado correctamente ✅");
+  } catch (err) {
+    console.error("❌ Error en enviarPdfNotaVentaPorEmail:", err);
+    alert("Error al enviar correo");
+  }
+}
+
 
   /* ==========================================================================
      [E] EFECTOS: Inicialización y carga de datos
@@ -996,7 +1085,8 @@ async function enviarEmail() {
         </section>
       </div>
       
-           {/* ===== BOTONES (solo pantalla) ===== */}
+
+{/* ===== BOTONES (solo pantalla) ===== */}
 <div className="flex flex-wrap gap-2 print:hidden px-6 pb-8">
   <button
     className="bg-zinc-200 px-3 py-1 rounded"
@@ -1022,16 +1112,32 @@ async function enviarEmail() {
     🧹 Nueva NV
   </button>
 
+  {/* 🔹 Exportar PDF local (desde #printArea) */}
+  <button
+    className="bg-purple-600 text-white px-3 py-1 rounded hover:bg-purple-700"
+    onClick={generarPdfNotaVenta}
+  >
+    📄 Exportar PDF
+  </button>
+
+  {/* 🔹 Enviar solo email con HTML (sin adjunto) */}
   <button
     className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
     onClick={enviarEmail}
   >
     📧 Enviar Email
   </button>
-</div>
 
-   
-         {/* =========================================================================
+  {/* 🔹 Enviar email con PDF adjunto */}
+  <button
+    className="bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700"
+    onClick={enviarPdfNotaVentaPorEmail}
+  >
+    📧 Enviar Email con PDF
+  </button>
+  </div>
+
+{/* =========================================================================
    [K] ESTILOS DE IMPRESIÓN — PDF profesional
    ======================================================================= */}
 <style jsx>{`
@@ -1183,5 +1289,5 @@ async function enviarEmail() {
   }
 `}</style>
 </>
-  );
+);
 }

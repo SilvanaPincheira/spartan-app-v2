@@ -4,7 +4,7 @@ import { Resend } from "resend";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// --- helper: arma el HTML de la evaluación ---
+// --- helper: arma el HTML de la evaluación de negocios ---
 function buildEvaluacionHTML(payload: any) {
   const {
     cliente = "",
@@ -21,14 +21,15 @@ function buildEvaluacionHTML(payload: any) {
     ok === null
       ? `<span style="background:#9ca3af;color:#fff;padding:2px 8px;border-radius:9999px;font-size:12px">Sin evaluar</span>`
       : ok
-        ? `<span style="background:#059669;color:#fff;padding:2px 8px;border-radius:9999px;font-size:12px">Viable</span>`
-        : `<span style="background:#dc2626;color:#fff;padding:2px 8px;border-radius:9999px;font-size:12px">No viable</span>`;
+      ? `<span style="background:#059669;color:#fff;padding:2px 8px;border-radius:9999px;font-size:12px">Viable</span>`
+      : `<span style="background:#dc2626;color:#fff;padding:2px 8px;border-radius:9999px;font-size:12px">No viable</span>`;
 
-        const indicadoresRows = (indicadores || [])
-  .map((i: { label: string; valor: string | number }) =>
-    `<tr><td style="border:1px solid #e5e7eb;padding:8px">${i.label ?? ""}</td><td style="border:1px solid #e5e7eb;padding:8px;text-align:right">${i.valor ?? ""}</td></tr>`
-  )
-  .join("");
+  const indicadoresRows = (indicadores || [])
+    .map(
+      (i: { label: string; valor: string | number }) =>
+        `<tr><td style="border:1px solid #e5e7eb;padding:8px">${i.label ?? ""}</td><td style="border:1px solid #e5e7eb;padding:8px;text-align:right">${i.valor ?? ""}</td></tr>`
+    )
+    .join("");
 
   return `
   <div style="font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; color:#111827">
@@ -96,7 +97,6 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    // Destinatario y asunto con fallback a TU correo y asunto por defecto
     const to =
       (typeof body.to === "string" && body.to.trim()) ||
       "silvana.pincheira@spartan.cl";
@@ -104,12 +104,29 @@ export async function POST(req: Request) {
       (typeof body.subject === "string" && body.subject.trim()) ||
       "Evaluación de negocio – Spartan App";
 
-    const html = buildEvaluacionHTML(body);
+    // 🔹 Caso 1: Nota de Venta → email con PDF adjunto
+    if (body.attachment) {
+      const data = await resend.emails.send({
+        from: "silvana.pincheira@spartan.cl", // remitente validado en Resend
+        to,
+        subject,
+        html: body.message || "<p>Adjunto Nota de Venta en PDF</p>",
+        attachments: [
+          {
+            filename: body.attachment.filename,
+            content: body.attachment.content, // Base64 del PDF
+          },
+        ],
+      });
+      return NextResponse.json({ success: true, data });
+    }
 
+    // 🔹 Caso 2: Evaluación de Negocios → HTML formateado
+    const html = buildEvaluacionHTML(body);
     const data = await resend.emails.send({
-      from: "silvana.pincheira@spartan.cl", // remitente validado
-      to,                                    // tu correo si no envían nada
-      subject,                               // asunto por defecto si no envían nada
+      from: "silvana.pincheira@spartan.cl",
+      to,
+      subject,
       html,
     });
 
@@ -119,4 +136,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error }, { status: 500 });
   }
 }
-
