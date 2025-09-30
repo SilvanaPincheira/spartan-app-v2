@@ -531,33 +531,49 @@ export default function NotaVentaPage() {
     window.print();
   }
 
-  // 🔻 Helper: genera y DESCARGA PDF desde #printArea y retorna base64 para adjuntar
+  // 🔹 Helper para clonar y reemplazar <input>, <select>, <textarea> por spans con sus valores
+function cloneForPrint(node: HTMLElement) {
+  const clone = node.cloneNode(true) as HTMLElement;
+
+  clone.querySelectorAll("input, textarea, select").forEach((el) => {
+    const input = el as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+    const span = document.createElement("span");
+    span.textContent = input.value || "";
+    span.style.whiteSpace = "pre-wrap";
+    span.style.fontSize = "11px";
+    span.style.display = "inline-block";
+    span.style.minWidth = input.offsetWidth + "px";
+    el.replaceWith(span);
+  });
+
+  return clone;
+}
+
+// 🔹 Genera y descarga PDF desde #printArea mostrando valores en vez de inputs
 async function crearYDescargarPdfDesdePrintArea(): Promise<{ filename: string; base64: string }> {
   const input = document.getElementById("printArea") as HTMLElement | null;
   if (!input) throw new Error("No se encontró el contenedor #printArea");
 
-  // ⚡ Reducir escala = menos peso
-  const canvas = await html2canvas(input, { scale: 1 });
+  // Clonamos el nodo y lo preparamos para impresión
+  const clone = cloneForPrint(input);
 
-  // ⚡ Cambiar a JPEG con compresión
-  const imgData = canvas.toDataURL("image/jpeg", 0.6); // calidad 60%
+  // Captura con html2canvas (JPEG comprimido para que no pese tanto)
+  const canvas = await html2canvas(clone, { scale: 1 });
+  const imgData = canvas.toDataURL("image/jpeg", 0.6);
 
-  // Crear PDF
+  // Creamos el PDF
   const pdf = new jsPDF("p", "mm", "a4");
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
-
   const imgWidth = pageWidth;
   const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
   let heightLeft = imgHeight;
   let position = 0;
 
-  // Página 1
   pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight, undefined, "FAST");
   heightLeft -= pageHeight;
 
-  // Si se pasa del alto → agregar más páginas
   while (heightLeft > 0) {
     position = heightLeft - imgHeight;
     pdf.addPage();
@@ -566,14 +582,13 @@ async function crearYDescargarPdfDesdePrintArea(): Promise<{ filename: string; b
   }
 
   const filename = `Nota_Venta_${numeroNV || "sin_numero"}.pdf`;
-
-  // Descargar local
   pdf.save(filename);
 
-  // Devolver base64 (sin encabezado data:)
+  // Devolver en base64 para adjuntar al correo
   const base64 = pdf.output("datauristring").split(",")[1];
   return { filename, base64 };
 }
+
   // 🔻 ÚNICO BOTÓN: guarda -> genera/descarga PDF -> envía email con adjunto
   async function guardarPdfYEnviar() {
     if (procesando) return;
