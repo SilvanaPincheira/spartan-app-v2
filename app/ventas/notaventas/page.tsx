@@ -708,7 +708,7 @@ async function guardarEnGoogleSheets() {
 
 async function enviarEmail() {
   try {
-    const res = await fetch("/api/send-email", {
+    const res = await fetch("/api/send-notaventa", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
