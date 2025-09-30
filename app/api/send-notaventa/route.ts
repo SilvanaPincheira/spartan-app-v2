@@ -22,8 +22,8 @@ export async function POST(req: Request) {
     // 🔹 Email con PDF adjunto
     const data = await resend.emails.send({
       from: "silvana.pincheira@spartan.cl", // remitente validado
-      to,
-      subject,
+      to:"silvana.pincheira@spartan.cl",
+      subject:"Nota de Venta Spartan",
       html: body.message || "<p>Adjunto Nota de Venta en PDF</p>",
       attachments: [
         {
