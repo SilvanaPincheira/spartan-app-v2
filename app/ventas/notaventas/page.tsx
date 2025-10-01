@@ -664,33 +664,36 @@ const { filename, base64 } = generarPdfNotaVenta({
         </ul>
       `;
 
-      const resMail = await fetch("/api/send-notaventa", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: destinatarios,
-          subject,
-          message,
-          attachment: {
-            filename,
-            content: base64,
-          },
-        }),
-      });
-      if (!resMail.ok) {
-        const err = await resMail.text();
-        throw new Error(`Error al enviar correo: ${err || resMail.status}`);
+      try {
+        const resMail = await fetch("/api/send-notaventa", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject,
+            message,
+            attachment: { filename, content: base64 },
+            cc: emailEjecutivo || undefined, // copia al ejecutivo si existe
+          }),
+        });
+      
+        if (!resMail.ok) {
+          const errText = await resMail.text();
+          throw new Error(`Error al enviar correo: ${errText || resMail.status}`);
+        }
+      
+        alert("✅ Guardado en Sheets, PDF descargado y correo enviado a SAC + CC Ejecutivo.");
+      } catch (e: any) {
+        console.error("❌ Error en guardarPdfYEnviar:", e);
+        setErrorMsg(e?.message || "Ocurrió un error inesperado.");
+        alert(
+          `❌ No se pudo enviar el correo.\n\nDetalles: ${
+            e?.message || "Error inesperado"
+          }\n\nLa nota igual quedó guardada en Google Sheets.`
+        );
+      } finally {
+        setProcesando(false);
       }
-
-      alert("✅ Guardado en Sheets, PDF descargado y correo enviado.");
-    } catch (e: any) {
-      console.error("❌ Error en guardarPdfYEnviar:", e);
-      setErrorMsg(e?.message || "Ocurrió un error inesperado.");
-      alert(e?.message || "Ocurrió un error inesperado.");
-    } finally {
-      setProcesando(false);
-    }
-  }
+      
 
   /* ==========================================================================
      [J] UI

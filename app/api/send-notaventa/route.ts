@@ -8,9 +8,12 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    const to =
-      (typeof body.to === "string" && body.to.trim()) ||
-      "silvana.pincheira@spartan.cl";
+    // Siempre SAC como destinatario
+    const to = "sac@spartan.cl";
+
+    // CC: correo del ejecutivo (si viene en el body)
+    const cc = body.cc || body.emailEjecutivo || "";
+
     const subject =
       (typeof body.subject === "string" && body.subject.trim()) ||
       "Nota de Venta – Spartan App";
@@ -19,11 +22,12 @@ export async function POST(req: Request) {
       throw new Error("❌ Falta adjuntar el PDF de la Nota de Venta.");
     }
 
-    // 🔹 Email con PDF adjunto
+    // Email con PDF adjunto
     const data = await resend.emails.send({
-      from: "silvana.pincheira@spartan.cl", // remitente validado
-      to:"silvana.pincheira@spartan.cl",
-      subject:"Nota de Venta Spartan",
+      from: "no-reply@spartan.cl", // remitente validado en Resend
+      to,                          // siempre SAC
+      cc: cc ? [cc] : undefined,   // copia al ejecutivo si existe
+      subject,
       html: body.message || "<p>Adjunto Nota de Venta en PDF</p>",
       attachments: [
         {
@@ -35,7 +39,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true, data });
   } catch (error: any) {
-    console.error("❌ Error al enviar correo de Nota de Venta:", JSON.stringify(error, null, 2));
+    console.error("❌ Error al enviar correo de Nota de Venta:", error);
     return NextResponse.json({ success: false, error }, { status: 500 });
   }
 }
