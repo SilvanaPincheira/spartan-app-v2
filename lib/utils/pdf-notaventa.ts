@@ -1,5 +1,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { logoBase64 } from "../logo64";
+
 
 // Tipos de datos
 export type ProductoPdf = {
@@ -39,14 +41,13 @@ export function generarPdfNotaVenta(
 ): { base64: string; filename: string } {
   const doc = new jsPDF();
 
-  // === Logo (si está en /public/logo.png) ===
-  const logo = new Image();
-  logo.src = "/logo.png";
-  try {
-    doc.addImage(logo, "PNG", 14, 10, 25, 25);
-  } catch {
-    // si no existe el logo, no pasa nada
-  }
+    // === Logo Spartan (desde base64) ===
+    try {
+      doc.addImage(logoBase64, "JPEG", 14, 10, 25, 25);
+    } catch (err) {
+      console.warn("No se pudo insertar el logo en el PDF:", err);
+    }
+  
 
   // === Encabezado ===
   doc.setFontSize(16);
