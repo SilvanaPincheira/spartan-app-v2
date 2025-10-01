@@ -27,8 +27,10 @@ type NotaVentaPdf = {
   comentarios: string;
 };
 
-export function generarPdfNotaVenta(data: NotaVentaPdf) {
+
+export function generarPdfNotaVenta(data: NotaVentaPdf): { base64: string; filename: string } {
   const doc = new jsPDF();
+  
 
   // Encabezado
   doc.setFontSize(16);
@@ -73,6 +75,9 @@ export function generarPdfNotaVenta(data: NotaVentaPdf) {
   doc.setFontSize(10);
   doc.text(data.comentarios || "—", 14, finalY + 16);
 
-  // Guardar PDF
-  doc.save(`Nota_Venta_${data.numeroNV}.pdf`);
+  // ✅ Exportar como base64
+  const filename = `Nota_Venta_${data.numeroNV}.pdf`;
+  const base64 = doc.output("datauristring").split(",")[1];
+
+  return { base64, filename };
 }
