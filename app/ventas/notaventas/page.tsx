@@ -23,6 +23,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { guardarPdfYEnviarSinEstado } from "@/lib/utils/guardar-notaventa";
 import html2canvas from "html2canvas";
+import { generarPdfNotaVenta } from "@/lib/utils/pdf-notaventa";
+
 import jsPDF from "jspdf";
 
 /* ============================================================================
@@ -624,8 +626,30 @@ export default function NotaVentaPage() {
       const rows = Number(json?.rows ?? payload.length) || payload.length;
       setSaveMsg(`✅ Nota de venta guardada con ${rows} ítem(s) en Google Sheets.`);
 
-      // 3) Generar y DESCARGAR PDF + obtener base64
-      const { filename, base64 } = await crearYDescargarPdfDesdePrintArea();
+      // 3) Generar PDF bonito con autoTable
+const { filename, base64 } = generarPdfNotaVenta({
+  numeroNV,
+  fecha: new Date().toLocaleDateString("es-CL"),
+  cliente: {
+    nombre: clientName,
+    rut: clientRut,
+    codigo: clientCode,
+    ejecutivo,
+    direccion,
+    comuna,
+  },
+  productos: lines.map((item) => ({
+    codigo: item.code,
+    descripcion: item.name,
+    kilos: item.kilos,
+    cantidad: item.qty,
+    precioBase: Math.round(item.priceBase || 0),
+    precioVenta: Math.round(item.precioVenta || 0),
+    precioPresentacion: Math.round((item.precioVenta || 0) * (item.kilos || 1)),
+    total: Math.round(item.total || 0),
+  })),
+  comentarios,
+});
 
       // 4) Enviar email con adjunto
       const destinatarios = [emailEjecutivo, "silvana.pincheira@spartan.cl"].filter(Boolean);

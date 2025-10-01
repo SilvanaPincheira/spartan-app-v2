@@ -10,9 +10,12 @@ export async function guardarPdfYEnviarSinEstado({
     emailEjecutivo,
     comentarios,
     lines,
-  }: any): Promise<{ ok: boolean; message: string }> {
+  }: any): Promise<{ ok: boolean; message: string; filename?: string }> {
     try {
-      const subtotal = lines.reduce((a: number, r: any) => a + (Number.isFinite(r.total) ? r.total : 0), 0);
+      const subtotal = lines.reduce(
+        (a: number, r: any) => a + (Number.isFinite(r.total) ? r.total : 0),
+        0
+      );
   
       if (!clientName || !clientRut || !clientCode)
         throw new Error("Faltan datos del cliente (Nombre, RUT y Código Cliente).");
@@ -58,13 +61,29 @@ export async function guardarPdfYEnviarSinEstado({
       if (!resSave.ok) throw new Error("Error al guardar en Google Sheets.");
       await resSave.json();
   
-      // Generar PDF (importa tu util)
+      // Generar PDF (usa tu util)
       const { generarPdfNotaVenta } = await import("./pdf-notaventa");
       const { filename, base64 } = generarPdfNotaVenta({
         numeroNV,
         fecha,
-        cliente: { nombre: clientName, rut: clientRut, codigo: clientCode, ejecutivo, direccion, comuna },
-        productos: lines,
+        cliente: {
+          nombre: clientName,
+          rut: clientRut,
+          codigo: clientCode,
+          ejecutivo,
+          direccion,
+          comuna,
+        },
+        productos: lines.map((item: any) => ({
+          codigo: item.code,
+          descripcion: item.name,
+          kilos: item.kilos,
+          cantidad: item.qty,
+          precioBase: Math.round(item.priceBase || 0),
+          precioVenta: Math.round(item.precioVenta || 0),
+          precioPresentacion: Math.round((item.precioVenta || 0) * (item.kilos || 1)),
+          total: Math.round(item.total || 0),
+        })),
         comentarios,
       });
   
@@ -85,7 +104,7 @@ export async function guardarPdfYEnviarSinEstado({
   
       if (!resMail.ok) throw new Error("Error al enviar correo.");
   
-      return { ok: true, message: "✅ Nota guardada y correo enviado." };
+      return { ok: true, message: "✅ Nota guardada y correo enviado.", filename };
     } catch (error: any) {
       console.error("❌ Error:", error);
       return { ok: false, message: error?.message || "Error inesperado." };
