@@ -1,6 +1,6 @@
 // lib/notaventa.ts
 import { generarPdfNotaVenta } from "@/lib/utils/pdf-notaventa";
-import { logoBase64 } from "../logo64";
+
 
 
 export async function guardarYEnviarNotaVenta(data: {
