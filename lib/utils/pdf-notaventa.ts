@@ -61,7 +61,7 @@ export function generarPdfNotaVenta(
   doc.setFontSize(12);
   doc.text("Datos del Cliente", 14, 52);
   doc.setDrawColor(0);
-  doc.rect(14, 54, 180, 50); // borde del bloque
+  doc.rect(14, 54, 180, 60); // borde del bloque
 
   doc.setFontSize(10);
   doc.text(`Nombre: ${data.cliente.nombre}`, 18, 60);

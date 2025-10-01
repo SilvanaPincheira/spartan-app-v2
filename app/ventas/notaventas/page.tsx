@@ -642,6 +642,7 @@ async function guardarPdfYEnviar() {
         ejecutivo,
         direccion,
         comuna,
+        direccionNueva,  // 👈 aquí lo agregas
       },
       productos: lines.map((item) => ({
         codigo: item.code,
