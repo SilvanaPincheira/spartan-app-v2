@@ -1,7 +1,8 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
-type ProductoPdf = {
+// Tipos de datos
+export type ProductoPdf = {
   codigo: string;
   descripcion: string;
   kilos: number;
@@ -12,7 +13,7 @@ type ProductoPdf = {
   total: number;
 };
 
-type NotaVentaPdf = {
+export type NotaVentaPdf = {
   numeroNV: string;
   fecha: string;
   cliente: {
@@ -27,17 +28,20 @@ type NotaVentaPdf = {
   comentarios: string;
 };
 
+function money(n: number): string {
+  return n.toLocaleString("es-CL", { style: "currency", currency: "CLP" });
+}
 
+// Función que genera PDF y retorna base64 y filename
 export function generarPdfNotaVenta(data: NotaVentaPdf): { base64: string; filename: string } {
   const doc = new jsPDF();
-  
 
   // Encabezado
   doc.setFontSize(16);
-  doc.text("📝 Nota de Venta", 14, 20);
+  doc.text("🧾 Nota de Venta", 14, 20);
   doc.setFontSize(10);
-  doc.text(`N°: ${data.numeroNV}`, 170, 20);
-  doc.text(`Fecha: ${data.fecha}`, 170, 26);
+  doc.text(`N°: ${data.numeroNV}`, 170, 20, { align: "right" });
+  doc.text(`Fecha: ${data.fecha}`, 170, 26, { align: "right" });
 
   // Cliente
   doc.setFontSize(12);
@@ -50,7 +54,7 @@ export function generarPdfNotaVenta(data: NotaVentaPdf): { base64: string; filen
   doc.text(`Dirección: ${data.cliente.direccion}`, 14, 66);
   doc.text(`Comuna: ${data.cliente.comuna}`, 14, 72);
 
-  // Productos con tabla
+  // Productos
   autoTable(doc, {
     startY: 80,
     head: [["Código", "Descripción", "Kg", "Cant", "Precio Base", "Precio Venta", "$ Presentación", "Total"]],
@@ -59,25 +63,25 @@ export function generarPdfNotaVenta(data: NotaVentaPdf): { base64: string; filen
       p.descripcion,
       p.kilos.toString(),
       p.cantidad.toString(),
-      p.precioBase.toLocaleString("es-CL"),
-      p.precioVenta.toLocaleString("es-CL"),
-      p.precioPresentacion.toLocaleString("es-CL"),
-      p.total.toLocaleString("es-CL"),
+      money(p.precioBase),
+      money(p.precioVenta),
+      money(p.precioPresentacion),
+      money(p.total),
     ]),
     styles: { fontSize: 9 },
     headStyles: { fillColor: [43, 108, 255] },
   });
 
   // Comentarios
-  let finalY = (doc as any).lastAutoTable.finalY || 100;
+  const finalY = (doc as any).lastAutoTable?.finalY || 100;
   doc.setFontSize(12);
   doc.text("Comentarios", 14, finalY + 10);
   doc.setFontSize(10);
   doc.text(data.comentarios || "—", 14, finalY + 16);
 
-  // ✅ Exportar como base64
-  const filename = `Nota_Venta_${data.numeroNV}.pdf`;
+  // Exportar como base64
   const base64 = doc.output("datauristring").split(",")[1];
+  const filename = `Nota_Venta_${data.numeroNV}.pdf`;
 
   return { base64, filename };
 }

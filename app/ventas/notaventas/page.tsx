@@ -21,9 +21,9 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { guardarPdfYEnviarSinEstado } from "@/lib/utils/guardar-notaventa";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 
 /* ============================================================================
    [A] HELPERS GENERALES
@@ -509,262 +509,670 @@ export default function NotaVentaPage() {
     }
   }
 
- /* ==========================================================================
-   [I] ACCIONES: guardar + generar PDF + enviar email (sin estados React)
-   ========================================================================== */
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
-
-function money(n: number): string {
-  return (n || 0).toLocaleString("es-CL", {
-    style: "currency",
-    currency: "CLP",
-    maximumFractionDigits: 0,
-  });
-}
-
-async function loadImageAsBase64(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url);
-    const blob = await res.blob();
-    return await new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result?.toString() || null);
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return null;
+  /* ==========================================================================
+     [I] ACCIONES (limpiar/imprimir/guardar+pdf+email)
+     ========================================================================== */
+  function limpiarTodo() {
+    setClientName("");
+    setClientRut("");
+    setClientCode("");
+    setEjecutivo("");
+    setDireccion("");
+    setDireccionNueva("");
+    setComuna("");
+    setEmailEjecutivo("");
+    setComentarios("");
+    setLines([]);
+    setErrorMsg("");
+    setNumeroNV(generarNumeroNV());
+    setListaSeleccionada(1);
+    setSaveMsg("");
   }
-}
-
-async function generarPDFProfesional({
-  numeroNV,
-  clientName,
-  clientRut,
-  ejecutivo,
-  direccion,
-  direccionNueva,
-  comuna,
-  subtotal,
-  comentarios,
-  lines,
-}: {
-  numeroNV: string;
-  clientName: string;
-  clientRut: string;
-  ejecutivo: string;
-  direccion: string;
-  direccionNueva: string;
-  comuna: string;
-  subtotal: number;
-  comentarios: string;
-  lines: {
-    code: string;
-    name: string;
-    qty: number;
-    precioVenta: number;
-    kilos: number;
-    total: number;
-  }[];
-}): Promise<{ filename: string; base64: string }> {
-  const pdf = new jsPDF();
-  const fecha = new Date().toLocaleDateString("es-CL");
-  const filename = `Nota_Venta_${numeroNV}.pdf`;
-
-  const logoUrl =
-    "https://images.jumpseller.com/store/spartan-de-chile/store/logo/Spartan_Logo_-_copia.jpg?0";
-  const logoImg = await loadImageAsBase64(logoUrl);
-  if (logoImg) pdf.addImage(logoImg, "JPEG", 14, 12, 24, 24);
-
-  pdf.setFontSize(14);
-  pdf.setTextColor(43, 108, 255);
-  pdf.text("📝 Nota de Venta", 42, 20);
-
-  pdf.setTextColor(0);
-  pdf.setFontSize(11);
-  pdf.text(`N° ${numeroNV}`, 160, 16);
-  pdf.text(fecha, 160, 22);
-
-  let y = 40;
-  pdf.setFontSize(10);
-  pdf.text("Cliente:", 14, y); pdf.text(clientName, 35, y); y += 6;
-  pdf.text("RUT:", 14, y); pdf.text(clientRut, 35, y); y += 6;
-  pdf.text("Ejecutivo:", 14, y); pdf.text(ejecutivo, 35, y); y += 6;
-  pdf.text("Dirección:", 14, y); pdf.text(direccionNueva || direccion || "", 35, y); y += 6;
-  pdf.text("Comuna:", 14, y); pdf.text(comuna || "", 35, y); y += 10;
-
-  autoTable(pdf, {
-    startY: y,
-    head: [["Código", "Descripción", "Cant", "Precio venta", "$ Presentación", "Total"]],
-    body: lines.map((item) => [
-      item.code,
-      item.name,
-      item.qty,
-      money(item.precioVenta),
-      money(item.precioVenta * item.kilos),
-      money(item.total),
-    ]),
-    styles: { fontSize: 10 },
-    headStyles: { fillColor: [43, 108, 255], textColor: 255 },
-    theme: "grid",
-    foot: [["", "", "", "", "TOTAL", money(subtotal)]],
-    footStyles: { fillColor: [255, 255, 255], fontStyle: "bold" },
-  });
-
-  if (comentarios?.trim()) {
-    const finalY = (pdf as any).lastAutoTable.finalY + 10;
-    pdf.setFontSize(10);
-    pdf.text("Comentarios:", 14, finalY);
-    pdf.text(comentarios, 35, finalY);
+  function imprimir() {
+    window.print();
   }
 
-  pdf.save(filename);
-  const base64 = pdf.output("datauristring").split(",")[1];
-  return { filename, base64 };
-}
+  // 🔻 Helper: genera y DESCARGA PDF desde #printArea y retorna base64 para adjuntar
+  async function crearYDescargarPdfDesdePrintArea(): Promise<{ filename: string; base64: string }> {
+    const input = document.getElementById("printArea") as HTMLElement | null;
+    if (!input) throw new Error("No se encontró el contenedor #printArea");
 
-export async function guardarPdfYEnviarSinEstado({
-  numeroNV,
-  clientName,
-  clientRut,
-  clientCode,
-  ejecutivo,
-  direccion,
-  direccionNueva,
-  comuna,
-  emailEjecutivo,
-  comentarios,
-  lines,
-}: {
-  numeroNV: string;
-  clientName: string;
-  clientRut: string;
-  clientCode: string;
-  ejecutivo: string;
-  direccion: string;
-  direccionNueva: string;
-  comuna: string;
-  emailEjecutivo: string;
-  comentarios: string;
-  lines: {
-    code: string;
-    name: string;
-    kilos: number;
-    qty: number;
-    priceBase: number;
-    especialPrice: number;
-    descuento: number;
-    precioVenta: number;
-    total: number;
-    isEspecial: boolean;
-    isBloqueado: boolean;
-  }[];
-}): Promise<{ ok: boolean; message: string }> {
-  try {
-    const subtotal = lines.reduce((a, r) => a + (Number.isFinite(r.total) ? r.total : 0), 0);
+    const canvas = await html2canvas(input, { scale: 2 });
+    const imgData = canvas.toDataURL("image/png");
 
-    if (!clientName || !clientRut || !clientCode)
-      throw new Error("Faltan datos del cliente (Nombre, RUT y Código Cliente).");
-    if (lines.length === 0) throw new Error("Agrega al menos un ítem antes de guardar.");
-    if (lines.some((l) => l.isBloqueado))
-      throw new Error("No puedes guardar: hay precios especiales vencidos en la tabla.");
+    const pdf = new jsPDF("p", "mm", "a4");
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
 
-    const fecha = new Date().toLocaleDateString("es-CL");
-    const payload = lines.map((item) => ({
-      numeroNV,
-      fecha,
-      cliente: clientName,
-      rut: clientRut,
-      codigoCliente: clientCode,
-      ejecutivo,
-      direccionDespacho: direccion,
-      direccionNueva,
-      comuna,
-      correoEjecutivo: emailEjecutivo,
-      comentarios,
-      subtotal,
-      total: subtotal,
-      codigo: item.code,
-      descripcion: item.name,
-      kilos: item.kilos,
-      cantidad: item.qty,
-      precioBase: Math.round(item.priceBase || 0),
-      descuento: item.isEspecial ? 0 : item.descuento,
-      precioVenta: Math.round(item.precioVenta || 0),
-      precioPresentacion: Math.round((item.precioVenta || 0) * (item.kilos || 1)),
-      totalItem: Math.round(item.total || 0),
-      especialVigente: !!item.isEspecial,
-      especialBloqueado: !!item.isBloqueado,
-    }));
+    const imgWidth = pageWidth;
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-    const resSave = await fetch("/api/save-to-sheets", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    let heightLeft = imgHeight;
+    let position = 0;
 
-    if (!resSave.ok) throw new Error("Error al guardar en Google Sheets.");
-    await resSave.json();
+    pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+    heightLeft -= pageHeight;
 
-    const { filename, base64 } = await generarPDFProfesional({
-      numeroNV,
-      clientName,
-      clientRut,
-      ejecutivo,
-      direccion,
-      direccionNueva,
-      comuna,
-      subtotal,
-      comentarios,
-      lines,
-    });
-
-    const destinatarios = [
-      emailEjecutivo,
-      "silvana.pincheira@spartan.cl",
-    ].filter(Boolean);
-
-    const subject = `Nota de Venta ${numeroNV}`;
-    const message = `
-      <p>Se ha generado una Nota de Venta.</p>
-      <ul>
-        <li><b>Número:</b> ${numeroNV}</li>
-        <li><b>Cliente:</b> ${clientName}</li>
-        <li><b>RUT:</b> ${clientRut}</li>
-        <li><b>Total:</b> ${subtotal.toLocaleString("es-CL", {
-          style: "currency",
-          currency: "CLP",
-        })}</li>
-      </ul>
-    `;
-
-    const resMail = await fetch("/api/send-notaventa", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        to: destinatarios,
-        subject,
-        message,
-        attachment: {
-          filename,
-          content: base64,
-        },
-      }),
-    });
-
-    if (!resMail.ok) {
-      const err = await resMail.text();
-      throw new Error(`Error al enviar correo: ${err || resMail.status}`);
+    while (heightLeft > 0) {
+      position = heightLeft - imgHeight;
+      pdf.addPage();
+      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
     }
 
-    return { ok: true, message: `✅ Nota guardada y correo enviado.` };
-  } catch (error: any) {
-    console.error("❌ Error:", error);
-    return { ok: false, message: error?.message || "Error inesperado." };
+    const filename = `Nota_Venta_${numeroNV || "sin_numero"}.pdf`;
+    // Descargar local
+    pdf.save(filename);
+    // Devolver base64 (sin encabezado data:)
+    const base64 = pdf.output("datauristring").split(",")[1];
+    return { filename, base64 };
   }
-}
 
-// Componente vacío (si estás en una página Next.js)
-export default function NotaVentaPage() {
-  return null;
+  // 🔻 ÚNICO BOTÓN: guarda -> genera/descarga PDF -> envía email con adjunto
+  async function guardarPdfYEnviar() {
+    if (procesando) return;
+    setProcesando(true);
+    setErrorMsg("");
+    setSaveMsg("");
+
+    try {
+      // 1) Validaciones básicas
+      if (!clientName || !clientRut || !clientCode)
+        throw new Error("Faltan datos del cliente (Nombre, RUT y Código Cliente).");
+      if (lines.length === 0) throw new Error("Agrega al menos un ítem antes de guardar.");
+      if (lines.some((l) => l.isBloqueado))
+        throw new Error("No puedes guardar: hay precios especiales vencidos en la tabla.");
+
+      // 2) Construir payload y GUARDAR en Google Sheets
+      const fecha = new Date().toLocaleDateString("es-CL");
+      const payload = lines.map((item) => ({
+        numeroNV,
+        fecha,
+        cliente: clientName,
+        rut: clientRut,
+        codigoCliente: clientCode,
+        ejecutivo,
+        direccionDespacho: direccion,
+        direccionNueva,
+        comuna,
+        correoEjecutivo: emailEjecutivo,
+        comentarios,
+        subtotal,
+        total: subtotal,
+        codigo: item.code,
+        descripcion: item.name,
+        kilos: item.kilos,
+        cantidad: item.qty,
+        precioBase: Math.round(item.priceBase || 0),
+        descuento: item.isEspecial ? 0 : item.descuento,
+        precioVenta: Math.round(item.precioVenta || 0),
+        precioPresentacion: Math.round((item.precioVenta || 0) * (item.kilos || 1)),
+        totalItem: Math.round(item.total || 0),
+        especialVigente: !!item.isEspecial,
+        especialBloqueado: !!item.isBloqueado,
+      }));
+
+      setSaving(true);
+      const resSave = await fetch("/api/save-to-sheets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setSaving(false);
+      if (!resSave.ok) throw new Error("Error al guardar en Google Sheets.");
+      const json = await resSave.json();
+      const rows = Number(json?.rows ?? payload.length) || payload.length;
+      setSaveMsg(`✅ Nota de venta guardada con ${rows} ítem(s) en Google Sheets.`);
+
+      // 3) Generar y DESCARGAR PDF + obtener base64
+      const { filename, base64 } = await crearYDescargarPdfDesdePrintArea();
+
+      // 4) Enviar email con adjunto
+      const destinatarios = [emailEjecutivo, "silvana.pincheira@spartan.cl"].filter(Boolean);
+      const subject = `Nota de Venta ${numeroNV}`;
+      const message = `
+        <p>Se ha generado una Nota de Venta.</p>
+        <ul>
+          <li><b>Número:</b> ${numeroNV}</li>
+          <li><b>Cliente:</b> ${clientName}</li>
+          <li><b>RUT:</b> ${clientRut}</li>
+          <li><b>Total:</b> ${subtotal.toLocaleString("es-CL", { style: "currency", currency: "CLP" })}</li>
+        </ul>
+      `;
+
+      const resMail = await fetch("/api/send-notaventa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: destinatarios,
+          subject,
+          message,
+          attachment: {
+            filename,
+            content: base64,
+          },
+        }),
+      });
+      if (!resMail.ok) {
+        const err = await resMail.text();
+        throw new Error(`Error al enviar correo: ${err || resMail.status}`);
+      }
+
+      alert("✅ Guardado en Sheets, PDF descargado y correo enviado.");
+    } catch (e: any) {
+      console.error("❌ Error en guardarPdfYEnviar:", e);
+      setErrorMsg(e?.message || "Ocurrió un error inesperado.");
+      alert(e?.message || "Ocurrió un error inesperado.");
+    } finally {
+      setProcesando(false);
+    }
+  }
+
+  /* ==========================================================================
+     [J] UI
+     ========================================================================== */
+  return (
+    <>
+      <div id="printArea" className="min-h-screen bg-white p-6 text-[12px]">
+        {/* ===== ENCABEZADO ===== */}
+        <header className="mb-4 flex items-center justify-between border-b pb-2">
+          <div className="flex items-center gap-3">
+            <img
+              src="https://images.jumpseller.com/store/spartan-de-chile/store/logo/Spartan_Logo_-_copia.jpg?0"
+              alt="Spartan"
+              className="h-12 w-auto"
+            />
+            <h1 className="text-lg font-bold text-[#2B6CFF]">📝 Nota de Venta</h1>
+          </div>
+          <div className="text-[11px] bg-zinc-100 px-3 py-2 rounded text-right">
+            <div>
+              <b>N°</b> {numeroNV || "—"}
+            </div>
+            <div>{new Date().toLocaleDateString("es-CL")}</div>
+          </div>
+        </header>
+
+        {/* Mensajes globales */}
+        {!!errorMsg && (
+          <div className="mb-3 rounded bg-red-50 text-red-700 px-3 py-2 text-sm border border-red-200">
+            {errorMsg}
+          </div>
+        )}
+        {!!saveMsg && !errorMsg && (
+          <div className="mb-3 rounded bg-green-50 text-green-700 px-3 py-2 text-sm border border-green-200">
+            {saveMsg}
+          </div>
+        )}
+
+        {/* ===== CLIENTE ===== */}
+        <section className="bg-white shadow p-4 rounded mb-4">
+          <h2 className="font-semibold text-[#2B6CFF] mb-2">Cliente</h2>
+          <div className="client-grid grid grid-cols-2 gap-2 text-[12px] print:grid-cols-3">
+            <label className="flex flex-col gap-1">
+              <span className="font-medium">Nombre</span>
+              <input
+                className="w-full border rounded px-2 py-1"
+                value={clientName}
+                onChange={(e) => handleNombreChange(e.target.value)}
+                list="clientesList"
+              />
+              <datalist id="clientesList">
+                {clients.map((c, i) => (
+                  <option key={`${c.codigo}-${i}`} value={c.nombre} />
+                ))}
+              </datalist>
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="font-medium">RUT</span>
+              <input className="w-full border rounded px-2 py-1" value={clientRut} readOnly />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="font-medium">Código Cliente</span>
+              <select
+                className="w-full border rounded px-2 py-1"
+                value={clientCode}
+                onChange={(e) => handleCodigoChange(e.target.value)}
+              >
+                <option value="">Seleccione…</option>
+                {clients
+                  .filter((c) => normalize(c.nombre) === normalize(clientName))
+                  .map((c) => (
+                    <option key={c.codigo} value={c.codigo}>
+                      {c.codigo} — {c.direccion}
+                    </option>
+                  ))}
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="font-medium">Ejecutivo</span>
+              <input className="w-full border rounded px-2 py-1" value={ejecutivo} readOnly />
+            </label>
+
+            <label className="flex flex-col gap-1 print:col-span-2">
+              <span className="font-medium">Dirección de Despacho</span>
+              <input className="w-full border rounded px-2 py-1" value={direccion} readOnly />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="font-medium">Dirección nueva</span>
+              <input
+                className="w-full border rounded px-2 py-1"
+                value={direccionNueva}
+                onChange={(e) => setDireccionNueva(e.target.value)}
+                placeholder="(Opcional)"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="font-medium">Comuna</span>
+              <input
+                className="w-full border rounded px-2 py-1"
+                value={comuna}
+                onChange={(e) => setComuna(e.target.value)}
+              />
+            </label>
+          </div>
+        </section>
+
+        {/* ===== PRODUCTOS ===== */}
+        <section className="bg-white shadow p-4 rounded mb-4">
+          <div className="flex justify-between mb-2 items-center">
+            <h2 className="font-semibold text-[#2B6CFF]">Productos</h2>
+
+            <div className="flex gap-2 print:hidden">
+              {[1, 2, 3].map((n) => (
+                <button
+                  key={n}
+                  className={`px-2 py-1 rounded text-xs ${
+                    listaSeleccionada === (n as 1 | 2 | 3) ? "bg-blue-500 text-white" : "bg-zinc-200"
+                  }`}
+                  onClick={() => setListaSeleccionada(n as 1 | 2 | 3)}
+                >
+                  {n}° Lista
+                </button>
+              ))}
+              <button className="bg-green-500 px-2 py-1 text-xs text-white rounded" onClick={addLine}>
+                + Ítem
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto print:overflow-visible">
+            <table className="min-w-full text-[11px] border">
+              <thead className="bg-zinc-100">
+                <tr>
+                  <th className="px-2 py-1 text-left" style={{ width: "80px" }}>
+                    Código
+                  </th>
+                  <th className="px-2 py-1 text-left">Descripción</th>
+                  <th className="px-2 py-1 text-right print:hidden" style={{ width: "70px" }}>
+                    Kg
+                  </th>
+                  <th className="px-2 py-1 text-right" style={{ width: "80px" }}>
+                    Cant
+                  </th>
+                  <th className="px-2 py-1 text-right print:hidden" style={{ width: "110px" }}>
+                    Precio base
+                  </th>
+                  <th className="px-2 py-1 text-right print:hidden" style={{ width: "80px" }}>
+                    % Desc
+                  </th>
+                  <th className="px-2 py-1 text-right" style={{ width: "110px" }}>
+                    Precio venta
+                  </th>
+                  <th className="px-2 py-1 text-right" style={{ width: "130px" }}>
+                    $ Presentación
+                  </th>
+                  <th className="px-2 py-1 text-right" style={{ width: "130px" }}>
+                    Total
+                  </th>
+                  <th className="print:hidden" />
+                </tr>
+              </thead>
+
+              <tbody>
+                {lines.map((r, i) => {
+                  const precioPresentacion = (r.precioVenta || 0) * (r.kilos || 1);
+                  return (
+                    <tr key={i} className="border-t align-middle">
+                      {/* Código */}
+                      <td className="px-2 py-1">
+                        <input
+                          className="w-24 border rounded px-1"
+                          value={r.code}
+                          onChange={(e) => updateLine(i, "code", e.target.value)}
+                          onBlur={(e) => fillFromCode(i, e.target.value)}
+                          list="productosList"
+                        />
+                        <datalist id="productosList">
+                          {productos.map((p) => (
+                            <option key={p.code} value={p.code}>
+                              {p.code} — {p.name}
+                            </option>
+                          ))}
+                        </datalist>
+
+                        {r.isEspecial && !r.isBloqueado && (
+                          <div className="text-[10px] text-emerald-700 mt-1 print:hidden">
+                            ✅ Precio especial vigente
+                          </div>
+                        )}
+                        {r.isBloqueado && (
+                          <div className="text-[10px] text-red-600 mt-1 print:hidden">
+                            ❌ Precio especial vencido (corrige para continuar)
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Descripción */}
+                      <td className="px-2 py-1">
+                        <div className="truncate print:whitespace-normal">{r.name}</div>
+                      </td>
+
+                      {/* Kg (solo pantalla) */}
+                      <td className="px-2 py-1 text-right print:hidden">
+                        <input
+                          type="number"
+                          className="w-16 border rounded text-right"
+                          value={r.kilos}
+                          onChange={(e) => updateLine(i, "kilos", num(e.target.value))}
+                          min={0}
+                          step="any"
+                        />
+                      </td>
+
+                      {/* Cantidad */}
+                      <td className="px-2 py-1 text-center">
+                        <input
+                          type="number"
+                          className="w-16 border rounded text-right print:hidden"
+                          value={r.qty}
+                          onChange={(e) => updateLine(i, "qty", num(e.target.value))}
+                          min={0}
+                          step="any"
+                        />
+                        <span className="hidden print:inline">{r.qty}</span>
+                      </td>
+
+                      {/* Precio Base (solo pantalla) */}
+                      <td className="px-2 py-1 text-right print:hidden">{money(r.priceBase)}</td>
+
+                      {/* % Desc (solo pantalla) */}
+                      <td className="px-2 py-1 text-right print:hidden">
+                        <input
+                          type="number"
+                          className="w-16 border rounded text-right"
+                          value={r.descuento}
+                          onChange={(e) => updateLine(i, "descuento", num(e.target.value))}
+                          disabled={r.isEspecial || r.isBloqueado}
+                          min={-20}
+                          max={20}
+                          step="any"
+                        />
+                      </td>
+
+                      {/* Precio venta $/kg (editable) */}
+                      <td className="px-2 py-1 text-right">
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          className="w-28 rounded border px-2 py-1 text-right"
+                          value={r.precioVenta === 0 ? "" : r.precioVenta}
+                          onChange={(e) => {
+                            const n = [...lines];
+                            n[i].precioVenta = e.target.value === "" ? 0 : Number(e.target.value);
+                            setLines(n);
+                          }}
+                          onBlur={(e) => {
+                            updateLine(i, "precioVenta", e.target.value);
+                          }}
+                          disabled={r.isEspecial || r.isBloqueado}
+                        />
+                      </td>
+
+                      {/* $ Presentación */}
+                      <td className="px-2 py-1 text-right">{money(precioPresentacion)}</td>
+
+                      {/* Total */}
+                      <td className="px-2 py-1 text-right">{money(r.total)}</td>
+
+                      {/* Acciones (solo pantalla) */}
+                      <td className="px-2 py-1 print:hidden">
+                        <button className="text-red-600 text-xs" onClick={() => rmLine(i)}>
+                          Eliminar
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+
+              {lines.length > 0 && (
+                <>
+                  <tfoot className="print:hidden">
+                    <tr className="font-semibold bg-zinc-50">
+                      <td colSpan={9} className="text-right px-2 py-1 border-t">
+                        TOTAL
+                      </td>
+                      <td className="text-right px-2 py-1 border-t">{money(subtotal)}</td>
+                    </tr>
+                  </tfoot>
+
+                  <tfoot className="hidden print:table-footer-group">
+                    <tr className="font-semibold">
+                      <td colSpan={5} className="text-right px-2 py-2" style={{ borderTop: "2px solid #000" }}>
+                        TOTAL
+                      </td>
+                      <td className="text-right px-2 py-2" style={{ borderTop: "2px solid #000" }}>
+                        {money(subtotal)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </>
+              )}
+            </table>
+          </div>
+        </section>
+
+        {/* ===== ENVÍO Y COMENTARIOS ===== */}
+        <section className="bg-white shadow p-4 rounded mb-4">
+          <h2 className="font-semibold text-[#2B6CFF] mb-2">📧 Envío y Comentarios</h2>
+          <div className="grid grid-cols-2 gap-2 text-[12px] print:grid-cols-2">
+            <label className="flex flex-col gap-1">
+              <span className="font-medium">Correo Ejecutivo</span>
+              <input
+                type="email"
+                className="w-full border rounded px-2 py-1"
+                value={emailEjecutivo}
+                onChange={(e) => setEmailEjecutivo(e.target.value)}
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="font-medium">Comentarios</span>
+              <input
+                type="text"
+                className="w-full border rounded px-2 py-1"
+                value={comentarios}
+                onChange={(e) => setComentarios(e.target.value)}
+              />
+            </label>
+          </div>
+        </section>
+      </div>
+
+      {/* ===== BOTONES (solo pantalla) ===== */}
+      <div className="flex flex-wrap gap-2 print:hidden px-6 pb-8">
+        <button className="bg-zinc-200 px-3 py-1 rounded" onClick={imprimir}>
+          🖨️ Imprimir / PDF
+        </button>
+
+        {/* 🔹 Botón único: Guarda + descarga PDF + envía email */}
+        <button
+          className={`px-3 py-1 rounded text-white ${
+            procesando ? "bg-zinc-400" : "bg-emerald-600 hover:bg-emerald-700"
+          }`}
+          onClick={guardarPdfYEnviar}
+          disabled={procesando}
+        >
+          {procesando ? "Procesando..." : "💾 Guardar + 📄 PDF + 📧 Email"}
+        </button>
+
+        <button className="bg-zinc-200 px-3 py-1 rounded" onClick={limpiarTodo}>
+          🧹 Nueva NV
+        </button>
+      </div>
+
+      {/* =========================================================================
+         [K] ESTILOS DE IMPRESIÓN — PDF profesional
+         ======================================================================= */}
+      <style jsx>{`
+        :global(html),
+        :global(body),
+        :global(#printArea) {
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+
+        @media print {
+          body * {
+            visibility: hidden !important;
+          }
+          #printArea,
+          #printArea * {
+            visibility: visible !important;
+          }
+          #printArea {
+            position: absolute !important;
+            left: 0;
+            top: 0;
+            width: 100% !important;
+          }
+
+          input,
+          select,
+          textarea,
+          button {
+            border: none !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            width: auto !important;
+            color: #000 !important;
+            font-size: 11px !important;
+            appearance: none !important;
+          }
+
+          .client-grid > label {
+            display: inline-block !important;
+            width: 32% !important;
+            vertical-align: top !important;
+            margin-right: 1.5% !important;
+          }
+          .client-grid > label.print\\:col-span-2 {
+            width: 66% !important;
+          }
+
+          .overflow-x-auto {
+            overflow: visible !important;
+          }
+          table {
+            border-collapse: collapse !important;
+            width: 100% !important;
+            table-layout: fixed !important;
+          }
+          th,
+          td {
+            border: 1px solid #e5e5e5 !important;
+            padding: 4px 6px !important;
+            vertical-align: middle !important;
+            font-variant-numeric: tabular-nums !important;
+          }
+          thead th {
+            background: #f5f5f5 !important;
+            text-align: center !important;
+            font-weight: 600 !important;
+          }
+
+          thead tr th:nth-child(3),
+          thead tr th:nth-child(5),
+          thead tr th:nth-child(6),
+          thead tr th:nth-child(10),
+          tbody tr td:nth-child(3),
+          tbody tr td:nth-child(5),
+          tbody tr td:nth-child(6),
+          tbody tr td:nth-child(10) {
+            display: none !important;
+          }
+
+          th:nth-child(1),
+          td:nth-child(1) {
+            width: 70px !important;
+            font-size: 10px !important;
+            text-align: left !important;
+          }
+          th:nth-child(2),
+          td:nth-child(2) {
+            width: auto !important;
+            white-space: normal !important;
+          }
+          th:nth-child(4),
+          td:nth-child(4) {
+            width: 60px !important;
+            text-align: center !important;
+          }
+
+          th:nth-child(7),
+          td:nth-child(7) {
+            width: 70px !important;
+            text-align: right !important;
+            padding-right: 2px !important;
+          }
+          td:nth-child(7) input {
+            width: 60px !important;
+            text-align: right !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
+
+          th:nth-child(8),
+          td:nth-child(8) {
+            width: 135px !important;
+            text-align: right !important;
+            padding-left: 4px !important;
+          }
+
+          th:nth-child(9),
+          td:nth-child(9) {
+            width: 125px !important;
+            text-align: right !important;
+          }
+
+          tfoot tr td {
+            border-top: 2px solid #2B6CFF !important;
+            font-weight: 700 !important;
+          }
+
+          .print\\:hidden {
+            display: none !important;
+          }
+          @page {
+            size: A4;
+            margin: 12mm;
+          }
+          header,
+          section,
+          table,
+          h1,
+          h2 {
+            break-inside: avoid;
+          }
+        }
+      `}</style>
+    </>
+  );
 }
