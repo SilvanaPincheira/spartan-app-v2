@@ -72,7 +72,7 @@ export function generarPdfNotaVenta(
 
   // === Tabla de productos ===
   autoTable(doc, {
-    startY: 90,
+    startY: 100,
     head: [
       [
         "Código",
