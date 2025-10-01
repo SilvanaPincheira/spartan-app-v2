@@ -52,7 +52,9 @@ export function generarPdfNotaVenta(
 
   // === Encabezado ===
   doc.setFontSize(16);
-  doc.text(" Nota de Venta", 50, 20);
+const pageWidth = doc.internal.pageSize.getWidth(); // ancho de la página
+  doc.text("Nota de Venta", pageWidth / 2, 20, { align: "center" });
+
   doc.setFontSize(10);
   doc.text(`N°: ${data.numeroNV}`, 200, 20, { align: "right" });
   doc.text(`Fecha: ${data.fecha}`, 200, 26, { align: "right" });
