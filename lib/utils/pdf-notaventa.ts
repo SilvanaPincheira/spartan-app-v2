@@ -57,24 +57,30 @@ export function generarPdfNotaVenta(
   doc.text(`N°: ${data.numeroNV}`, 200, 20, { align: "right" });
   doc.text(`Fecha: ${data.fecha}`, 200, 26, { align: "right" });
 
-  // === Bloque Cliente ===
-  doc.setFontSize(12);
-  doc.text("Datos del Cliente", 14, 52);
-  doc.setDrawColor(0);
-  doc.rect(14, 54, 180, 60); // borde del bloque
+ // === Bloque Cliente ===
+doc.setFontSize(12);
+doc.text("Datos del Cliente", 14, 52);
+doc.setDrawColor(0);
 
-  doc.setFontSize(10);
-  doc.text(`Nombre: ${data.cliente.nombre}`, 18, 60);
-  doc.text(`RUT: ${data.cliente.rut}`, 18, 66);
-  doc.text(`Código: ${data.cliente.codigo}`, 18, 72);
-  doc.text(`Ejecutivo: ${data.cliente.ejecutivo}`, 18, 78);
-  doc.text(`Dirección: ${data.cliente.direccion}`, 18, 84);
-  doc.text(`Comuna: ${data.cliente.comuna}`, 18, 90);
-  // Dirección nueva (si existe, en rojo)
+// 👉 altura ajustada a 55 px (antes era 60)
+doc.rect(14, 54, 180, 55);
+
+doc.setFontSize(10);
+doc.text(`Nombre: ${data.cliente.nombre}`, 18, 60);
+doc.text(`RUT: ${data.cliente.rut}`, 18, 66);
+doc.text(`Código: ${data.cliente.codigo}`, 18, 72);
+doc.text(`Ejecutivo: ${data.cliente.ejecutivo}`, 18, 78);
+doc.text(`Dirección: ${data.cliente.direccion}`, 18, 84);
+
+// Dirección nueva (si existe, en rojo, justo ANTES de comuna)
 if (data.cliente.direccionNueva) {
   doc.setTextColor(200, 0, 0); // 🔴 rojo
-  doc.text(`Dirección nueva: ${data.cliente.direccionNueva}`, 18, 96);
+  doc.text(`Dirección nueva: ${data.cliente.direccionNueva}`, 18, 90);
   doc.setTextColor(0, 0, 0);   // volver a negro
+  doc.text(`Comuna: ${data.cliente.comuna}`, 18, 96);
+} else {
+  // si no hay dirección nueva, comuna en su posición normal
+  doc.text(`Comuna: ${data.cliente.comuna}`, 18, 90);
 }
 
 
