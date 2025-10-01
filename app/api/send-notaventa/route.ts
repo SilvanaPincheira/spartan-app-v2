@@ -9,7 +9,7 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     // Siempre SAC como destinatario
-    const to = "silvana.pincheira@spartan.cl";
+    const to = "sac@spartan.cl";
 
     // CC: correo del ejecutivo (si viene en el body)
     const cc = body.cc || body.emailEjecutivo || "";

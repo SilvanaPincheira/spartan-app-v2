@@ -426,40 +426,86 @@ export default function Page() {
       y = endY + 10;
     };
 
-    const drawSimpleTable = (headers: string[], rows: (string | number)[][], widthsPct: number[]) => {
-      const tableW = W - 2 * M;
-      const widths = widthsPct.map((p) => Math.floor(tableW * p));
-      doc.setFillColor(BLUE.r, BLUE.g, BLUE.b);
-      doc.setTextColor(255, 255, 255);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
-      let x = M;
-      const th = 18;
-      doc.rect(M, y, tableW, th, "F");
-      headers.forEach((h, i) => {
-        doc.text(h, x + 4, y + 12);
-        x += widths[i];
-      });
-      y += th;
-      doc.setTextColor(0, 0, 0);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      const rowH = 14;
-      rows.forEach((r) => {
-        let px = M;
-        r.forEach((cell, i) => {
-          const txt = typeof cell === "string" ? cell : String(cell ?? "");
-          doc.text(txt, px + 4, y + 11, { maxWidth: widths[i] - 8 });
-          px += widths[i];
-        });
-        y += rowH;
-        if (y > 760) {
-          doc.addPage();
-          y = 48;
-        }
-      });
-      y += 6;
-    };
+    // Reemplaza TODO este bloque por el tuyo actual
+const drawSimpleTable = (
+  headers: string[],
+  rows: (string | number)[][],
+  widthsPct: number[]
+) => {
+  const tableW = W - 2 * M;
+  const widths = widthsPct.map((p) => Math.floor(tableW * p));
+
+  // Ajuste de redondeo: que el total sea exactamente tableW
+  const used = widths.reduce((a, b) => a + b, 0);
+  widths[widths.length - 1] += tableW - used;
+
+  const PADX = 4;           // padding horizontal
+  const HEAD_FS = 9;        // tamaño fuente header
+  const BODY_FS = 8;        // tamaño fuente filas
+  const HEAD_H = 20;        // alto header
+  const ROW_H  = 16;        // alto fila
+  const pageH = doc.internal.pageSize.getHeight();
+  const bottomY = pageH - M;
+
+  // Helper: cortar con "…" para que NO se vaya a 2 líneas
+  const ellipsize = (txt: string, maxW: number, fs: number) => {
+    doc.setFontSize(fs);
+    if (doc.getTextWidth(txt) <= maxW) return txt;
+    let t = txt;
+    while (t.length > 1 && doc.getTextWidth(t + "…") > maxW) t = t.slice(0, -1);
+    return t + "…";
+  };
+
+  // ===== Header =====
+  doc.setFillColor(BLUE.r, BLUE.g, BLUE.b);
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(HEAD_FS);
+
+  let x = M;
+  doc.rect(M, y, tableW, HEAD_H, "F");
+  headers.forEach((h, i) => {
+    const cw = widths[i];
+    const ht = ellipsize(h, cw - PADX * 2, HEAD_FS);
+    doc.text(ht, x + PADX, y + HEAD_H - 6); // baseline abajo para que no “se encime”
+    x += cw;
+  });
+
+  y += HEAD_H;
+  doc.setTextColor(0, 0, 0);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(BODY_FS);
+
+  // Alinear a la derecha desde las últimas 4 columnas (Cant. + $/kg + $/kg + Subtotal)
+  const firstRightIndex = Math.max(0, headers.length - 4);
+
+  // ===== Filas =====
+  rows.forEach((r) => {
+    // salto de página simple
+    if (y + ROW_H > bottomY) {
+      doc.addPage();
+      y = M; // margen superior de la página nueva
+    }
+
+    let px = M;
+    r.forEach((cell, i) => {
+      const cw = widths[i];
+      const raw = typeof cell === "number" ? String(cell) : String(cell ?? "");
+      const txt = ellipsize(raw, cw - PADX * 2, BODY_FS);
+
+      const align = i >= firstRightIndex ? "right" : "left";
+      const txX = align === "right" ? px + cw - PADX : px + PADX;
+
+      doc.text(txt, txX, y + ROW_H - 5, { align: align as any });
+      px += cw;
+    });
+
+    y += ROW_H;
+  });
+
+  y += 6; // pequeño espacio debajo de la tabla
+};
+
 
     // ===== Datos del cliente =====
     drawSectionHeader("Datos del cliente");
