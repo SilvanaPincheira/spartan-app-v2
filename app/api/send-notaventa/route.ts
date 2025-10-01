@@ -21,6 +21,13 @@ export async function POST(req: Request) {
     if (!body.attachment) {
       throw new Error("❌ Falta adjuntar el PDF de la Nota de Venta.");
     }
+    // 🔹 LOG para confirmar destinatarios
+    console.log("📧 Enviando Nota de Venta:", {
+      to,
+      cc,
+      subject,
+      hasAttachment: !!body.attachment,
+    });
 
     // Email con PDF adjunto
     const data = await resend.emails.send({
