@@ -73,7 +73,7 @@ export function generarPdfNotaVenta(
   // Dirección nueva (si existe, en rojo)
 if (data.cliente.direccionNueva) {
   doc.setTextColor(200, 0, 0); // 🔴 rojo
-  doc.text(`Dirección nueva: ${data.cliente.direccionNueva}`, 14, 78);
+  doc.text(`Dirección nueva: ${data.cliente.direccionNueva}`, 18, 96);
   doc.setTextColor(0, 0, 0);   // volver a negro
 }
 
