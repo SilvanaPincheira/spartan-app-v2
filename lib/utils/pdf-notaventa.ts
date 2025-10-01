@@ -51,24 +51,24 @@ export function generarPdfNotaVenta(
 
   // === Encabezado ===
   doc.setFontSize(16);
-  doc.text("🧾 Nota de Venta", 50, 20);
+  doc.text(" Nota de Venta", 50, 20);
   doc.setFontSize(10);
   doc.text(`N°: ${data.numeroNV}`, 200, 20, { align: "right" });
   doc.text(`Fecha: ${data.fecha}`, 200, 26, { align: "right" });
 
   // === Bloque Cliente ===
   doc.setFontSize(12);
-  doc.text("Datos del Cliente", 14, 42);
+  doc.text("Datos del Cliente", 14, 52);
   doc.setDrawColor(0);
-  doc.rect(14, 44, 180, 40); // borde del bloque
+  doc.rect(14, 54, 180, 50); // borde del bloque
 
   doc.setFontSize(10);
-  doc.text(`Nombre: ${data.cliente.nombre}`, 18, 50);
-  doc.text(`RUT: ${data.cliente.rut}`, 18, 56);
-  doc.text(`Código: ${data.cliente.codigo}`, 18, 62);
-  doc.text(`Ejecutivo: ${data.cliente.ejecutivo}`, 18, 68);
-  doc.text(`Dirección: ${data.cliente.direccion}`, 18, 74);
-  doc.text(`Comuna: ${data.cliente.comuna}`, 18, 80);
+  doc.text(`Nombre: ${data.cliente.nombre}`, 18, 60);
+  doc.text(`RUT: ${data.cliente.rut}`, 18, 66);
+  doc.text(`Código: ${data.cliente.codigo}`, 18, 72);
+  doc.text(`Ejecutivo: ${data.cliente.ejecutivo}`, 18, 78);
+  doc.text(`Dirección: ${data.cliente.direccion}`, 18, 84);
+  doc.text(`Comuna: ${data.cliente.comuna}`, 18, 90);
 
   // === Tabla de productos ===
   autoTable(doc, {
