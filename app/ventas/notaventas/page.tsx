@@ -570,129 +570,137 @@ export default function NotaVentaPage() {
     return { filename, base64 };
   }
 
-  // 🔻 ÚNICO BOTÓN: guarda -> genera/descarga PDF -> envía email con adjunto
-  async function guardarPdfYEnviar() {
-    if (procesando) return;
-    setProcesando(true);
-    setErrorMsg("");
-    setSaveMsg("");
+  // 🔹 Botón único: guarda → genera PDF → envía email
+async function guardarPdfYEnviar() {
+  if (procesando) return;
+  setProcesando(true);
+  setErrorMsg("");
+  setSaveMsg("");
 
-    try {
-      // 1) Validaciones básicas
-      if (!clientName || !clientRut || !clientCode)
-        throw new Error("Faltan datos del cliente (Nombre, RUT y Código Cliente).");
-      if (lines.length === 0) throw new Error("Agrega al menos un ítem antes de guardar.");
-      if (lines.some((l) => l.isBloqueado))
-        throw new Error("No puedes guardar: hay precios especiales vencidos en la tabla.");
+  try {
+    // 1) Validaciones básicas
+    if (!clientName || !clientRut || !clientCode) {
+      throw new Error("Faltan datos del cliente (Nombre, RUT y Código Cliente).");
+    }
+    if (lines.length === 0) {
+      throw new Error("Agrega al menos un ítem antes de guardar.");
+    }
+    if (lines.some((l) => l.isBloqueado)) {
+      throw new Error("No puedes guardar: hay precios especiales vencidos en la tabla.");
+    }
 
-      // 2) Construir payload y GUARDAR en Google Sheets
-      const fecha = new Date().toLocaleDateString("es-CL");
-      const payload = lines.map((item) => ({
-        numeroNV,
-        fecha,
-        cliente: clientName,
+    // 2) Construir payload y GUARDAR en Google Sheets
+    const fecha = new Date().toLocaleDateString("es-CL");
+    const payload = lines.map((item) => ({
+      numeroNV,
+      fecha,
+      cliente: clientName,
+      rut: clientRut,
+      codigoCliente: clientCode,
+      ejecutivo,
+      direccionDespacho: direccion,
+      direccionNueva,
+      comuna,
+      correoEjecutivo: emailEjecutivo,
+      comentarios,
+      subtotal,
+      total: subtotal,
+      codigo: item.code,
+      descripcion: item.name,
+      kilos: item.kilos,
+      cantidad: item.qty,
+      precioBase: Math.round(item.priceBase || 0),
+      descuento: item.isEspecial ? 0 : item.descuento,
+      precioVenta: Math.round(item.precioVenta || 0),
+      precioPresentacion: Math.round((item.precioVenta || 0) * (item.kilos || 1)),
+      totalItem: Math.round(item.total || 0),
+      especialVigente: !!item.isEspecial,
+      especialBloqueado: !!item.isBloqueado,
+    }));
+
+    setSaving(true);
+    const resSave = await fetch("/api/save-to-sheets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setSaving(false);
+
+    if (!resSave.ok) throw new Error("Error al guardar en Google Sheets.");
+    const json = await resSave.json();
+    const rows = Number(json?.rows ?? payload.length) || payload.length;
+    setSaveMsg(`✅ Nota de venta guardada con ${rows} ítem(s) en Google Sheets.`);
+
+    // 3) Generar PDF bonito
+    const { filename, base64 } = generarPdfNotaVenta({
+      numeroNV,
+      fecha,
+      cliente: {
+        nombre: clientName,
         rut: clientRut,
-        codigoCliente: clientCode,
+        codigo: clientCode,
         ejecutivo,
-        direccionDespacho: direccion,
-        direccionNueva,
+        direccion,
         comuna,
-        correoEjecutivo: emailEjecutivo,
-        comentarios,
-        subtotal,
-        total: subtotal,
+      },
+      productos: lines.map((item) => ({
         codigo: item.code,
         descripcion: item.name,
         kilos: item.kilos,
         cantidad: item.qty,
         precioBase: Math.round(item.priceBase || 0),
-        descuento: item.isEspecial ? 0 : item.descuento,
         precioVenta: Math.round(item.precioVenta || 0),
         precioPresentacion: Math.round((item.precioVenta || 0) * (item.kilos || 1)),
-        totalItem: Math.round(item.total || 0),
-        especialVigente: !!item.isEspecial,
-        especialBloqueado: !!item.isBloqueado,
-      }));
+        total: Math.round(item.total || 0),
+      })),
+      comentarios,
+    });
 
-      setSaving(true);
-      const resSave = await fetch("/api/save-to-sheets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      setSaving(false);
-      if (!resSave.ok) throw new Error("Error al guardar en Google Sheets.");
-      const json = await resSave.json();
-      const rows = Number(json?.rows ?? payload.length) || payload.length;
-      setSaveMsg(`✅ Nota de venta guardada con ${rows} ítem(s) en Google Sheets.`);
+    // 4) Enviar correo (SIEMPRE a SAC, CC ejecutivo)
+    const subject = `Nota de Venta ${numeroNV}`;
+    const message = `
+      <p>Se ha generado una Nota de Venta.</p>
+      <ul>
+        <li><b>Número:</b> ${numeroNV}</li>
+        <li><b>Cliente:</b> ${clientName}</li>
+        <li><b>RUT:</b> ${clientRut}</li>
+        <li><b>Total:</b> ${subtotal.toLocaleString("es-CL", {
+          style: "currency",
+          currency: "CLP",
+        })}</li>
+      </ul>
+    `;
 
-      // 3) Generar PDF bonito con autoTable
-const { filename, base64 } = generarPdfNotaVenta({
-  numeroNV,
-  fecha: new Date().toLocaleDateString("es-CL"),
-  cliente: {
-    nombre: clientName,
-    rut: clientRut,
-    codigo: clientCode,
-    ejecutivo,
-    direccion,
-    comuna,
-  },
-  productos: lines.map((item) => ({
-    codigo: item.code,
-    descripcion: item.name,
-    kilos: item.kilos,
-    cantidad: item.qty,
-    precioBase: Math.round(item.priceBase || 0),
-    precioVenta: Math.round(item.precioVenta || 0),
-    precioPresentacion: Math.round((item.precioVenta || 0) * (item.kilos || 1)),
-    total: Math.round(item.total || 0),
-  })),
-  comentarios,
-});
+    const resMail = await fetch("/api/send-notaventa", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subject,
+        message,
+        attachment: { filename, content: base64 },
+        cc: emailEjecutivo || undefined,
+      }),
+    });
 
-      // 4) Enviar email con adjunto
-      const destinatarios = [emailEjecutivo, "silvana.pincheira@spartan.cl"].filter(Boolean);
-      const subject = `Nota de Venta ${numeroNV}`;
-      const message = `
-        <p>Se ha generado una Nota de Venta.</p>
-        <ul>
-          <li><b>Número:</b> ${numeroNV}</li>
-          <li><b>Cliente:</b> ${clientName}</li>
-          <li><b>RUT:</b> ${clientRut}</li>
-          <li><b>Total:</b> ${subtotal.toLocaleString("es-CL", { style: "currency", currency: "CLP" })}</li>
-        </ul>
-      `;
+    if (!resMail.ok) {
+      const errText = await resMail.text();
+      throw new Error(`Error al enviar correo: ${errText || resMail.status}`);
+    }
 
-      try {
-        const resMail = await fetch("/api/send-notaventa", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            subject,
-            message,
-            attachment: { filename, content: base64 },
-            cc: emailEjecutivo || undefined, // copia al ejecutivo si existe
-          }),
-        });
-      
-        if (!resMail.ok) {
-          const errText = await resMail.text();
-          throw new Error(`Error al enviar correo: ${errText || resMail.status}`);
-        }
-      
-        alert("✅ Guardado en Sheets, PDF descargado y correo enviado a SAC + CC Ejecutivo.");
-      } catch (e: any) {
-        console.error("❌ Error en guardarPdfYEnviar:", e);
-        setErrorMsg(e?.message || "Ocurrió un error inesperado.");
-        alert(
-          `❌ No se pudo enviar el correo.\n\nDetalles: ${
-            e?.message || "Error inesperado"
-          }\n\nLa nota igual quedó guardada en Google Sheets.`
-        );
-      } finally {
-        setProcesando(false);
-      }
+    alert("✅ Guardado en Sheets, PDF generado y correo enviado a SAC + CC Ejecutivo.");
+  } catch (e: any) {
+    console.error("❌ Error en guardarPdfYEnviar:", e);
+    setErrorMsg(e?.message || "Ocurrió un error inesperado.");
+    alert(
+      `❌ No se pudo completar el proceso.\n\nDetalles: ${
+        e?.message || "Error inesperado"
+      }\n\n⚠️ Revisa si la Nota quedó guardada en Google Sheets.`
+    );
+  } finally {
+    setProcesando(false);
+  }
+}
+
       
 
   /* ==========================================================================
