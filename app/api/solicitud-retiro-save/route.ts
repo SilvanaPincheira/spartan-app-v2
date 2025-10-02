@@ -1,43 +1,69 @@
 // app/api/solicitud-retiro-save/route.ts
 import { NextResponse } from "next/server";
 
-// 👉 tu URL de Apps Script publicada como web app (con permisos "Cualquiera con el enlace")
-const APPS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbxAEuzhsp_AsI4wjw5rtIcCEJzUZzHCmKtcevjZnoZl8ZMyAWvhvNA38Ht8Lz3KEIWmjw/exec";
+const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL_RETIRO; // <-- ponla en env
 
 export async function POST(req: Request) {
   try {
-    // 1. Leer body { destinoSheetUrl, payload }
-    const { destinoSheetUrl, payload } = await req.json();
+    if (!APPS_SCRIPT_URL) {
+      throw new Error("Falta APPS_SCRIPT_URL_RETIRO en variables de entorno.");
+    }
 
-    // 2. Mandar al Apps Script con destino + payload
+    // 1) Leer body
+    const body = await req.json();
+    const destinoSheetUrl = body?.destinoSheetUrl as string;
+    const payload = body?.payload;
+
+    if (!destinoSheetUrl || typeof destinoSheetUrl !== "string") {
+      return NextResponse.json(
+        { ok: false, error: "destinoSheetUrl inválido o faltante." },
+        { status: 400 }
+      );
+    }
+    if (!payload || typeof payload !== "object") {
+      return NextResponse.json(
+        { ok: false, error: "payload inválido o faltante." },
+        { status: 400 }
+      );
+    }
+
+    // 2) Timeout por si Apps Script se cuelga
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 20000); // 20s
+
     const res = await fetch(APPS_SCRIPT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ destinoSheetUrl, payload }),
-    });
+      signal: ac.signal,
+    }).finally(() => clearTimeout(t));
 
-    // 3. Capturar respuesta cruda
-    const text = await res.text();
+    const raw = await res.text();
 
-    // 4. Intentar parsear como JSON
-    let json: any;
-    try {
-      json = JSON.parse(text);
-    } catch {
+    // 3) Si no es 2xx, devolver detalle
+    if (!res.ok) {
       return NextResponse.json(
-        { error: "Respuesta de Apps Script no es JSON", raw: text },
-        { status: 500 }
+        { ok: false, status: res.status, statusText: res.statusText, raw },
+        { status: 502 }
       );
     }
 
-    // 5. Devolver JSON válido al frontend
-    return NextResponse.json(json);
+    // 4) Intentar parsear JSON
+    try {
+      const json = JSON.parse(raw);
+      return NextResponse.json(json);
+    } catch {
+      return NextResponse.json(
+        { ok: false, error: "Respuesta de Apps Script no es JSON", raw },
+        { status: 500 }
+      );
+    }
   } catch (err: any) {
+    const msg =
+      err?.name === "AbortError"
+        ? "Timeout al llamar Apps Script (20s)."
+        : String(err?.message || err);
     console.error("Error en solicitud-retiro-save:", err);
-    return NextResponse.json(
-      { error: "Excepción en route.ts", message: String(err) },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }

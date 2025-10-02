@@ -2,6 +2,8 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { generarPdfSolicitudRetiro } from "@/lib/utils/pdf-solicitud-retiro";
+
 
 /* ============================================================================
    HELPERS
@@ -421,7 +423,8 @@ export default function SolicitudRetiroPage() {
         throw new Error("Completa los datos del cliente (RUT, Código y Nombre).");
       }
       if (!retiro.length) throw new Error("Selecciona al menos 1 equipo para retirar.");
-
+  
+      // --- payload que ya estabas enviando al Apps Script ---
       const payload = {
         fechaSolicitud: fecha,
         fechaRetiro,
@@ -437,30 +440,70 @@ export default function SolicitudRetiroPage() {
           valorTotal: r.valorTotal,
         })),
         subtotal,
+        // si quieres forzar destinatario específico desde el front:
         destinatario: "jorge.palma@spartan.cl",
       };
-
-      // Guardar en Google Sheets (Apps Script WebApp)
+  
+      // 1) Guardar en Google Sheets (Apps Script WebApp)
       const resSave = await fetch(API_SAVE, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ destinoSheetUrl: DESTINO_SOLICITUDES_URL, payload }),
       });
-      if (!resSave.ok) throw new Error("No se pudo guardar en Google Sheets.");
-
-      // Enviar correo a Servicio Técnico
+      if (!resSave.ok) {
+        const raw = await resSave.text();
+        throw new Error(`No se pudo guardar en Google Sheets. Detalle: ${raw || resSave.status}`);
+      }
+  
+      // 2) Generar PDF
+      const { base64, filename } = generarPdfSolicitudRetiro({
+        fechaSolicitud: fecha,
+        fechaRetiro,
+        motivo,
+        contacto,
+        comentarios,
+        cliente,
+        equipos: retiro,
+        subtotal,
+      });
+  
+      // 3) Enviar correo (puedes pasar "to" para sobrescribir el default del API)
+      const subject = `Solicitud de Retiro – ${cliente.nombre} (${cliente.codigo})`;
+      const message = `
+        <p>Se ha generado una <b>Solicitud de Retiro</b>.</p>
+        <ul>
+          <li><b>Cliente:</b> ${cliente.nombre}</li>
+          <li><b>RUT:</b> ${cliente.rut}</li>
+          <li><b>Código Cliente:</b> ${cliente.codigo}</li>
+          <li><b>Fecha Solicitud:</b> ${fecha}</li>
+          <li><b>Fecha Retiro:</b> ${fechaRetiro}</li>
+          <li><b>Motivo:</b> ${motivo}</li>
+        </ul>
+      `;
+  
       const resMail = await fetch(API_MAIL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          to: payload.destinatario,              // opcional: override
+          subject,
+          message,
+          attachment: { filename, content: base64 },
+          cc: "silvana.pincheira@spartan.cl"          // opcional
+        }),
       });
-      if (!resMail.ok) throw new Error("No se pudo enviar el correo.");
-
+  
+      if (!resMail.ok) {
+        const errText = await resMail.text();
+        throw new Error(`No se pudo enviar el correo. ${errText || resMail.status}`);
+      }
+  
       setOkMsg("✅ Solicitud enviada y guardada correctamente.");
     } catch (e: any) {
       setErrorMsg(e?.message || "Error al enviar la solicitud.");
     }
   }
+  
 
   function limpiar() {
     setRutInput("");

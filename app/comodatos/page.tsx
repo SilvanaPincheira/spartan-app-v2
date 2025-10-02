@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 
+
 export default function ComodatosMenu() {
   return (
     <div className="p-6">
