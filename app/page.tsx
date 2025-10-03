@@ -119,7 +119,7 @@ export default function HomeMenu() {
             />
             <div className="min-w-0">
               <h1 className="text-white uppercase font-semibold tracking-widest text-2xl md:text-3xl">
-                Spartan — Panel Principal
+                Spartan One
               </h1>
               <p className="mt-1 text-white/80 text-sm max-w-2xl">
                 Bienvenido al panel central de gestión y reportes.
