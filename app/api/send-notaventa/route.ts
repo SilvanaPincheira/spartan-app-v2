@@ -2,51 +2,70 @@
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = new Resend(process.env.RESEND_API_KEY!);
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    // Siempre SAC como destinatario
-    const to = "sac@spartan.cl";
+    // Destinatarios
+    const to: string[] = ["sac@spartan.cl"]; // <-- cambia si corresponde
+    const cc: string[] | undefined =
+      body.cc
+        ? (Array.isArray(body.cc) ? body.cc : [String(body.cc)]).filter(Boolean)
+        : (body.emailEjecutivo ? [String(body.emailEjecutivo)] : undefined);
 
-    // CC: correo del ejecutivo (si viene en el body)
-    const cc = body.cc || body.emailEjecutivo || "";
-
-    const subject =
+    const subject: string =
       (typeof body.subject === "string" && body.subject.trim()) ||
-      "Nota de Venta – Spartan App";
+      "Nota de Venta – Spartan One";
 
-    if (!body.attachment) {
-      throw new Error("❌ Falta adjuntar el PDF de la Nota de Venta.");
+    // Adjuntos: soporta 'attachments' (array) o 'attachment' (uno solo)
+    const attachments =
+      Array.isArray(body.attachments) && body.attachments.length
+        ? body.attachments
+        : body.attachment
+        ? [body.attachment]
+        : [];
+
+    if (!attachments.length) {
+      throw new Error("Falta adjuntar el PDF de la Nota de Venta.");
     }
-    // 🔹 LOG para confirmar destinatarios
+    for (const a of attachments) {
+      if (!a?.filename || !a?.content) {
+        throw new Error("Adjunto inválido: se requiere 'filename' y 'content' (base64).");
+      }
+    }
+
+    // (opcional) límite de tamaño total
+    const totalMB = attachments.reduce((s: number, a: any) => s + (a.content.length * 3) / 4 / 1048576, 0);
+    if (totalMB > 4.5) {
+      throw new Error(`Adjuntos muy pesados (${totalMB.toFixed(2)} MB).`);
+    }
+
     console.log("📧 Enviando Nota de Venta:", {
+      to, cc, subject,
+      atts: attachments.map((a: any) => a.filename),
+      totalMB: totalMB.toFixed(2),
+    });
+
+    const data = await resend.emails.send({
+      from: "no-reply@spartan.cl",       // dominio/verificado en Resend
       to,
       cc,
       subject,
-      hasAttachment: !!body.attachment,
-    });
-
-    // Email con PDF adjunto
-    const data = await resend.emails.send({
-      from: "no-reply@spartan.cl", // remitente validado en Resend
-      to,                          // siempre SAC
-      cc: cc ? [cc] : undefined,   // copia al ejecutivo si existe
-      subject,
       html: body.message || "<p>Adjunto Nota de Venta en PDF</p>",
-      attachments: [
-        {
-          filename: body.attachment.filename,
-          content: body.attachment.content, // base64 del PDF generado en page.tsx
-        },
-      ],
+      attachments: attachments.map((a: any) => ({
+        filename: a.filename,
+        content: a.content, // base64 sin "data:..."
+      })),
     });
 
     return NextResponse.json({ success: true, data });
-  } catch (error: any) {
-    console.error("❌ Error al enviar correo de Nota de Venta:", error);
-    return NextResponse.json({ success: false, error }, { status: 500 });
+  } catch (err: any) {
+    console.error("❌ Error al enviar correo de Nota de Venta:", err);
+    return NextResponse.json(
+      { success: false, error: String(err?.message || err) },
+      { status: 500 }
+    );
   }
 }
