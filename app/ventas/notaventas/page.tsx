@@ -442,23 +442,48 @@ function applyEspecial(row: Line): Line {
     especialPrice: 0,
   };
 
-  if (clientCode && out.code) {
-    const pe = preciosEspeciales.find(
-      (p) => p.codigoSN === clientCode && p.articulo === out.code
-    );
-    if (pe) {
-      if (pe.vigente) {
-        out.isEspecial = true;
-        out.especialPrice = Math.round(pe.precio || 0);
-        out.descuento = 0; // sin descuento cuando es especial
-      } else {
-        out.isBloqueado = true; // ❌ especial vencido -> bloquear
-      }
+  if (!clientCode || !out.code) return computeLine(out);
+
+  // 1) Buscar TODOS los especiales que calzan (puede haber duplicados)
+  const matches = preciosEspeciales.filter(
+    (p) => p.codigoSN === clientCode && p.articulo === out.code
+  );
+
+  if (matches.length) {
+    const hoy = startOfDayMs(new Date());
+
+    // ordenar por vencimiento descendente (más nuevo primero)
+    const byVencDesc = (a: PrecioEspecial, b: PrecioEspecial) =>
+      (b.vencimientoMs ?? 0) - (a.vencimientoMs ?? 0);
+
+    // 2) Preferir vigentes; si no hay vigentes, tomar el de vencimiento más reciente
+    const vigentes = matches.filter((m) => (m.vencimientoMs ?? Infinity) >= hoy);
+    const pe = (vigentes.length ? vigentes : matches).sort(byVencDesc)[0];
+    const vigente = (pe.vencimientoMs ?? Infinity) >= hoy;
+
+    if (vigente) {
+      out.isEspecial = true;
+      out.especialPrice = Math.round(pe.precio || 0);
+      out.descuento = 0;
+    } else {
+      out.isBloqueado = true;      // ❌ especial vencido -> bloquear
+      out.precioVenta = 0;
+      out.total = 0;
     }
+
+    // (opcional) log para depurar qué fecha tomó
+    console.debug("PE match", {
+      cliente: clientCode,
+      articulo: out.code,
+      vencimiento: pe.vencimiento,
+      vencimientoMs: pe.vencimientoMs,
+      vigente,
+    });
   }
 
-  return computeLine(out); // recalcula con tus reglas
+  return computeLine(out);
 }
+
 
   /* ==========================================================================
    [G] MANEJO DE LÍNEAS
