@@ -293,21 +293,8 @@ const [ocBase64, setOcBase64] = useState<string>("");
     if (!f) return true;
     const fv = new Date(f.getFullYear(), f.getMonth(), f.getDate()).getTime();
     return hoySinHora().getTime() <= fv;
-  }
-  async function fileToBase64(file: File): Promise<{ base64: string; mime: string }> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = String(reader.result || "");
-        resolve({
-          base64: dataUrl.split(",")[1] || "",
-          mime: file.type || "application/octet-stream",
-        });
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  }
+  };
+  
 
   /* ==========================================================================
      [E] EFECTOS: Inicialización y carga de datos
@@ -378,7 +365,7 @@ useEffect(() => {
 
       // Regla: si no hay fecha o es inválida => lo consideramos VIGENTE.
       // Cambia a `false` si quieres tratarlos como NO vigentes.
-      const vigente = vencMs === undefined ? true : hoy <= vencMs;
+      const vigente = vencMs === undefined ? false : hoy <= vencMs;
 
       return {
         codigoSN: String((r as any)["Código SN"] ?? (r as any)["Codigo SN"] ?? "").trim(),
@@ -418,8 +405,9 @@ useEffect(() => {
       out.total = 0;
       return out;
     }
-
-    if (out.isEspecial && out.especialPrice > 0) {
+  
+  
+   if (out.isEspecial && out.especialPrice > 0) {
       out.descuento = 0;
       out.precioVenta = Math.round(out.especialPrice);
     } else {
@@ -439,6 +427,32 @@ useEffect(() => {
     out.total = precioPresentacion * (num(out.qty) || 0);
     return out;
   }
+  // --- aplica precio especial / bloqueo por vencimiento sobre una fila ---
+function applyEspecial(row: Line): Line {
+  let out: Line = {
+    ...row,
+    isEspecial: false,
+    isBloqueado: false,
+    especialPrice: 0,
+  };
+
+  if (clientCode && out.code) {
+    const pe = preciosEspeciales.find(
+      (p) => p.codigoSN === clientCode && p.articulo === out.code
+    );
+    if (pe) {
+      if (pe.vigente) {
+        out.isEspecial = true;
+        out.especialPrice = Math.round(pe.precio || 0);
+        out.descuento = 0; // sin descuento cuando es especial
+      } else {
+        out.isBloqueado = true; // ❌ especial vencido -> bloquear
+      }
+    }
+  }
+
+  return computeLine(out); // recalcula con tus reglas
+}
 
   /* ==========================================================================
    [G] MANEJO DE LÍNEAS
@@ -470,40 +484,35 @@ useEffect(() => {
   
     setLines((old) => {
       const n = [...old];
-      const row = { ...(n[i] ?? n[0]) } as Line;
+      const base: Line =
+        n[i] ??
+        {
+          code: "",
+          name: "",
+          kilos: 1,
+          qty: 1,
+          priceBase: 0,
+          especialPrice: 0,
+          descuento: 0,
+          precioVenta: 0,
+          total: 0,
+          isEspecial: false,
+          isBloqueado: false,
+        };
   
-      row.code = prod.code;
-      row.name = prod.name;
-      row.kilos = prod.kilos || 1;
-      row.priceBase = prod.price_list || 0;
+      const row: Line = {
+        ...base,
+        code: prod.code,
+        name: prod.name,
+        kilos: prod.kilos || 1,
+        priceBase: prod.price_list || 0,
+      };
   
-      let esp = 0;
-      let isEsp = false;
-      let bloqueado = false;
-  
-      if (clientCode) {
-        const pe = preciosEspeciales.find(
-          (p) => p.codigoSN === clientCode && p.articulo === prod.code
-        );
-        if (pe) {
-          if (pe.vigente) {
-            esp = pe.precio || 0;
-            isEsp = true;
-          } else {
-            bloqueado = true; // ❌ especial vencido -> bloquear línea
-          }
-        }
-      }
-  
-      row.especialPrice = esp;
-      row.isEspecial = isEsp;
-      row.isBloqueado = bloqueado;
-      row.descuento = isEsp ? 0 : Math.round(clamp(num(row.descuento), -20, 20) * 100) / 100;
-  
-      n[i] = computeLine(row);
+      n[i] = applyEspecial(row); // 👈 aplica precio especial / bloqueo
       return n;
     });
   }
+  
   
   function updateLine(i: number, field: keyof Line, value: unknown) {
     setLines((old) => {
@@ -569,6 +578,12 @@ useEffect(() => {
     setLines((old) => old.map((r) => computeLine(r)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listaSeleccionada]);
+
+  // Reaplica precio especial / bloqueo al cambiar cliente o la lista de especiales
+useEffect(() => {
+  setLines((old) => old.map((r) => (r.code ? applyEspecial(r) : r)));
+}, [clientCode, preciosEspeciales]);
+
 
   // Subtotal
   const subtotal = useMemo(
