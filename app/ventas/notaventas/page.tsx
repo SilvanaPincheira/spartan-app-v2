@@ -196,33 +196,39 @@ type PrecioEspecial = {
   vencimientoMs?: number; // fecha normalizada a ms a medianoche
   vigente?: boolean;      // true si no venció (o si no hay fecha, según tu regla)
 };
-// Parser robusto: soporta "dd/mm/yyyy", "yyyy-mm-dd" y serial de Excel
 function parseFechaFlexible(v: any): Date | null {
   if (v === null || v === undefined) return null;
-  if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
 
-  if (typeof v === "number") {
-    // Serial Excel (base 1899-12-30)
+  // Excel serial (base 1899-12-30)
+  if (typeof v === "number" && Number.isFinite(v)) {
     const base = new Date(1899, 11, 30).getTime();
-    const ms = base + v * 86400000;
+    const ms = base + Math.round(v * 86400000);
     const d = new Date(ms);
     return isNaN(d.getTime()) ? null : d;
-  }
+    }
 
-  const s = String(v).trim();
-  if (!s) return null;
+  const raw = String(v).trim();
+  if (!raw) return null;
 
-  // ISO yyyy-mm-dd
-  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  // Quitar parte horaria si viene (" 00:00", "T00:00:00", etc.)
+  const s = raw.replace(/[T ]\d{1,2}:\d{2}(:\d{2})?.*$/, "");
+
+  // yyyy-mm-dd / yyyy.mm.dd / yyyy/mm/dd
+  let m = s.match(/^(\d{4})[.\-\/](\d{1,2})[.\-\/](\d{1,2})$/);
   if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
 
-  // dd/mm/yyyy o dd-mm-yyyy (formato CL)
-  m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
-  if (m) return new Date(+m[3], +m[2] - 1, +m[1]);
+  // dd-mm-yyyy / dd.mm.yyyy / dd/mm/yyyy  (y también año de 2 dígitos)
+  m = s.match(/^(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2}|\d{4})$/);
+  if (m) {
+    let y = +m[3];
+    if (y < 100) y += 2000; // asume 20xx para años de 2 dígitos
+    return new Date(y, +m[2] - 1, +m[1]);
+  }
 
-  const t = Date.parse(s);
+  const t = Date.parse(raw);
   return isNaN(t) ? null : new Date(t);
 }
+
 
 function startOfDayMs(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
