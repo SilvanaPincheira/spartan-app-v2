@@ -75,6 +75,21 @@ function hoySinHora(): Date {
   const t = new Date();
   return new Date(t.getFullYear(), t.getMonth(), t.getDate());
 }
+async function fileToBase64(file: File): Promise<{ base64: string; mime: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || "");
+      resolve({
+        base64: dataUrl.split(",")[1] || "",
+        mime: file.type || "application/octet-stream",
+      });
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 
 /* ============================================================================
    [B] LECTURA DE CSVs (Google Sheets) — sin dependencias
@@ -205,6 +220,11 @@ export default function NotaVentaPage() {
   const [direccion, setDireccion] = useState("");
   const [direccionNueva, setDireccionNueva] = useState("");
   const [comuna, setComuna] = useState("");
+  // Archivo OC (opcional)
+const [ocName, setOcName] = useState<string>("");
+const [ocMime, setOcMime] = useState<string>("");
+const [ocBase64, setOcBase64] = useState<string>("");
+
 
   /* ----- Estado: Productos/Precios ----- */
   const [productos, setProductos] = useState<Product[]>([]);
@@ -238,6 +258,20 @@ export default function NotaVentaPage() {
     if (!f) return true;
     const fv = new Date(f.getFullYear(), f.getMonth(), f.getDate()).getTime();
     return hoySinHora().getTime() <= fv;
+  }
+  async function fileToBase64(file: File): Promise<{ base64: string; mime: string }> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result || "");
+        resolve({
+          base64: dataUrl.split(",")[1] || "",
+          mime: file.type || "application/octet-stream",
+        });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
   }
 
   /* ==========================================================================
@@ -672,16 +706,23 @@ async function guardarPdfYEnviar() {
       </ul>
     `;
 
-    const resMail = await fetch("/api/send-notaventa", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        subject,
-        message,
-        attachment: { filename, content: base64 },
-        cc: emailEjecutivo || undefined,
-      }),
-    });
+    // 4) Preparar adjuntos (PDF NV + OC opcional) y enviar correo
+const attachments = [
+  { filename, content: base64 },                            // PDF de la Nota de Venta
+  ...(ocBase64 ? [{ filename: ocName || "OC.pdf", content: ocBase64 }] : []), // OC (si subieron archivo)
+];
+
+const resMail = await fetch("/api/send-notaventa", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    subject,
+    message,
+    cc: emailEjecutivo || undefined,
+    attachments, // 👈 ahora plural
+  }),
+});
+
 
     if (!resMail.ok) {
       const errText = await resMail.text();
@@ -1036,6 +1077,33 @@ async function guardarPdfYEnviar() {
                 onChange={(e) => setComentarios(e.target.value)}
               />
             </label>
+            <label className="flex flex-col gap-1">
+  <span className="font-medium">Adjuntar documento (OC del cliente, etc.)</span>
+  <input
+    type="file"
+    accept=".pdf,.jpg,.jpeg,.png"
+    className="w-full border rounded px-2 py-1"
+    onChange={async (e) => {
+      const f = e.target.files?.[0];
+      if (!f) {
+        setOcName("");
+        setOcMime("");
+        setOcBase64("");
+        return;
+      }
+      const { base64, mime } = await fileToBase64(f);
+      setOcName(f.name);
+      setOcMime(mime);
+      setOcBase64(base64);
+    }}
+  />
+  {ocName && (
+    <span className="text-xs text-zinc-500 mt-1">
+      Adjunto listo: <b>{ocName}</b>
+    </span>
+  )}
+</label>
+
           </div>
         </section>
       </div>
