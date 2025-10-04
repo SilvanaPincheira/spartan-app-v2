@@ -55,11 +55,14 @@ function getDateFromRow(r: any): Date | null {
     r?.["Fecha Contabilización"];
   return parseDateLike(cand);
 }
-function rango6Meses(base = new Date()) {
-  const end = new Date(base.getFullYear(), base.getMonth() + 1, 1);
-  const start = new Date(base.getFullYear(), base.getMonth() - 5, 1);
-  return { start, end };
+// 6 meses COMPLETOS previos (excluye el mes en curso)
+function rango6MesesCompletos(ref = new Date()) {
+  const end = new Date(ref.getFullYear(), ref.getMonth(), 1);       // 1° del mes actual (exclusivo)
+  const start = new Date(end.getFullYear(), end.getMonth() - 6, 1); // 1° de hace 6 meses (inclusive)
+  return { start, end, meses: 6 };
 }
+
+
 function useLocalStorage<T>(key: string, initial: T) {
   const [state, setState] = useState<T>(() => {
     if (typeof window === "undefined") return initial;
@@ -620,12 +623,16 @@ export default function Page() {
         return (rutSan && rv === rutSan) || (codeSan && cv === codeSan);
       });
 
-      const { start, end } = rango6Meses(new Date());
+      const ref = parseDateLike(fechaEval) || new Date();
+const { start, end, meses } = rango6MesesCompletos(ref);
+
+
       let ventasFiltradas = ventasPorRutOCod.filter((r) => {
         const fecha = getDateFromRow(r);
         return !!fecha && fecha >= start && fecha < end;
       });
-      if (!ventasFiltradas.length) ventasFiltradas = ventasPorRutOCod;
+      
+      if (!ventasFiltradas.length) ventasFiltradas = ventasPorRutOCod; // 👈 respaldo
 
       const master = clientMasterByRut.get(rutSan);
       if (master) {
@@ -653,7 +660,7 @@ export default function Page() {
         const rawCode = String(r.ItemCode ?? "").trim();
         if (!rawCode) continue;
         const code = rawCode.toUpperCase();
-        if (!/PT/i.test(code)) continue;
+        if (!/^PT/i.test(code)) continue; // 👈 sólo prefijo PT
         const name = String(r.Dscription ?? "").trim();
         const kg = num(r["Cantidad Kilos"]);
         const venta = num(r["Global Venta"]);
@@ -679,20 +686,29 @@ export default function Page() {
             : usePriceListAsCost
             ? Number(item?.price_list ?? 0)
             : 0;
+      
         const precioPromKg = r.kilos6m > 0 ? r.venta6m / r.kilos6m : 0;
         const margenDirectoPct = precioPromKg > 0 ? (precioPromKg - costoKg) / precioPromKg : 0;
-        result.push({ ...r, kgMes: r.kilos6m / 6, ventaMes: r.venta6m / 6, precioPromKg, margenDirectoPct });
+      
+        result.push({
+          ...r,
+          kgMes: r.kilos6m / meses,     // 👈 antes / 6
+          ventaMes: r.venta6m / meses,  // 👈 antes / 6
+          precioPromKg,
+          margenDirectoPct,
+        });
       }
-
+      
       const venta6mTotal = result.reduce((a, x) => a + x.venta6m, 0);
-      const ventaMesProm = venta6mTotal / 6;
+      const ventaMesProm = meses > 0 ? venta6mTotal / meses : 0; // 👈 antes / 6
+      
 
       const { id: cId, gid: cGid } = normalizeGoogleSheetUrl(comodatosUrl);
       if (!cId) throw new Error("URL de comodatos inválida.");
       const comodatos = (await loadSheetSmart(cId, cGid, "Comodatos")) as ComodatoRow[];
       const comCliente = comodatos.filter((r) => sanitizeRut(String(r["Rut Cliente"] ?? "")) === rutSan);
 
-      const hoy = new Date();
+      const hoy = parseDateLike(fechaEval) || new Date();
       const contratoDefault = Math.max(1, Number(months || 1));
       const comodatosV: ComodatoView[] = comCliente.map((r) => {
         const code = String(r["Codigo Producto"] ?? "").trim().toUpperCase();
