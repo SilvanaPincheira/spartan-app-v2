@@ -187,12 +187,47 @@ type Client = {
   direccion: string;
 };
 type Product = { code: string; name: string; price_list: number; kilos: number };
+
 type PrecioEspecial = {
   codigoSN: string;
   articulo: string;
   precio: number;
-  vencimiento?: string;
+  vencimiento?: string;   // como viene del sheet (texto/serial)
+  vencimientoMs?: number; // fecha normalizada a ms a medianoche
+  vigente?: boolean;      // true si no venció (o si no hay fecha, según tu regla)
 };
+// Parser robusto: soporta "dd/mm/yyyy", "yyyy-mm-dd" y serial de Excel
+function parseFechaFlexible(v: any): Date | null {
+  if (v === null || v === undefined) return null;
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
+
+  if (typeof v === "number") {
+    // Serial Excel (base 1899-12-30)
+    const base = new Date(1899, 11, 30).getTime();
+    const ms = base + v * 86400000;
+    const d = new Date(ms);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  const s = String(v).trim();
+  if (!s) return null;
+
+  // ISO yyyy-mm-dd
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+
+  // dd/mm/yyyy o dd-mm-yyyy (formato CL)
+  m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (m) return new Date(+m[3], +m[2] - 1, +m[1]);
+
+  const t = Date.parse(s);
+  return isNaN(t) ? null : new Date(t);
+}
+
+function startOfDayMs(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
 type Line = {
   code: string;
   name: string;
@@ -316,23 +351,49 @@ const [ocBase64, setOcBase64] = useState<string>("");
     })().catch((e) => setErrorMsg(String(e)));
   }, []);
 
-  // Precios especiales
-  useEffect(() => {
-    (async () => {
-      const { id, gid } = normalizeGoogleSheetUrl(
-        "https://docs.google.com/spreadsheets/d/1UXVAxwzg-Kh7AWCPnPbxbEpzXnRPR2pDBKrRUFNZKZo/edit?gid=2117069636#gid=2117069636"
-      );
-      if (!id) return;
-      const rows = await loadSheetSmart(id, gid, "Precios especiales");
-      const list: PrecioEspecial[] = rows.map((r) => ({
+  
+      // Precios especiales
+useEffect(() => {
+  (async () => {
+    const { id, gid } = normalizeGoogleSheetUrl(
+      "https://docs.google.com/spreadsheets/d/1UXVAxwzg-Kh7AWCPnPbxbEpzXnRPR2pDBKrRUFNZKZo/edit?gid=2117069636#gid=2117069636"
+    );
+    if (!id) return;
+
+    const rows = await loadSheetSmart(id, gid, "Precios especiales");
+
+    const hoy = startOfDayMs(new Date());
+
+    const list: PrecioEspecial[] = rows.map((r) => {
+      const vencRaw =
+        String(
+          (r as any).Vencimiento ??
+          (r as any)["Fecha Vencimiento"] ??
+          (r as any)["Fecha vencimiento"] ??
+          ""
+        ).trim();
+
+      const d = parseFechaFlexible(vencRaw);
+      const vencMs = d ? startOfDayMs(d) : undefined;
+
+      // Regla: si no hay fecha o es inválida => lo consideramos VIGENTE.
+      // Cambia a `false` si quieres tratarlos como NO vigentes.
+      const vigente = vencMs === undefined ? true : hoy <= vencMs;
+
+      return {
         codigoSN: String((r as any)["Código SN"] ?? (r as any)["Codigo SN"] ?? "").trim(),
         articulo: String((r as any)["Número de artículo"] ?? (r as any)["Numero de articulo"] ?? "").trim(),
         precio: num((r as any)["Precio especial"] ?? 0),
-        vencimiento: String((r as any).Vencimiento ?? (r as any)["Fecha Vencimiento"] ?? "").trim(),
-      }));
-      setPreciosEspeciales(list);
-    })().catch((e) => setErrorMsg(String(e)));
-  }, []);
+        vencimiento: vencRaw,
+        vencimientoMs: vencMs,
+        vigente,
+      };
+    });
+
+    setPreciosEspeciales(list);
+  })().catch((e) => setErrorMsg(String(e)));
+}, []);
+
 
   /* ==========================================================================
      [F] LÓGICA DE PRECIOS
@@ -406,42 +467,44 @@ const [ocBase64, setOcBase64] = useState<string>("");
   function fillFromCode(i: number, code: string) {
     const prod = productos.find((p) => p.code === code);
     if (!prod) return;
+  
     setLines((old) => {
       const n = [...old];
       const row = { ...(n[i] ?? n[0]) } as Line;
-
+  
       row.code = prod.code;
       row.name = prod.name;
       row.kilos = prod.kilos || 1;
       row.priceBase = prod.price_list || 0;
-
+  
       let esp = 0;
       let isEsp = false;
       let bloqueado = false;
-
+  
       if (clientCode) {
         const pe = preciosEspeciales.find(
           (p) => p.codigoSN === clientCode && p.articulo === prod.code
         );
         if (pe) {
-          if (especialVigente(pe)) {
+          if (pe.vigente) {
             esp = pe.precio || 0;
             isEsp = true;
           } else {
-            bloqueado = true;
+            bloqueado = true; // ❌ especial vencido -> bloquear línea
           }
         }
       }
-
+  
       row.especialPrice = esp;
       row.isEspecial = isEsp;
       row.isBloqueado = bloqueado;
       row.descuento = isEsp ? 0 : Math.round(clamp(num(row.descuento), -20, 20) * 100) / 100;
-
+  
       n[i] = computeLine(row);
       return n;
     });
   }
+  
   function updateLine(i: number, field: keyof Line, value: unknown) {
     setLines((old) => {
       const n = [...old];
@@ -1279,4 +1342,4 @@ const resMail = await fetch("/api/send-notaventa", {
       `}</style>
     </>
   );
-}
+      }
