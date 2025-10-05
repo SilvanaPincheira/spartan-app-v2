@@ -616,11 +616,10 @@ useEffect(() => {
 }, [clientCode, preciosEspeciales]);
 
 
-  // Subtotal
-  const subtotal = useMemo(
-    () => lines.reduce((a, r) => a + (Number.isFinite(r.total) ? r.total : 0), 0),
-    [lines]
-  );
+ const subtotal = useMemo(
+  () => lines.reduce((sum, r) => sum + (Number.isFinite(r.total) ? r.total : 0), 0),
+  [lines]
+);
 
   /* ==========================================================================
      [H] CLIENTE: eventos
@@ -801,7 +800,12 @@ async function guardarPdfYEnviar() {
     });
 
     // 4) Enviar correo (SIEMPRE a SAC, CC ejecutivo)
-    const subject = `Nota de Venta ${numeroNV}`;
+    const subject = `Nota de Venta ${numeroNV}— ${clientName}`;
+    // a quién se responde al “Responder”
+    const replyTo = (emailEjecutivo || "").trim() || undefined;
+
+    // nombre visible del remitente (el email sigue siendo no-reply@)
+    const fromName = `${(ejecutivo || "Spartan").trim()} — ${numeroNV}`;
     const message = `
       <p>Se ha generado una Nota de Venta.</p>
       <ul>
@@ -821,6 +825,7 @@ const attachments = [
   ...(ocBase64 ? [{ filename: ocName || "OC.pdf", content: ocBase64 }] : []), // OC (si subieron archivo)
 ];
 
+
 const resMail = await fetch("/api/send-notaventa", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
@@ -829,6 +834,9 @@ const resMail = await fetch("/api/send-notaventa", {
     message,
     cc: emailEjecutivo || undefined,
     attachments, // 👈 ahora plural
+    replyTo,                  // 👈 nuevo
+    fromName,                 // 👈 nuevo
+               
   }),
 });
 

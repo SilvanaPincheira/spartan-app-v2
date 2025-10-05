@@ -2,25 +2,71 @@
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY!);
+const resendApiKey = process.env.RESEND_API_KEY;
+const resend = new Resend(resendApiKey);
+
+type AttachmentIn = { filename: string; content: string };
+
+type SendNotaVentaBody = {
+  subject?: string;
+  message?: string;                 // HTML
+  to?: string | string[];           // opcional (por defecto SAC)
+  cc?: string | string[];           // opcional (si no, cae en emailEjecutivo)
+  emailEjecutivo?: string;          // CC y replyTo de respaldo
+  attachments?: AttachmentIn[];     // múltiples adjuntos
+  attachment?: AttachmentIn;        // adjunto único (compat)
+  replyTo?: string | string[];      // “Responder a”
+  fromName?: string;                // nombre mostrado en “From”
+};
+
+// normaliza a array de emails o undefined
+function normEmails(v: unknown): string[] | undefined {
+  if (!v && v !== "") return undefined;
+  if (Array.isArray(v)) {
+    const out = v.map(String).map((s) => s.trim()).filter(Boolean);
+    return out.length ? out : undefined;
+  }
+  const s = String(v).trim();
+  return s ? [s] : undefined;
+}
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    if (!resendApiKey) {
+      throw new Error("Falta RESEND_API_KEY en variables de entorno.");
+    }
+
+    const body = (await req.json()) as SendNotaVentaBody;
 
     // Destinatarios
-    const to: string[] = ["sac@spartan.cl"]; // <-- cambia si corresponde
-    const cc: string[] | undefined =
-      body.cc
-        ? (Array.isArray(body.cc) ? body.cc : [String(body.cc)]).filter(Boolean)
-        : (body.emailEjecutivo ? [String(body.emailEjecutivo)] : undefined);
+    const to = normEmails(body.to) ?? ["sac@spartan.cl"];
+    const cc =
+      normEmails(body.cc) ??
+      (body.emailEjecutivo ? [String(body.emailEjecutivo)] : undefined);
 
-    const subject: string =
-      (typeof body.subject === "string" && body.subject.trim()) ||
-      "Nota de Venta – Spartan One";
+    // Reply-To (preferimos explícito; si no, ejecutivo)
+    const replyTo =
+      normEmails(body.replyTo) ??
+      (body.emailEjecutivo ? [String(body.emailEjecutivo)] : undefined);
+
+    // Asunto y nombre visible en From
+    const subject =
+      typeof body.subject === "string" && body.subject.trim()
+        ? body.subject.trim()
+        : "Nota de Venta – Spartan One";
+
+    const fromName =
+      typeof body.fromName === "string" && body.fromName.trim()
+        ? body.fromName.trim()
+        : "Spartan One";
+
+    const html =
+      typeof body.message === "string" && body.message.trim()
+        ? body.message
+        : "<p>Adjunto Nota de Venta en PDF.</p>";
 
     // Adjuntos: soporta 'attachments' (array) o 'attachment' (uno solo)
-    const attachments =
+    const attachments: AttachmentIn[] =
       Array.isArray(body.attachments) && body.attachments.length
         ? body.attachments
         : body.attachment
@@ -32,31 +78,39 @@ export async function POST(req: Request) {
     }
     for (const a of attachments) {
       if (!a?.filename || !a?.content) {
-        throw new Error("Adjunto inválido: se requiere 'filename' y 'content' (base64).");
+        throw new Error(
+          "Adjunto inválido: se requiere 'filename' y 'content' (base64)."
+        );
       }
     }
 
-    // (opcional) límite de tamaño total
-    const totalMB = attachments.reduce((s: number, a: any) => s + (a.content.length * 3) / 4 / 1048576, 0);
+    // Límite de tamaño total (~4.5 MB)
+    const totalMB =
+      attachments.reduce((s, a) => s + (a.content.length * 3) / 4 / 1048576, 0) || 0;
     if (totalMB > 4.5) {
       throw new Error(`Adjuntos muy pesados (${totalMB.toFixed(2)} MB).`);
     }
 
-    console.log("📧 Enviando Nota de Venta:", {
-      to, cc, subject,
-      atts: attachments.map((a: any) => a.filename),
+    console.log("📧 Enviando Nota de Venta", {
+      to,
+      cc,
+      replyTo,
+      subject,
+      from: `${fromName} <no-reply@spartan.cl>`,
+      atts: attachments.map((a) => a.filename),
       totalMB: totalMB.toFixed(2),
     });
 
     const data = await resend.emails.send({
-      from: "no-reply@spartan.cl",       // dominio/verificado en Resend
+      from: `${fromName} <no-reply@spartan.cl>`, // dominio verificado en Resend
       to,
       cc,
+      replyTo,                                    // 👈 camelCase correcto
       subject,
-      html: body.message || "<p>Adjunto Nota de Venta en PDF</p>",
-      attachments: attachments.map((a: any) => ({
+      html,
+      attachments: attachments.map((a) => ({
         filename: a.filename,
-        content: a.content, // base64 sin "data:..."
+        content: a.content, // base64 sin data:...
       })),
     });
 
