@@ -1,325 +1,221 @@
-// /lib/utils/pdf-cotizacion.ts
 import jsPDF from "jspdf";
-import autoTable, { RowInput } from "jspdf-autotable";
+import autoTable from "jspdf-autotable";
 
-// Opcionalmente puedes mover esto a un archivo de "branding"
-const SPARTAN_BLUE = "#2B6CFF";
-const TEXT_GRAY = "#3A3A3A";
-const LIGHT_BORDER = "#D9E1F2";
-
-type CotizacionInput = {
-  numeroCTZ: string;
-  fecha: string;               // ej: "Santiago, 24 de abril de 2024" o "24-04-2024"
+/**
+ * Genera el PDF profesional de cotización Spartan de Chile.
+ * Incluye encabezado con logo, introducción, tabla con totales y firma del ejecutivo.
+ */
+export function generarPdfCotizacion(data: {
+  numero: string;
+  fecha: string;
   cliente: {
     nombre: string;
-    rut: string;
-    codigo: string;
-    direccion: string;
+    email?: string;
+    rut?: string;
+    direccion?: string;
     comuna?: string;
-    contacto?: string;
-    emailCliente: string;
   };
   productos: {
     codigo: string;
     descripcion: string;
-    kilos?: number;            // solo informativo; NO se muestra (como el ejemplo)
     cantidad: number;
-    precioUnitario: number;    // $ unitario (o $/presentación si es PT)
-    total: number;
+    kilos?: number;
+    precioVenta: number;
   }[];
-  validez: string;
-  formaPago: string;
-  entrega: string;             // "Plazo de entrega"
-  observaciones?: string;
-  subtotal: number;
-  iva: number;
-  total: number;
-
-  // Firma dinámica del ejecutivo
+  condiciones?: string;
   ejecutivo: {
     nombre: string;
-    correo?: string;
-    celular?: string;
-    cargo?: string;            // por defecto "Ejecutivo Comercial"
+    telefono: string;
+    celular: string;
+    email: string;
   };
+}) {
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const azul = "#0033A0"; // color corporativo Spartan
+  const gris = "#555";
+  const startX = 20;
+  let y = 20;
 
-  // Branding
-  ciudad?: string;             // para la línea de fecha “Santiago, …” (opcional)
-  logoUrl?: string;            // URL del logo (por defecto el tuyo)
-};
-
-async function imageUrlToDataUrl(url: string): Promise<string | null> {
-  try {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.src = url;
-    await new Promise((res, rej) => {
-      img.onload = () => res(true);
-      img.onerror = rej;
-    });
-    const canvas = document.createElement("canvas");
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.drawImage(img, 0, 0);
-    return canvas.toDataURL("image/png");
-  } catch {
-    return null;
-  }
-}
-
-function moneyCL(n: number) {
-  return (n || 0).toLocaleString("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
-}
-
-export async function generarPdfCotizacion(data: CotizacionInput): Promise<{ filename: string; base64: string }> {
-  const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
-  const pageWidth = pdf.internal.pageSize.getWidth();
-  const marginX = 20;
-  let cursorY = 16;
-
-  // ===== HEADER: logo + título derecha =====
-  // Logo
+  // === ENCABEZADO ===
   const logoUrl =
-    data.logoUrl ||
     "https://images.jumpseller.com/store/spartan-de-chile/store/logo/Spartan_Logo_-_copia.jpg?0";
+  doc.addImage(logoUrl, "JPEG", startX, y, 35, 15);
 
-  const logoDataUrl = await imageUrlToDataUrl(logoUrl);
-  if (logoDataUrl) {
-    pdf.addImage(logoDataUrl, "PNG", marginX, cursorY - 2, 32, 12);
-  } else {
-    // fallback: nombre textual si no se pudo cargar el logo
-    pdf.setTextColor(0);
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(14);
-    pdf.text("SPARTAN", marginX, cursorY + 6);
-  }
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(azul);
+  doc.text(`COTIZACIÓN N° ${data.numero}`, 200 - startX, y + 6, { align: "right" });
 
-  // Título
-  pdf.setTextColor(SPARTAN_BLUE);
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(14);
-  const title = `COTIZACIÓN No ${data.numeroCTZ.replace(/^CTZ-/, "")}`;
-  pdf.text(title, pageWidth - marginX, cursorY + 2, { align: "right" });
+  doc.setFontSize(9);
+  doc.setTextColor(gris);
+  doc.text("Santiago, " + data.fecha, 200 - startX, y + 12, { align: "right" });
 
-  pdf.setTextColor(100);
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(9);
-  pdf.text("page.tsx / app/ventas/cotizacion", pageWidth - marginX, cursorY + 8, { align: "right" });
+  y += 25;
 
-  cursorY += 18;
+  // === DATOS EMPRESA ===
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor("#000");
+  doc.text("SPARTAN DE CHILE LTDA.", startX, y);
+  y += 5;
 
-  // ===== BLOQUE EMPRESA / FECHA =====
-  pdf.setTextColor(0);
-  pdf.setFontSize(12);
-  pdf.setFont("helvetica", "bold");
-  pdf.text("SPARTAN DE CHILE LTDA.", marginX, cursorY);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor("#111");
+  doc.text("RUT: 76.883.980-7", startX, y);
+  y += 4;
+  doc.text("Cerro Sarita Lucia #9873 – Quilicura – Santiago", startX, y);
+  y += 4;
+  doc.setTextColor(azul);
+  doc.text("Teléfono: 227385150", startX, y);
+  y += 4;
+  doc.text("ventas@spartan.cl", startX, y);
+  y += 10;
 
-  pdf.setTextColor(SPARTAN_BLUE);
-  pdf.setFont("helvetica", "normal");
-  const fechaLinea = data.fecha || "";
-  pdf.text(fechaLinea, pageWidth - marginX, cursorY, { align: "right" });
+  // === CLIENTE ===
+  doc.setTextColor("#000");
+  doc.setFont("helvetica", "bold");
+  doc.text("Señores", startX, y);
+  y += 5;
+  doc.text(data.cliente.nombre?.toUpperCase() || "", startX, y);
+  y += 5;
 
-  cursorY += 6;
-  pdf.setTextColor(TEXT_GRAY);
-  pdf.setFontSize(9);
-  pdf.text("RUT: 76 883-980-7", marginX, cursorY);
-  cursorY += 5;
-  pdf.text("Cerro Sarita Lucia #9873 - Quilicura - Santiago", marginX, cursorY);
-  cursorY += 5;
-  pdf.setTextColor(SPARTAN_BLUE);
-  pdf.text("Teléfono: 227385150", marginX, cursorY);
-  cursorY += 5;
-  pdf.text("ventas@spartan.cl", marginX, cursorY);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(azul);
+  if (data.cliente.email) doc.text(data.cliente.email, startX, y);
+  y += 10;
 
-  // Separador tenue
-  cursorY += 6;
-  pdf.setDrawColor(LIGHT_BORDER);
-  pdf.setLineWidth(0.3);
-  pdf.line(marginX, cursorY, pageWidth - marginX, cursorY);
-  cursorY += 6;
+  // === INTRODUCCIÓN ===
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor("#000");
+  const intro =
+    "De acuerdo a lo solicitado, tenemos el agrado de cotizar algunos de los productos que Spartan de Chile Ltda., fabrica y distribuye en el país, y/o maquinaria / accesorios de limpieza industrial.";
+  const splitIntro = doc.splitTextToSize(intro, 170);
+  doc.text(splitIntro, startX, y, { align: "justify", maxWidth: 170 });
+  y += splitIntro.length * 5 + 8;
 
-  // ===== CLIENTE =====
-  pdf.setTextColor(0);
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(10);
-  pdf.text("Señores", marginX, cursorY);
-  cursorY += 6;
+  // === TABLA PRODUCTOS ===
+  const body = data.productos.map((p) => {
+    const precioPresentacion = p.precioVenta * (p.kilos || 1);
+    const totalNeto = precioPresentacion * (p.cantidad || 1);
 
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(12);
-  pdf.text((data.cliente.nombre || "").toUpperCase(), marginX, cursorY);
-  cursorY += 6;
+    return [
+      p.codigo,
+      p.descripcion,
+      `${p.cantidad} unidad${p.cantidad > 1 ? "es" : ""}`,
+      precioPresentacion.toLocaleString("es-CL", {
+        style: "currency",
+        currency: "CLP",
+        maximumFractionDigits: 0,
+      }),
+      totalNeto.toLocaleString("es-CL", {
+        style: "currency",
+        currency: "CLP",
+        maximumFractionDigits: 0,
+      }),
+    ];
+  });
 
-  pdf.setFont("helvetica", "normal");
-  pdf.setTextColor(SPARTAN_BLUE);
-  const mailCliente = data.cliente.emailCliente || "";
-  if (mailCliente) pdf.text(mailCliente, marginX, cursorY);
-  cursorY += 8;
-
-  // ===== TABLA DE PRODUCTOS =====
-  // Encabezado azul como en el ejemplo
-  const headStyles = {
-    fillColor: SPARTAN_BLUE,
-    textColor: "#FFFFFF",
-    halign: "center" as const,
-    valign: "middle" as const,
-    fontStyle: "bold" as const,
-    lineColor: LIGHT_BORDER,
-  };
-  const bodyStyles = {
-    textColor: 20,
-    halign: "left" as const,
-    valign: "middle" as const,
-    lineColor: LIGHT_BORDER,
-  };
-
-  // Mapeo de filas
-  const bodyRows: RowInput[] = data.productos.map((p) => [
-    p.codigo || "",
-    p.descripcion || "",
-    `${p.cantidad} ${p.cantidad === 1 ? "unidad" : "unidades"}`,
-    moneyCL(p.precioUnitario),
-    moneyCL(p.total),
-  ]);
-
-  autoTable(pdf, {
-    startY: cursorY,
-    head: [["CÓDIGO", "PRODUCTO / DESCRIPCIÓN", "CANTIDAD", "PRECIO UNITARIO", "TOTAL"]],
-    body: bodyRows,
-    styles: { ...bodyStyles, fontSize: 9 },
-    headStyles: { ...headStyles, fontSize: 9 },
+  autoTable(doc, {
+    startY: y,
+    head: [
+      [
+        "CÓDIGO",
+        "PRODUCTO / DESCRIPCIÓN",
+        "CANTIDAD SOLICITADA",
+        "PRECIO PRESENTACIÓN",
+        "PRECIO TOTAL NETO",
+      ],
+    ],
+    body,
+    styles: { fontSize: 9, valign: "middle", textColor: "#000" },
+    headStyles: { fillColor: azul, textColor: "#fff", halign: "center", fontStyle: "bold" },
     columnStyles: {
-      0: { cellWidth: 36 },         // Código
-      1: { cellWidth: 88 },         // Descripción
-      2: { cellWidth: 26, halign: "center" },
-      3: { cellWidth: 26, halign: "right" },
-      4: { cellWidth: 26, halign: "right" },
+      0: { cellWidth: 28 },
+      1: { cellWidth: 75 },
+      2: { cellWidth: 30, halign: "center" },
+      3: { cellWidth: 30, halign: "right" },
+      4: { cellWidth: 30, halign: "right" },
     },
-    tableLineWidth: 0.2,
-    theme: "grid",
-    willDrawCell: (dataCell) => {
-      // subtítulo azul para código (como link visual)
-      if (dataCell.section === "body" && dataCell.column.index === 0) {
-        pdf.setTextColor(SPARTAN_BLUE);
-      } else {
-        pdf.setTextColor(20);
-      }
-    },
+    margin: { left: startX, right: startX },
   });
 
-  cursorY = (pdf as any).lastAutoTable.finalY + 2;
+  y = (doc as any).lastAutoTable.finalY + 10;
 
-  // Subtotales (alineados a la derecha en dos columnas)
-  const rightX = pageWidth - marginX;
-  const labelX = rightX - 52;
-  const valueX = rightX;
+  // === TOTAL GENERAL ===
+  const totalGeneral = data.productos.reduce((sum, p) => {
+    const precioPres = p.precioVenta * (p.kilos || 1);
+    return sum + precioPres * (p.cantidad || 1);
+  }, 0);
 
-  pdf.setFont("helvetica", "normal");
-  pdf.setTextColor(40);
-  pdf.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.text(
+    `Total Neto Cotización: ${totalGeneral.toLocaleString("es-CL", {
+      style: "currency",
+      currency: "CLP",
+      maximumFractionDigits: 0,
+    })}`,
+    200 - startX,
+    y,
+    { align: "right" }
+  );
+  y += 10;
 
-  cursorY += 6;
-  pdf.text("Subtotal", labelX, cursorY, { align: "right" });
-  pdf.text(moneyCL(data.subtotal), valueX, cursorY, { align: "right" });
+  // === CONDICIONES COMERCIALES ===
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor("#000");
+  doc.text("CONDICIONES COMERCIALES:", startX, y);
+  y += 6;
 
-  cursorY += 6;
-  pdf.text("IVA 19 %", labelX, cursorY, { align: "right" });
-  pdf.text(moneyCL(data.iva), valueX, cursorY, { align: "right" });
+  doc.setFont("helvetica", "normal");
+  const condiciones = data.condiciones?.trim()
+    ? data.condiciones
+    : `Estos precios son unitarios netos y no incluyen I.V.A.
+Despacho Mínimo: $50.000 + IVA, puesto en sus bodegas Región Metropolitana.
+Cualquier pedido menor a este monto debe pagar despacho de $19.900 + IVA.
+Plazo de entrega: Primera quincena de Diciembre (Máquinas marca Keeper).
+Validez cotización: 10 días.
+Forma de Pago: Contado - Transferencia.`;
 
-  pdf.setDrawColor(LIGHT_BORDER);
-  pdf.setLineWidth(0.4);
-  pdf.line(labelX - 2, cursorY + 2, valueX, cursorY + 2);
+  const splitCond = doc.splitTextToSize(condiciones.trim(), 170);
+  doc.text(splitCond, startX, y);
+  y += splitCond.length * 5 + 10;
 
-  cursorY += 8;
-  pdf.setFont("helvetica", "bold");
-  pdf.text("Total Neto + IVA", labelX, cursorY, { align: "right" });
-  pdf.text(moneyCL(data.total), valueX, cursorY, { align: "right" });
+  // === PIE DE ASESORÍA ===
+  doc.setFont("helvetica", "bold");
+  doc.text("Spartan de Chile Ltda.,", startX, y);
+  doc.setFont("helvetica", "normal");
+  doc.text(
+    "presta asesoría técnica permanente, sin costo para el cliente, en el uso de su amplia gama de productos, solucionando cualquier duda o dificultad en su aplicación.",
+    startX,
+    y + 5,
+    { maxWidth: 170 }
+  );
+  y += 22;
 
-  // Caja alrededor de totales (ligera)
-  pdf.setDrawColor(LIGHT_BORDER);
-  pdf.setLineWidth(0.3);
-  pdf.roundedRect(labelX - 56, (pdf as any).lastAutoTable.finalY + 4, 58, cursorY - ((pdf as any).lastAutoTable.finalY + 4) + 4, 2, 2);
+  // === FIRMA ===
+  doc.setFont("helvetica", "normal");
+  doc.text("Sin otro particular, le saluda muy atentamente,", startX, y);
+  y += 8;
 
-  cursorY += 10;
+  doc.setFont("helvetica", "bold");
+  doc.text(data.ejecutivo.nombre, startX, y);
+  y += 4;
 
-  // ===== CONDICIONES (viñetas) =====
-  pdf.setTextColor(0);
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.text("SPARTAN DE CHILE LTDA.", startX, y);
+  y += 5;
 
-  const bullets: string[] = [
-    `Mínimo de despacho: $50.000.`,
-    `Término: ${data.entrega || "A convenir"}.`,
-    `Vigencia: ${data.validez || "10 días"}.`,
-    `Forma de pago: ${data.formaPago || "Contado - Transferencia"}.`,
-  ];
-  if (data.observaciones) bullets.push(data.observaciones);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Fono: ${data.ejecutivo.telefono}`, startX, y);
+  y += 4;
+  doc.text(`Cel.: ${data.ejecutivo.celular}`, startX, y);
+  y += 4;
+  doc.text(`E-mail: ${data.ejecutivo.email}`, startX, y);
+  y += 10;
 
-  const bulletX = marginX + 2;
-  bullets.forEach((t) => {
-    pdf.circle(bulletX - 2.2, cursorY - 2.2, 0.6, "F");
-    pdf.text(t, bulletX, cursorY);
-    cursorY += 6;
-  });
-
-  // Texto institucional
-  cursorY += 2;
-  pdf.setTextColor(90);
-  pdf.setFontSize(9);
-  const parrafo =
-    "Spartan de Chile Ltda. presta asesoría técnica permanente, sin costo para el cliente, " +
-    "en el uso de su amplia gama de productos, solucionando cualquier duda o dificultad en su aplicación.";
-  // Wrap manual
-  const maxWidth = pageWidth / 2 - 8;
-  const lines = pdf.splitTextToSize(parrafo, maxWidth);
-  pdf.text(lines, marginX, cursorY);
-
-  // ===== FIRMA (derecha) =====
-  const firmaTopY = cursorY;
-  let firmaX = pageWidth - marginX;
-  let firmaY = firmaTopY;
-
-  pdf.setTextColor(0);
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(10);
-  pdf.text("Atentamente,", firmaX, firmaY, { align: "right" });
-  firmaY += 6;
-
-  pdf.setFont("helvetica", "bold");
-  pdf.text(data.ejecutivo.nombre || "Ejecutivo de Ventas", firmaX, firmaY, { align: "right" });
-  firmaY += 5;
-
-  pdf.setFont("helvetica", "normal");
-  pdf.text("SPARTAN DE CHILE LTDA.", firmaX, firmaY, { align: "right" });
-  firmaY += 5;
-
-  const cargo = data.ejecutivo.cargo || "Ejecutivo Comercial";
-  pdf.text(cargo, firmaX, firmaY, { align: "right" });
-  firmaY += 5;
-
-  if (data.ejecutivo.celular) {
-    pdf.text(`Cel.: ${data.ejecutivo.celular}`, firmaX, firmaY, { align: "right" });
-    firmaY += 5;
-  }
-  if (data.ejecutivo.correo) {
-    pdf.text(`${data.ejecutivo.correo}`, firmaX, firmaY, { align: "right" });
-    firmaY += 5;
-  }
-
-  // ===== FOOTER BARRA AZUL (opcional, como el ejemplo) =====
-  const footerH = 12;
-  pdf.setFillColor(SPARTAN_BLUE);
-  pdf.rect(0, 297 - footerH, pageWidth, footerH, "F");
-  pdf.setTextColor("#FFFFFF");
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(9);
-  pdf.text("Ficha / cotización", pageWidth / 2, 297 - footerH / 2 + 2, { align: "center" });
-
-  // ===== OUTPUT =====
-  const filename = `Cotizacion_${data.numeroCTZ}.pdf`;
-  const base64 = pdf.output("datauristring").split(",")[1];
-
-  return { filename, base64 };
+  // === RETORNAR PDF ===
+  const filename = `Cotizacion_${data.numero}.pdf`;
+  const base64 = doc.output("datauristring").split(",")[1];
+  return { base64, filename };
 }
