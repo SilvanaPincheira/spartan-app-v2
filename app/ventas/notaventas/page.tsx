@@ -730,6 +730,32 @@ async function guardarPdfYEnviar() {
     if (lines.some((l) => l.isBloqueado)) {
       throw new Error("No puedes guardar: hay precios especiales vencidos en la tabla.");
     }
+    // 1. Validaciones básicas
+if (!clientName || !clientRut || !clientCode) {
+  throw new Error("Faltan datos del cliente (Nombre, RUT y Código Cliente).");
+}
+if (lines.length === 0) {
+  throw new Error("Agrega al menos un ítem antes de guardar.");
+}
+if (lines.some((l) => l.isBloqueado)) {
+  throw new Error("No puedes guardar: hay precios especiales vencidos en la tabla.");
+}
+
+// 🚨 NUEVA VALIDACIÓN: Descuentos superiores al 20%
+const descuentosInvalidos = lines.filter((l) => l.descuento > 20);
+if (descuentosInvalidos.length > 0) {
+  const detalle = descuentosInvalidos
+    .map(
+      (l) =>
+        `• ${l.code} (${l.name}) — Descuento ${l.descuento.toFixed(2)}%`
+    )
+    .join("\n");
+  throw new Error(
+    `❌ No se puede generar la Nota de Venta.\n\nHay ${descuentosInvalidos.length
+    } ítem(s) con descuento superior al 20%:\n\n${detalle}\n\nCorrige los precios antes de continuar.`
+  );
+}
+
 
     // 2) Construir payload y GUARDAR en Google Sheets
     const fecha = new Date().toLocaleDateString("es-CL");

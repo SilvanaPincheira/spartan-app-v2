@@ -441,6 +441,6 @@ export function generarPdfCotizacion(data: DatosPDF) {
 
   /* -------------------- 9) Output -------------------- */
   const filename = `Cotizacion_${numero}.pdf`;
-  const base64 = btoa(doc.output("datauristring").split(",")[1]);
+  const base64 = doc.output("datauristring").split(",")[1];
   return { filename, base64 };
 }
