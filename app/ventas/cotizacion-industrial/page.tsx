@@ -2,10 +2,9 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import html2canvas from "html2canvas";
-import jsPDF from "jspdf";
+import { generarPdfCotizacion } from "@/lib/utils/pdf-cotizacion";
 
-/* ========================= Helpers utilitarios ========================= */
+/* ========================= Helpers ========================= */
 function normalize(s: string) {
   return (s || "")
     .toLowerCase()
@@ -28,9 +27,6 @@ function money(n: number) {
     currency: "CLP",
     maximumFractionDigits: 0,
   });
-}
-function hoyCL() {
-  return new Date().toLocaleDateString("es-CL");
 }
 function parseCsv(text: string): Record<string, string>[] {
   const rows: string[][] = [];
@@ -92,6 +88,9 @@ function normalizeGoogleSheetUrl(url: string) {
   if (g) gid = g[1];
   return { id, gid };
 }
+function hoyCL() {
+  return new Date().toLocaleDateString("es-CL");
+}
 
 /* ========================= Tipos ========================= */
 type Client = {
@@ -99,6 +98,7 @@ type Client = {
   rut: string;
   codigo: string;
   direccion: string;
+  comuna?: string;
   contacto?: string;
   email?: string;
   telefono?: string;
@@ -107,21 +107,25 @@ type Product = { code: string; name: string; price_list: number; kilos: number }
 type Line = {
   code: string;
   name: string;
-  kilos: number;
+  kilos: number;      // solo aplica a PT
   qty: number;
-  priceBase: number;
-  precioVenta: number; // $ por kg (PT) o $ unitario (resto)
+  priceBase: number;  // referencia
+  precioVenta: number; // $/kg si PT, $ unit si no-PT
   total: number;
 };
 
 /* ========================= Componente ========================= */
 export default function CotizacionPage() {
-  /* ---- Cliente ---- */
+  /* ---- Modo cliente ---- */
+  const [tipoCliente, setTipoCliente] = useState<"activo" | "nuevo">("activo");
+
+  /* ---- Datos cliente ---- */
   const [clients, setClients] = useState<Client[]>([]);
   const [clienteNombre, setClienteNombre] = useState("");
   const [clienteRut, setClienteRut] = useState("");
   const [clienteCodigo, setClienteCodigo] = useState("");
   const [clienteDireccion, setClienteDireccion] = useState("");
+  const [clienteComuna, setClienteComuna] = useState("");
   const [clienteContacto, setClienteContacto] = useState("");
   const [emailCliente, setEmailCliente] = useState("");
 
@@ -159,12 +163,11 @@ export default function CotizacionPage() {
     setNumeroCTZ(generarNumeroCTZ());
   }, []);
 
-  /* ---- Carga de clientes (misma hoja que NV) ---- */
+  /* ---- Carga de clientes (misma fuente que NV) ---- */
   useEffect(() => {
     (async () => {
       try {
         const { id, gid } = normalizeGoogleSheetUrl(
-          // Reemplaza con tu fuente real de clientes (misma que NV)
           "https://docs.google.com/spreadsheets/d/1kF0INEtwYDXhQCBPTVhU8NQI2URKoi99Hs43DTSO02I/edit?gid=161671364#gid=161671364"
         );
         if (!id) return;
@@ -174,6 +177,7 @@ export default function CotizacionPage() {
           rut: String((r as any).RUT ?? (r as any).LicTradNum ?? "").trim(),
           codigo: String((r as any).CardCode ?? "").trim(),
           direccion: String((r as any)["Dirección Despacho"] ?? (r as any)["Direccion Despacho"] ?? (r as any).Address ?? "").trim(),
+          comuna: String((r as any)["Comuna"] ?? "").trim(),
           contacto: String((r as any)["Contacto"] ?? "").trim(),
           email: String((r as any)["Email"] ?? "").trim(),
           telefono: String((r as any)["Telefono"] ?? "").trim(),
@@ -185,7 +189,7 @@ export default function CotizacionPage() {
     })();
   }, []);
 
-  /* ---- Carga de productos (misma hoja que NV) ---- */
+  /* ---- Carga de productos (misma fuente que NV) ---- */
   useEffect(() => {
     (async () => {
       try {
@@ -207,32 +211,39 @@ export default function CotizacionPage() {
     })();
   }, []);
 
-  /* ---- Eventos cliente ---- */
+  /* ---- Eventos cliente (solo en modo activo autocompleta y bloquea) ---- */
   function onClienteNombre(val: string) {
     setClienteNombre(val);
-    const row = clients.find((c) => normalize(c.nombre) === normalize(val));
-    if (row) {
-      setClienteRut(row.rut || "");
-      setClienteCodigo("");
-      setClienteDireccion(row.direccion || "");
-      setClienteContacto(row.contacto || "");
-      setEmailCliente(row.email || "");
-    } else {
-      setClienteRut("");
-      setClienteCodigo("");
-      setClienteDireccion("");
-      setClienteContacto("");
-      setEmailCliente("");
+    if (tipoCliente === "activo") {
+      const row = clients.find((c) => normalize(c.nombre) === normalize(val));
+      if (row) {
+        setClienteRut(row.rut || "");
+        setClienteCodigo("");
+        setClienteDireccion(row.direccion || "");
+        setClienteComuna(row.comuna || "");
+        setClienteContacto(row.contacto || "");
+        setEmailCliente(row.email || "");
+      } else {
+        setClienteRut("");
+        setClienteCodigo("");
+        setClienteDireccion("");
+        setClienteComuna("");
+        setClienteContacto("");
+        setEmailCliente("");
+      }
     }
   }
   function onClienteCodigo(val: string) {
     setClienteCodigo(val);
-    const row = clients.find((c) => c.codigo === val);
-    if (row) {
-      setClienteRut(row.rut || "");
-      setClienteDireccion(row.direccion || "");
-      setClienteContacto(row.contacto || "");
-      setEmailCliente(row.email || "");
+    if (tipoCliente === "activo") {
+      const row = clients.find((c) => c.codigo === val);
+      if (row) {
+        setClienteRut(row.rut || "");
+        setClienteDireccion(row.direccion || "");
+        setClienteComuna(row.comuna || "");
+        setClienteContacto(row.contacto || "");
+        setEmailCliente(row.email || "");
+      }
     }
   }
 
@@ -260,7 +271,7 @@ export default function CotizacionPage() {
         name: prod.name,
         kilos: prod.kilos || 1,
         priceBase: prod.price_list || 0,
-        precioVenta: prod.price_list || 0,
+        precioVenta: prod.price_list || 0, // default editable
       };
       n[i] = computeLine(row);
       return n;
@@ -272,7 +283,6 @@ export default function CotizacionPage() {
       const current = n[i];
       if (!current) return old;
       const row: Line = { ...current };
-
       if (field === "precioVenta") {
         row.precioVenta = value === "" || value === undefined ? 0 : Math.round(num(value));
       } else {
@@ -286,8 +296,6 @@ export default function CotizacionPage() {
       return n;
     });
   }
-
-  // Regla PT = presentación, otros = unitario
   function computeLine(row: Line): Line {
     const out = { ...row };
     const esPT = (out.code || "").toUpperCase().startsWith("PT");
@@ -304,39 +312,28 @@ export default function CotizacionPage() {
   const iva = Math.round(subtotal * 0.19);
   const total = subtotal + iva;
 
-  /* ---- PDF A4 desde #printArea ---- */
-  async function crearYDescargarPdfDesdePrintArea(): Promise<{ filename: string; base64: string }> {
-    const input = document.getElementById("printArea") as HTMLElement | null;
-    if (!input) throw new Error("No se encontró #printArea");
-    const canvas = await html2canvas(input, { scale: 2 });
-    const imgData = canvas.toDataURL("image/jpeg", 0.92);
-
-    const pdf = new jsPDF("p", "mm", "a4");
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
-    const imgWidth = pageWidth;
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
-
-    let heightLeft = imgHeight;
-    let position = 0;
-
-    pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight, undefined, "FAST");
-    heightLeft -= pageHeight;
-
-    while (heightLeft > 0) {
-      position = heightLeft - imgHeight;
-      pdf.addPage();
-      pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight, undefined, "FAST");
-      heightLeft -= pageHeight;
-    }
-
-    const filename = `Cotizacion_${numeroCTZ || "sin_numero"}.pdf`;
-    pdf.save(filename);
-    const base64 = pdf.output("datauristring").split(",")[1];
-    return { filename, base64 };
+  /* ---- Acciones ---- */
+  function limpiar() {
+    setTipoCliente("activo");
+    setClienteNombre("");
+    setClienteRut("");
+    setClienteCodigo("");
+    setClienteDireccion("");
+    setClienteComuna("");
+    setClienteContacto("");
+    setEmailCliente("");
+    setEjecutivoNombre("");
+    setEmailEjecutivo("");
+    setCelularEjecutivo("");
+    setValidez("10 días");
+    setFormaPago("Contado - Transferencia");
+    setPlazoEntrega("A convenir");
+    setObservaciones("");
+    setLines([]);
+    setInfoMsg("");
+    setErrorMsg("");
   }
 
-  /* ---- Guardar + PDF + Email ---- */
   async function guardarPdfYEnviar() {
     if (procesando) return;
     setProcesando(true);
@@ -344,21 +341,23 @@ export default function CotizacionPage() {
     setInfoMsg("");
 
     try {
-      if (!clienteNombre || !clienteRut) throw new Error("Faltan datos del cliente (Nombre y RUT).");
-      if (!emailCliente) throw new Error("Falta correo del cliente.");
-      if (!emailEjecutivo) throw new Error("Falta correo del ejecutivo.");
-      if (lines.length === 0) throw new Error("Agrega al menos un ítem a la cotización.");
+      // Validaciones mínimas
+      if (!clienteNombre) throw new Error("Falta el nombre del cliente.");
+      if (!emailCliente) throw new Error("Falta el email del cliente.");
+      if (!emailEjecutivo) throw new Error("Falta el email del ejecutivo.");
+      if (lines.length === 0) throw new Error("Agrega al menos un ítem.");
 
-      // 1) Guardar en Google Sheets (pestaña "Cotizaciones") con el MISMO endpoint
       const fecha = hoyCL();
-      const payload = lines.map((item) => ({
-        tipo: "Cotizacion",              // 👈 para que tu Apps Script rote a la pestaña "Cotizaciones"
+
+      // Payload para Sheets (una fila por ítem)
+      const datos = lines.map((item) => ({
         numeroCTZ,
         fecha,
         cliente: clienteNombre,
         rut: clienteRut,
         codigoCliente: clienteCodigo,
         direccion: clienteDireccion,
+        comuna: clienteComuna,
         contacto: clienteContacto,
         emailCliente,
         ejecutivo: ejecutivoNombre,
@@ -366,7 +365,7 @@ export default function CotizacionPage() {
         celularEjecutivo,
         validez,
         formaPago,
-        plazoEntrega,
+        entrega: plazoEntrega,
         observaciones,
         subtotal,
         iva,
@@ -379,28 +378,65 @@ export default function CotizacionPage() {
         totalItem: Math.round(item.total || 0),
       }));
 
+      // 1) Guardar en Sheets (pestaña "Cotizaciones")
       const resSave = await fetch("/api/save-to-sheets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ tipo: "Cotizacion", datos }),
       });
-      if (!resSave.ok) throw new Error("Error al guardar en Google Sheets (Cotizaciones).");
-      const json = await resSave.json();
-      const rows = Number(json?.rows ?? payload.length) || payload.length;
+      if (!resSave.ok) throw new Error("Error al guardar en Google Sheets.");
+      const saved = await resSave.json();
+      const rows = Number(saved?.rows ?? datos.length) || datos.length;
       setInfoMsg(`✅ Cotización guardada con ${rows} ítem(s) en "Cotizaciones".`);
 
-      // 2) PDF
-      const { filename, base64 } = await crearYDescargarPdfDesdePrintArea();
+      // 2) Generar PDF corporativo (idéntico al ejemplo)
+      const { filename, base64 } = await generarPdfCotizacion({
+        numeroCTZ,
+        fecha: `Santiago, ${new Date().toLocaleDateString("es-CL", {
+          day: "2-digit",
+          month: "long",
+          year: "numeric",
+        })}`,
+        cliente: {
+          nombre: clienteNombre,
+          rut: clienteRut,
+          codigo: clienteCodigo,
+          direccion: clienteDireccion,
+          comuna: clienteComuna,
+          contacto: clienteContacto,
+          emailCliente,
+        },
+        productos: lines.map((r) => ({
+          codigo: r.code,
+          descripcion: r.name,
+          cantidad: r.qty,
+          precioUnitario: r.precioVenta, // si PT, ya está considerado en total (presentación)
+          total: r.total,
+        })),
+        validez,
+        formaPago,
+        entrega: plazoEntrega,
+        observaciones,
+        subtotal,
+        iva,
+        total,
+        ejecutivo: {
+          nombre: ejecutivoNombre,
+          correo: emailEjecutivo,
+          celular: celularEjecutivo,
+          cargo: "Ejecutivo Comercial",
+        },
+        ciudad: "Santiago",
+      });
 
-      // 3) Email: cliente + ejecutivo, CC Patricia
+      // 3) Enviar email (cliente + ejecutivo, CC Patricia)
       const subject = `Cotización ${numeroCTZ} — ${clienteNombre}`;
-      const totalCLP = money(total);
       const html = `
         <p>Estimado(a),</p>
         <p>Adjuntamos la <b>Cotización ${numeroCTZ}</b> para <b>${clienteNombre}</b>.</p>
         <ul>
-          <li><b>RUT:</b> ${clienteRut}</li>
-          <li><b>Total (con IVA):</b> ${totalCLP}</li>
+          <li><b>RUT:</b> ${clienteRut || "-"}</li>
+          <li><b>Total (con IVA):</b> ${money(total)}</li>
           <li><b>Validez:</b> ${validez}</li>
           <li><b>Forma de pago:</b> ${formaPago}</li>
           <li><b>Plazo de entrega:</b> ${plazoEntrega}</li>
@@ -426,7 +462,7 @@ export default function CotizacionPage() {
           toEjecutivo: emailEjecutivo,
           ccFija: "patricia.acuna@spartan.cl",
           attachments: [{ filename, content: base64 }],
-          replyTo: emailEjecutivo || undefined,
+          replyTo: emailEjecutivo,
           fromName: `Spartan App — ${numeroCTZ}`,
         }),
       });
@@ -435,7 +471,7 @@ export default function CotizacionPage() {
 
       alert("✅ Guardado en Sheets, PDF generado y correo enviado a Cliente + Ejecutivo (CC Patricia).");
     } catch (e: any) {
-      console.error("❌ Error en guardarPdfYEnviar:", e);
+      console.error("❌ Error:", e);
       setErrorMsg(e?.message || "Ocurrió un error inesperado.");
       alert(`❌ No se pudo completar el proceso.\n\nDetalles: ${e?.message || "Error inesperado"}`);
     } finally {
@@ -443,29 +479,9 @@ export default function CotizacionPage() {
     }
   }
 
-  function imprimir() {
-    window.print();
-  }
-  function limpiar() {
-    setClienteNombre("");
-    setClienteRut("");
-    setClienteCodigo("");
-    setClienteDireccion("");
-    setClienteContacto("");
-    setEmailCliente("");
-    setEjecutivoNombre("");
-    setEmailEjecutivo("");
-    setCelularEjecutivo("");
-    setValidez("10 días");
-    setFormaPago("Contado - Transferencia");
-    setPlazoEntrega("A convenir");
-    setObservaciones("");
-    setLines([]);
-    setInfoMsg("");
-    setErrorMsg("");
-  }
-
   /* ========================= UI ========================= */
+  const readOnlyActivos = tipoCliente === "activo";
+
   return (
     <>
       <div id="printArea" className="min-h-screen bg-white p-6 text-[12px]">
@@ -495,54 +511,138 @@ export default function CotizacionPage() {
           </div>
         )}
 
+        {/* Selector tipo cliente */}
+        <section className="bg-white shadow p-4 rounded mb-4">
+          <div className="flex items-center gap-3">
+            <span className="font-semibold text-[#2B6CFF]">Tipo de cliente:</span>
+            <select
+              value={tipoCliente}
+              onChange={(e) => {
+                const v = e.target.value as "activo" | "nuevo";
+                setTipoCliente(v);
+                // al cambiar a "nuevo", no autocompletar
+                if (v === "nuevo") {
+                  setClienteCodigo("");
+                  setClienteRut("");
+                  setClienteDireccion("");
+                  setClienteComuna("");
+                  setClienteContacto("");
+                  // mantenemos el nombre/email si ya los escribió
+                }
+              }}
+              className="border p-2 rounded w-52"
+            >
+              <option value="activo">🧾 Cliente Activo</option>
+              <option value="nuevo">🆕 Cliente Nuevo</option>
+            </select>
+          </div>
+        </section>
+
         {/* Cliente */}
         <section className="bg-white shadow p-4 rounded mb-4">
-          <h2 className="font-semibold text-[#2B6CFF] mb-2">Cliente</h2>
+          <h2 className="font-semibold text-[#2B6CFF] mb-2">Datos del Cliente</h2>
           <div className="grid grid-cols-2 gap-2 text-[12px] print:grid-cols-3">
             <label className="flex flex-col gap-1">
               <span className="font-medium">Nombre</span>
-              <input
-                className="w-full border rounded px-2 py-1"
-                value={clienteNombre}
-                onChange={(e) => onClienteNombre(e.target.value)}
-                list="clientesList"
-              />
-              <datalist id="clientesList">
-                {clients.map((c, i) => <option key={`${c.codigo}-${i}`} value={c.nombre} />)}
-              </datalist>
+              {tipoCliente === "activo" ? (
+                <>
+                  <input
+                    className="w-full border rounded px-2 py-1"
+                    value={clienteNombre}
+                    onChange={(e) => onClienteNombre(e.target.value)}
+                    list="clientesList"
+                  />
+                  <datalist id="clientesList">
+                    {clients.map((c, i) => <option key={`${c.codigo}-${i}`} value={c.nombre} />)}
+                  </datalist>
+                </>
+              ) : (
+                <input
+                  className="w-full border rounded px-2 py-1"
+                  value={clienteNombre}
+                  onChange={(e) => setClienteNombre(e.target.value)}
+                  placeholder="Razón Social / Nombre"
+                />
+              )}
             </label>
+
             <label className="flex flex-col gap-1">
               <span className="font-medium">RUT</span>
-              <input className="w-full border rounded px-2 py-1" value={clienteRut} readOnly />
+              <input
+                className="w-full border rounded px-2 py-1"
+                value={clienteRut}
+                readOnly={readOnlyActivos}
+                onChange={(e) => setClienteRut(e.target.value)}
+                placeholder={readOnlyActivos ? "" : "Ej: 12.345.678-9"}
+              />
             </label>
+
             <label className="flex flex-col gap-1">
               <span className="font-medium">Código Cliente</span>
-              <select
-                className="w-full border rounded px-2 py-1"
-                value={clienteCodigo}
-                onChange={(e) => onClienteCodigo(e.target.value)}
-              >
-                <option value="">Seleccione…</option>
-                {clients
-                  .filter((c) => normalize(c.nombre) === normalize(clienteNombre))
-                  .map((c) => (
-                    <option key={c.codigo} value={c.codigo}>
-                      {c.codigo} — {c.direccion}
-                    </option>
-                  ))}
-              </select>
+              {tipoCliente === "activo" ? (
+                <select
+                  className="w-full border rounded px-2 py-1"
+                  value={clienteCodigo}
+                  onChange={(e) => onClienteCodigo(e.target.value)}
+                >
+                  <option value="">Seleccione…</option>
+                  {clients
+                    .filter((c) => normalize(c.nombre) === normalize(clienteNombre))
+                    .map((c) => (
+                      <option key={c.codigo} value={c.codigo}>
+                        {c.codigo} — {c.direccion}
+                      </option>
+                    ))}
+                </select>
+              ) : (
+                <input
+                  className="w-full border rounded px-2 py-1"
+                  value={clienteCodigo}
+                  onChange={(e) => setClienteCodigo(e.target.value)}
+                  placeholder="(Opcional)"
+                />
+              )}
             </label>
+
             <label className="flex flex-col gap-1 print:col-span-2">
               <span className="font-medium">Dirección</span>
-              <input className="w-full border rounded px-2 py-1" value={clienteDireccion} readOnly />
+              <input
+                className="w-full border rounded px-2 py-1"
+                value={clienteDireccion}
+                readOnly={readOnlyActivos}
+                onChange={(e) => setClienteDireccion(e.target.value)}
+              />
             </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="font-medium">Comuna</span>
+              <input
+                className="w-full border rounded px-2 py-1"
+                value={clienteComuna}
+                readOnly={readOnlyActivos}
+                onChange={(e) => setClienteComuna(e.target.value)}
+              />
+            </label>
+
             <label className="flex flex-col gap-1">
               <span className="font-medium">Contacto</span>
-              <input className="w-full border rounded px-2 py-1" value={clienteContacto} onChange={(e) => setClienteContacto(e.target.value)} />
+              <input
+                className="w-full border rounded px-2 py-1"
+                value={clienteContacto}
+                readOnly={false}
+                onChange={(e) => setClienteContacto(e.target.value)}
+              />
             </label>
+
             <label className="flex flex-col gap-1">
               <span className="font-medium">Email cliente</span>
-              <input type="email" className="w-full border rounded px-2 py-1" value={emailCliente} onChange={(e) => setEmailCliente(e.target.value)} />
+              <input
+                type="email"
+                className="w-full border rounded px-2 py-1"
+                value={emailCliente}
+                readOnly={false}
+                onChange={(e) => setEmailCliente(e.target.value)}
+              />
             </label>
           </div>
         </section>
@@ -741,7 +841,6 @@ export default function CotizacionPage() {
 
       {/* Botones */}
       <div className="flex flex-wrap gap-2 print:hidden px-6 pb-8">
-        <button className="bg-zinc-200 px-3 py-1 rounded" onClick={imprimir}>🖨️ Imprimir / PDF</button>
         <button
           className={`px-3 py-1 rounded text-white ${procesando ? "bg-zinc-400" : "bg-emerald-600 hover:bg-emerald-700"}`}
           onClick={guardarPdfYEnviar}
