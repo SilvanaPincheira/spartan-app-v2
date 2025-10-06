@@ -550,9 +550,12 @@ function applyEspecial(row: Line): Line {
       const n = [...old];
       const current = n[i];
       if (!current) return old;
-
+  
       const row: Line = { ...current };
-
+  
+      // ===========================================================
+      // Caso: se modifica el precio de venta
+      // ===========================================================
       if (field === "precioVenta") {
         if (value === "" || value === undefined) {
           row.precioVenta = 0;
@@ -561,49 +564,55 @@ function applyEspecial(row: Line): Line {
           const pv = Math.round(num(value));
           const base = precioBaseSegunLista(row);
           const descCalc = base > 0 ? ((base - pv) / base) * 100 : 0;
-
+  
+          // 🚫 Si el precio ingresado genera descuento > 20%, no permitirlo
           if (descCalc > 20) {
-            if (typeof window !== "undefined") {
-              alert(
-                `❌ Precio inferior al esperado.\n\n` +
-                  `Base: ${base.toLocaleString("es-CL", {
-                    style: "currency",
-                    currency: "CLP",
-                    minimumFractionDigits: 0,
-                  })}\n` +
-                  `Digitado: ${pv.toLocaleString("es-CL", {
-                    style: "currency",
-                    currency: "CLP",
-                    minimumFractionDigits: 0,
-                  })}\n\n` +
-                  `El precio no puede ser menor al 80% del base.`
-              );
-            }
-            return old;
+            alert(
+              `❌ Precio inferior al 80% del precio base.\n\n` +
+                `Precio base: ${money(base)}\n` +
+                `Digitado: ${money(pv)}\n\n` +
+                `El descuento calculado sería ${descCalc.toFixed(
+                  2
+                )}%, lo que supera el máximo permitido (20%).\n\n` +
+                `El precio será restablecido al valor base.`
+            );
+            row.precioVenta = Math.round(base);
+            row.descuento = 0;
+          } else {
+            row.precioVenta = pv;
+            row.descuento = Math.round(clamp(descCalc, -20, 20) * 100) / 100;
           }
-
-          row.precioVenta = pv;
-          row.descuento = Math.round(clamp(descCalc, -20, 20) * 100) / 100;
         }
-      } else {
+      }
+  
+      // ===========================================================
+      // Caso: cualquier otro campo (kg, cantidad, descuento, etc.)
+      // ===========================================================
+      else {
         (row as any)[field] = value as any;
         row.kilos = num(row.kilos) || 1;
         row.qty = num(row.qty) || 0;
         row.priceBase = num(row.priceBase) || 0;
         row.especialPrice = num(row.especialPrice) || 0;
-        row.descuento = row.isEspecial ? 0 : Math.round(clamp(num(row.descuento), -20, 20) * 100) / 100;
-
+  
+        // Limita descuento manual dentro del rango permitido
+        row.descuento = row.isEspecial
+          ? 0
+          : Math.round(clamp(num(row.descuento), -20, 20) * 100) / 100;
+  
+        // Si cambia el % descuento, recalcula precio de venta
         if (field === "descuento") {
           const base = precioBaseSegunLista(row);
           row.precioVenta = Math.round(base * (1 - row.descuento / 100));
         }
       }
-
+  
+      // Recalcular totales
       n[i] = computeLine(row);
       return n;
     });
   }
-
+  
   // Recalcula al cambiar lista
   useEffect(() => {
     setLines((old) => old.map((r) => computeLine(r)));
@@ -720,17 +729,7 @@ async function guardarPdfYEnviar() {
   setSaveMsg("");
 
   try {
-    // 1) Validaciones básicas
-    if (!clientName || !clientRut || !clientCode) {
-      throw new Error("Faltan datos del cliente (Nombre, RUT y Código Cliente).");
-    }
-    if (lines.length === 0) {
-      throw new Error("Agrega al menos un ítem antes de guardar.");
-    }
-    if (lines.some((l) => l.isBloqueado)) {
-      throw new Error("No puedes guardar: hay precios especiales vencidos en la tabla.");
-    }
-    // 1. Validaciones básicas
+       // 1. Validaciones básicas
 if (!clientName || !clientRut || !clientCode) {
   throw new Error("Faltan datos del cliente (Nombre, RUT y Código Cliente).");
 }
