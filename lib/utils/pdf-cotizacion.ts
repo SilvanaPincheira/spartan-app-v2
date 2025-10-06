@@ -221,17 +221,25 @@ export function generarPdfCotizacion(data: DatosPDF) {
   y += mm(4);
 
   /* ---------- TABLA ---------- */
-  const showTotalCol = opts.mostrarTotalColumna;
-  const widths = showTotalCol
-    ? [mm(32), mm(76), mm(30), mm(30), mm(30)]
-    : [mm(32), mm(100), mm(30), mm(35)];
+  /* ---------- TABLA (ajustada a A4) ---------- */
+const showTotalCol = opts.mostrarTotalColumna;
 
-  const headers = showTotalCol
-    ? ["CÓDIGO", "PRODUCTO / DESCRIPCIÓN", "CANTIDAD SOLICITADA", "PRECIO NETO", "TOTAL S/IVA"]
-    : ["CÓDIGO", "PRODUCTO / DESCRIPCIÓN", "CANTIDAD", "PRECIO NETO"];
+// 🔹 Ajustar proporciones (suman 180 mm ≈ ancho útil A4)
+const widths = showTotalCol
+  ? [mm(25), mm(85), mm(25), mm(22), mm(23)]
+  : [mm(25), mm(100), mm(28), mm(27)];
 
-  y = ensureSpace(doc, y, mm(10));
-  drawTableHeader(doc, y, marginX, widths, headers);
+const headers = showTotalCol
+  ? ["CÓDIGO", "PRODUCTO / DESCRIPCIÓN", "CANTIDAD", "PRECIO NETO", "TOTAL S/IVA"]
+  : ["CÓDIGO", "PRODUCTO / DESCRIPCIÓN", "CANTIDAD", "PRECIO NETO"];
+
+// 🔹 Reducir tamaño del encabezado
+doc.setFontSize(9);
+y = ensureSpace(doc, y, mm(10));
+drawTableHeader(doc, y, marginX, widths, headers);
+y += mm(7);
+doc.setFontSize(8.5);
+
   y += mm(8);
   doc.setFontSize(9);
 
