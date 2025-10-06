@@ -400,11 +400,9 @@ export default function CotizacionPage() {
         cliente: {
           nombre: clienteNombre,
           rut: clienteRut,
-          codigo: clienteCodigo,
           direccion: clienteDireccion,
           comuna: clienteComuna,
-          contacto: clienteContacto,
-          emailCliente,
+          email: emailCliente,
         },
         productos: lines.map((r) => ({
           codigo: r.code,
@@ -422,12 +420,12 @@ export default function CotizacionPage() {
         total,
         ejecutivo: {
           nombre: ejecutivoNombre,
-          correo: emailEjecutivo,
+          email: emailEjecutivo,
           celular: celularEjecutivo,
-          cargo: "Ejecutivo Comercial",
+          
         },
-        ciudad: "Santiago",
-      });
+        
+    });
 
       // 3) Enviar email (cliente + ejecutivo, CC Patricia)
       const subject = `Cotización ${numeroCTZ} — ${clienteNombre}`;
