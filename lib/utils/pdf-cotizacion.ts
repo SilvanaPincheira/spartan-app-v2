@@ -230,8 +230,8 @@ const widths = showTotalCol
   : [mm(25), mm(100), mm(28), mm(27)];
 
 const headers = showTotalCol
-  ? ["CÓDIGO", "PRODUCTO / DESCRIPCIÓN", "CANTIDAD", "PRECIO NETO", "TOTAL S/IVA"]
-  : ["CÓDIGO", "PRODUCTO / DESCRIPCIÓN", "CANTIDAD", "PRECIO NETO"];
+  ? ["Código", "Producto / Descripción", "Cantidad", "Precio Neto", "Total S/IVA"]
+  : ["Código", "Producto / Descripción", "Cantidad", "Precio Neto"];
 
 // 🔹 Reducir tamaño del encabezado
 doc.setFontSize(9);
