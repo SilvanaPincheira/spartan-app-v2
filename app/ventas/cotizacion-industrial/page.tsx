@@ -391,7 +391,7 @@ export default function CotizacionPage() {
 
       // 2) Generar PDF corporativo (idéntico al ejemplo)
       const { filename, base64 } = await generarPdfCotizacion({
-        numeroCTZ,
+        numero: numeroCTZ,
         fecha: `Santiago, ${new Date().toLocaleDateString("es-CL", {
           day: "2-digit",
           month: "long",
@@ -419,11 +419,12 @@ export default function CotizacionPage() {
         iva,
         total,
         ejecutivo: {
-          nombre: ejecutivoNombre,
-          email: emailEjecutivo,
-          celular: celularEjecutivo,
+            nombre: ejecutivoNombre,
+            correo: emailEjecutivo,
+            celular: celularEjecutivo,
+            cargo:""
+          },
           
-        },
         
     });
 
