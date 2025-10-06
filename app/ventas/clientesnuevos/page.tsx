@@ -82,9 +82,10 @@ export default function ClientesNuevosPage() {
     setForm((prev) => ({ ...prev, [name]: value }));
   }
 
+  // 🔹 Guardar y enviar correo automáticamente
   async function handleGuardar() {
     try {
-      setMensaje("⏳ Guardando...");
+      setMensaje("⏳ Guardando cliente en Google Sheets...");
       const res = await fetch("/api/save-client", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -92,8 +93,26 @@ export default function ClientesNuevosPage() {
       });
 
       const json = await res.json();
+
       if (json.ok || json.status === "ok") {
-        setMensaje("✅ Cliente guardado en Google Sheets");
+        setMensaje("📨 Enviando correo a cobranzas@sac...");
+        
+        // Envío automático de correo
+        const sendRes = await fetch("/api/send-client", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(form),
+        });
+
+        const sendJson = await sendRes.json();
+
+        if (sendJson.ok) {
+          setMensaje("✅ Cliente guardado y correo enviado correctamente.");
+        } else {
+          setMensaje("⚠️ Cliente guardado, pero no se pudo enviar el correo.");
+        }
+
+        // Reset del formulario
         setForm({
           razonSocial: "",
           rut: "",
@@ -130,7 +149,7 @@ export default function ClientesNuevosPage() {
           comentarios: "",
         });
       } else {
-        setMensaje("❌ Error: " + (json.error || "No se pudo guardar"));
+        setMensaje("❌ Error al guardar: " + (json.error || "No se pudo guardar"));
       }
     } catch (e: any) {
       setMensaje("❌ Error al conectar: " + e.message);
@@ -142,7 +161,17 @@ export default function ClientesNuevosPage() {
       <h1 className="text-2xl font-bold text-[#2B6CFF] mb-6">👤 Ficha de Cliente Nuevo</h1>
 
       {mensaje && (
-        <div className="mb-4 text-sm">
+        <div
+          className={`mb-4 text-sm p-3 rounded ${
+            mensaje.startsWith("✅")
+              ? "bg-green-100 text-green-700"
+              : mensaje.startsWith("⚠️")
+              ? "bg-yellow-100 text-yellow-700"
+              : mensaje.startsWith("❌")
+              ? "bg-red-100 text-red-700"
+              : "bg-blue-100 text-blue-700"
+          }`}
+        >
           {mensaje}
         </div>
       )}
@@ -212,41 +241,43 @@ export default function ClientesNuevosPage() {
           💾 Guardar
         </button>
         <button
-          onClick={() => setForm({
-            razonSocial: "",
-            rut: "",
-            nombreFantasia: "",
-            giro: "",
-            direccion: "",
-            comuna: "",
-            region: "",
-            telefono: "",
-            email: "",
-            contactoComercial: "",
-            emailComercial: "",
-            telefonoComercial: "",
-            contactoRecepcion: "",
-            emailRecepcion: "",
-            telefonoRecepcion: "",
-            contactoFinanzas: "",
-            emailFinanzas: "",
-            telefonoFinanzas: "",
-            contactoPagos: "",
-            emailPagos: "",
-            telefonoPagos: "",
-            direccionDespacho: "",
-            ciudad: "",
-            tipoDocumento: "",
-            banco: "",
-            cuentaCorriente: "",
-            representanteLegal: "",
-            contribuyenteElectronico: "",
-            rubro: "",
-            condicionPago: "",
-            cobrador: "",
-            analisisCredito: "",
-            comentarios: "",
-          })}
+          onClick={() =>
+            setForm({
+              razonSocial: "",
+              rut: "",
+              nombreFantasia: "",
+              giro: "",
+              direccion: "",
+              comuna: "",
+              region: "",
+              telefono: "",
+              email: "",
+              contactoComercial: "",
+              emailComercial: "",
+              telefonoComercial: "",
+              contactoRecepcion: "",
+              emailRecepcion: "",
+              telefonoRecepcion: "",
+              contactoFinanzas: "",
+              emailFinanzas: "",
+              telefonoFinanzas: "",
+              contactoPagos: "",
+              emailPagos: "",
+              telefonoPagos: "",
+              direccionDespacho: "",
+              ciudad: "",
+              tipoDocumento: "",
+              banco: "",
+              cuentaCorriente: "",
+              representanteLegal: "",
+              contribuyenteElectronico: "",
+              rubro: "",
+              condicionPago: "",
+              cobrador: "",
+              analisisCredito: "",
+              comentarios: "",
+            })
+          }
           className="bg-zinc-300 px-4 py-2 rounded hover:bg-zinc-400"
         >
           🧹 Limpiar
