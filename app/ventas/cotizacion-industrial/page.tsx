@@ -110,7 +110,7 @@ type Line = {
   kilos: number;      // solo aplica a PT
   qty: number;
   priceBase: number;  // referencia
-  precioVenta: number; // $/kg si PT, $ unit si no-PT
+  precioVenta: number; // $/kg si PT (modo kilo), $/presentación si PT (modo presentación), $ unit si no-PT
   total: number;
 };
 
@@ -118,6 +118,31 @@ type Line = {
 export default function CotizacionPage() {
   /* ---- Modo cliente ---- */
   const [tipoCliente, setTipoCliente] = useState<"activo" | "nuevo">("activo");
+
+  /* ---- Preferencias dinámicas (con memoria) ---- */
+  const [modoPrecio, setModoPrecio] = useState<"kilo" | "presentacion">("kilo");
+  const [mostrarTotales, setMostrarTotales] = useState<boolean>(true);
+  const [mostrarIva, setMostrarIva] = useState<boolean>(true);
+
+  useEffect(() => {
+    // Cargar preferencias
+    try {
+      const mp = window.localStorage.getItem("ctz.pref.modoPrecio") as "kilo" | "presentacion" | null;
+      const mt = window.localStorage.getItem("ctz.pref.mostrarTotales");
+      const mi = window.localStorage.getItem("ctz.pref.mostrarIva");
+      if (mp === "kilo" || mp === "presentacion") setModoPrecio(mp);
+      if (mt !== null) setMostrarTotales(mt === "1");
+      if (mi !== null) setMostrarIva(mi === "1");
+    } catch {}
+  }, []);
+  useEffect(() => {
+    // Guardar preferencias
+    try {
+      window.localStorage.setItem("ctz.pref.modoPrecio", modoPrecio);
+      window.localStorage.setItem("ctz.pref.mostrarTotales", mostrarTotales ? "1" : "0");
+      window.localStorage.setItem("ctz.pref.mostrarIva", mostrarIva ? "1" : "0");
+    } catch {}
+  }, [modoPrecio, mostrarTotales, mostrarIva]);
 
   /* ---- Datos cliente ---- */
   const [clients, setClients] = useState<Client[]>([]);
@@ -271,7 +296,7 @@ export default function CotizacionPage() {
         name: prod.name,
         kilos: prod.kilos || 1,
         priceBase: prod.price_list || 0,
-        precioVenta: prod.price_list || 0, // default editable
+        precioVenta: prod.price_list || 0, // editable
       };
       n[i] = computeLine(row);
       return n;
@@ -299,7 +324,18 @@ export default function CotizacionPage() {
   function computeLine(row: Line): Line {
     const out = { ...row };
     const esPT = (out.code || "").toUpperCase().startsWith("PT");
-    const precioPresentacion = esPT ? (out.precioVenta || 0) * (out.kilos || 1) : (out.precioVenta || 0);
+
+    // 👇 dinámica por modo
+    let precioPresentacion: number;
+    if (esPT) {
+      precioPresentacion =
+        modoPrecio === "kilo"
+          ? (out.precioVenta || 0) * (out.kilos || 1) // $/kg × kg
+          : (out.precioVenta || 0);                   // $ por presentación
+    } else {
+      precioPresentacion = (out.precioVenta || 0);    // $ unitario
+    }
+
     out.total = Math.round(precioPresentacion) * (out.qty || 0);
     return out;
   }
@@ -374,8 +410,12 @@ export default function CotizacionPage() {
         descripcion: item.name,
         kilos: item.kilos,
         cantidad: item.qty,
+        // guardamos lo digitado según el modo seleccionado
         precioUnitarioPresentacion: Math.round(item.precioVenta || 0),
         totalItem: Math.round(item.total || 0),
+        modoPrecio,                 // 👈 útil para auditar
+        mostrarTotales: mostrarTotales ? "Sí" : "No",
+        mostrarIva: mostrarIva ? "Sí" : "No",
       }));
 
       // 1) Guardar en Sheets (pestaña "Cotizaciones")
@@ -389,7 +429,7 @@ export default function CotizacionPage() {
       const rows = Number(saved?.rows ?? datos.length) || datos.length;
       setInfoMsg(`✅ Cotización guardada con ${rows} ítem(s) en "Cotizaciones".`);
 
-      // 2) Generar PDF corporativo (idéntico al ejemplo)
+      // 2) Generar PDF corporativo
       const { filename, base64 } = await generarPdfCotizacion({
         numero: numeroCTZ,
         fecha: `Santiago, ${new Date().toLocaleDateString("es-CL", {
@@ -408,7 +448,8 @@ export default function CotizacionPage() {
           codigo: r.code,
           descripcion: r.name,
           cantidad: r.qty,
-          precioUnitario: r.precioVenta, // si PT, ya está considerado en total (presentación)
+          // en el PDF, el total de la fila ya viene calculado con la dinámica
+          precioUnitario: r.precioVenta,
           total: r.total,
         })),
         validez,
@@ -418,27 +459,38 @@ export default function CotizacionPage() {
         subtotal,
         iva,
         total,
+        opciones: {
+          modoPrecio,           // "kilo" | "presentacion"
+          mostrarTotales,       // true/false
+          mostrarIva,           // true/false
+        },
         ejecutivo: {
-            nombre: ejecutivoNombre,
-            correo: emailEjecutivo,
-            celular: celularEjecutivo,
-            cargo:""
-          },
-          
-        
-    });
+          nombre: ejecutivoNombre,
+          correo: emailEjecutivo,
+          celular: celularEjecutivo,
+          cargo: "",
+        },
+      });
 
       // 3) Enviar email (cliente + ejecutivo, CC Patricia)
       const subject = `Cotización ${numeroCTZ} — ${clienteNombre}`;
+      const htmlTotales = mostrarTotales
+        ? `
+          <li><b>Subtotal:</b> ${money(subtotal)}</li>
+          ${mostrarIva ? `<li><b>IVA (19%):</b> ${money(iva)}</li>` : ""}
+          ${mostrarIva ? `<li><b>Total (con IVA):</b> ${money(total)}</li>` : ""}
+        `
+        : "";
+
       const html = `
         <p>Estimado(a),</p>
         <p>Adjuntamos la <b>Cotización ${numeroCTZ}</b> para <b>${clienteNombre}</b>.</p>
         <ul>
           <li><b>RUT:</b> ${clienteRut || "-"}</li>
-          <li><b>Total (con IVA):</b> ${money(total)}</li>
           <li><b>Validez:</b> ${validez}</li>
           <li><b>Forma de pago:</b> ${formaPago}</li>
           <li><b>Plazo de entrega:</b> ${plazoEntrega}</li>
+          ${htmlTotales}
         </ul>
         ${observaciones ? `<p><b>Observaciones:</b> ${observaciones}</p>` : ""}
         <hr />
@@ -510,6 +562,44 @@ export default function CotizacionPage() {
           </div>
         )}
 
+        {/* Preferencias dinámicas */}
+        <section className="bg-white shadow p-4 rounded mb-4">
+          <h2 className="font-semibold text-[#2B6CFF] mb-2">Preferencias de Cotización</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[12px]">
+            <label className="flex items-center gap-2">
+              <span className="font-medium w-40">Modo de precio (PT):</span>
+              <select
+                className="border rounded px-2 py-1"
+                value={modoPrecio}
+                onChange={(e) => setModoPrecio(e.target.value as "kilo" | "presentacion")}
+              >
+                <option value="kilo">Por kilo (× Kg)</option>
+                <option value="presentacion">Por presentación</option>
+              </select>
+            </label>
+
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={mostrarTotales}
+                onChange={(e) => setMostrarTotales(e.target.checked)}
+              />
+              <span>Mostrar totales</span>
+            </label>
+
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={mostrarIva}
+                onChange={(e) => setMostrarIva(e.target.checked)}
+                disabled={!mostrarTotales}
+                title={!mostrarTotales ? "Activa 'Mostrar totales' primero" : ""}
+              />
+              <span>Incluir IVA (19%)</span>
+            </label>
+          </div>
+        </section>
+
         {/* Selector tipo cliente */}
         <section className="bg-white shadow p-4 rounded mb-4">
           <div className="flex items-center gap-3">
@@ -519,14 +609,12 @@ export default function CotizacionPage() {
               onChange={(e) => {
                 const v = e.target.value as "activo" | "nuevo";
                 setTipoCliente(v);
-                // al cambiar a "nuevo", no autocompletar
                 if (v === "nuevo") {
                   setClienteCodigo("");
                   setClienteRut("");
                   setClienteDireccion("");
                   setClienteComuna("");
                   setClienteContacto("");
-                  // mantenemos el nombre/email si ya los escribió
                 }
               }}
               className="border p-2 rounded w-52"
@@ -570,9 +658,9 @@ export default function CotizacionPage() {
               <input
                 className="w-full border rounded px-2 py-1"
                 value={clienteRut}
-                readOnly={readOnlyActivos}
+                readOnly={tipoCliente === "activo"}
                 onChange={(e) => setClienteRut(e.target.value)}
-                placeholder={readOnlyActivos ? "" : "Ej: 12.345.678-9"}
+                placeholder={tipoCliente === "activo" ? "" : "Ej: 12.345.678-9"}
               />
             </label>
 
@@ -608,7 +696,7 @@ export default function CotizacionPage() {
               <input
                 className="w-full border rounded px-2 py-1"
                 value={clienteDireccion}
-                readOnly={readOnlyActivos}
+                readOnly={tipoCliente === "activo"}
                 onChange={(e) => setClienteDireccion(e.target.value)}
               />
             </label>
@@ -618,7 +706,7 @@ export default function CotizacionPage() {
               <input
                 className="w-full border rounded px-2 py-1"
                 value={clienteComuna}
-                readOnly={readOnlyActivos}
+                readOnly={tipoCliente === "activo"}
                 onChange={(e) => setClienteComuna(e.target.value)}
               />
             </label>
@@ -628,7 +716,6 @@ export default function CotizacionPage() {
               <input
                 className="w-full border rounded px-2 py-1"
                 value={clienteContacto}
-                readOnly={false}
                 onChange={(e) => setClienteContacto(e.target.value)}
               />
             </label>
@@ -639,7 +726,6 @@ export default function CotizacionPage() {
                 type="email"
                 className="w-full border rounded px-2 py-1"
                 value={emailCliente}
-                readOnly={false}
                 onChange={(e) => setEmailCliente(e.target.value)}
               />
             </label>
@@ -711,7 +797,9 @@ export default function CotizacionPage() {
                   <th className="px-2 py-1 text-right print:hidden" style={{ width: "70px" }}>Kg (PT)</th>
                   <th className="px-2 py-1 text-right" style={{ width: "80px" }}>Cant</th>
                   <th className="px-2 py-1 text-right print:hidden" style={{ width: "110px" }}>Precio base</th>
-                  <th className="px-2 py-1 text-right" style={{ width: "110px" }}>$ Unit/Pres</th>
+                  <th className="px-2 py-1 text-right" style={{ width: "140px" }}>
+                    {(modoPrecio === "kilo") ? "$ por kg / $ unit" : "$ presentación / $ unit"}
+                  </th>
                   <th className="px-2 py-1 text-right" style={{ width: "130px" }}>Total</th>
                   <th className="print:hidden" />
                 </tr>
@@ -779,7 +867,9 @@ export default function CotizacionPage() {
                           onBlur={(e) => updateLine(i, "precioVenta", e.target.value)}
                         />
                         <div className="text-[10px] text-zinc-500 mt-1">
-                          {(r.code || "").toUpperCase().startsWith("PT") ? "$ por kg (× Kg)" : "$ unitario"}
+                          {(r.code || "").toUpperCase().startsWith("PT")
+                            ? (modoPrecio === "kilo" ? "$ por kg × Kg" : "$ por presentación")
+                            : "$ unitario"}
                         </div>
                       </td>
                       <td className="px-2 py-1 text-right">{money(r.total)}</td>
@@ -791,7 +881,7 @@ export default function CotizacionPage() {
                 })}
               </tbody>
 
-              {lines.length > 0 && (
+              {lines.length > 0 && mostrarTotales && (
                 <tfoot>
                   <tr className="font-semibold bg-zinc-50">
                     <td colSpan={5} />
@@ -799,22 +889,26 @@ export default function CotizacionPage() {
                     <td className="text-right px-2 py-1 border-t">{money(subtotal)}</td>
                     <td />
                   </tr>
-                  <tr className="bg-zinc-50">
-                    <td colSpan={5} />
-                    <td className="text-right px-2 py-1">IVA (19%)</td>
-                    <td className="text-right px-2 py-1">{money(iva)}</td>
-                    <td />
-                  </tr>
-                  <tr className="font-bold bg-zinc-50">
-                    <td colSpan={5} />
-                    <td className="text-right px-2 py-1" style={{ borderTop: "2px solid #2B6CFF" }}>
-                      TOTAL
-                    </td>
-                    <td className="text-right px-2 py-1" style={{ borderTop: "2px solid #2B6CFF" }}>
-                      {money(total)}
-                    </td>
-                    <td />
-                  </tr>
+                  {mostrarIva && (
+                    <>
+                      <tr className="bg-zinc-50">
+                        <td colSpan={5} />
+                        <td className="text-right px-2 py-1">IVA (19%)</td>
+                        <td className="text-right px-2 py-1">{money(iva)}</td>
+                        <td />
+                      </tr>
+                      <tr className="font-bold bg-zinc-50">
+                        <td colSpan={5} />
+                        <td className="text-right px-2 py-1" style={{ borderTop: "2px solid #2B6CFF" }}>
+                          TOTAL
+                        </td>
+                        <td className="text-right px-2 py-1" style={{ borderTop: "2px solid #2B6CFF" }}>
+                          {money(total)}
+                        </td>
+                        <td />
+                      </tr>
+                    </>
+                  )}
                 </tfoot>
               )}
             </table>
