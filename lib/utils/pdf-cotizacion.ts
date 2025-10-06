@@ -285,8 +285,18 @@ export function generarPdfCotizacion(data: DatosPDF) {
   y += mm(5);
   doc.text(`E-mail: ${ejecutivo.correo}`, firmaX, y);
 
-  /* ---------- OUTPUT ---------- */
-  const filename = `Cotizacion_${numero}.pdf`;
-  const base64 = btoa(doc.output("datauristring").split(",")[1]);
-  return { filename, base64 };
+/* ---------- OUTPUT ---------- */
+const filename = `Cotizacion_${numero}.pdf`;
+
+// ✅ Obtener bytes reales del PDF
+const pdfBytes = doc.output("arraybuffer");
+
+// ✅ Convertir a base64 sin corrupción de caracteres
+const base64 = btoa(
+  new Uint8Array(pdfBytes)
+    .reduce((data, byte) => data + String.fromCharCode(byte), "")
+);
+
+// ✅ Retornar objeto
+return { filename, base64 };
 }
