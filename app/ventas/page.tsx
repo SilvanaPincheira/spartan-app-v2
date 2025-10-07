@@ -33,6 +33,14 @@ export default function VentasPage() {
       desc: "Solicita la creación de nuevos clientes y envíalos a SAP/Cobranzas.",
       color: "bg-amber-50",
     },
+    {
+      href: "/ventas/reclamos",
+      icon: "🧾",
+      title: "Formulario de Reclamos",
+      desc: "Registra reclamos de clientes con detalle del producto, lote y aplicación.",
+      color: "bg-sky-50",
+    },
+    
   ];
 
   return (
