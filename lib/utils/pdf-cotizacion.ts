@@ -1,5 +1,5 @@
 import jsPDF from "jspdf";
-import { LOGO_BASE64 } from "@/lib/utils/logo64";
+import { logoBase64 } from "@/lib/logo64";
 
 /* ============================ CONFIGURACIÓN ============================ */
 const AZUL = "#0033A0";
@@ -154,7 +154,7 @@ export function generarPdfCotizacion(data: DatosPDF) {
     const logoW = mm(55);
     const logoH = mm(13);
     const logoX = (pageW - logoW) / 2;
-    doc.addImage(LOGO_BASE64, "PNG", logoX, y, logoW, logoH);
+    doc.addImage(logoBase64, "PNG", logoX, y, logoW, logoH);
     y += mm(22);
   } catch {
     y += mm(22);
