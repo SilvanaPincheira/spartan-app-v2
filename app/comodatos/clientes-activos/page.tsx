@@ -776,207 +776,316 @@ const { start, end, meses } = rango6MesesCompletos(ref);
   const nuevaCuotaTotal = cuotaVigenteTotal + cuotaSimuladaTotal;
 
   /* ---------- PDF (misma lógica) ---------- */
-  async function descargarPdf() {
-    const { jsPDF } = await import("jspdf");
-    const doc = new jsPDF({ unit: "pt", format: "a4" });
+async function descargarPdf() {
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
 
-    const BLUE = { r: 31, g: 78, b: 216 };
-    const GREEN = { r: 22, g: 163, b: 74 };
-    const RED = { r: 220, g: 38, b: 38 };
+  const BLUE = { r: 31, g: 78, b: 216 };
+  const GREEN = { r: 22, g: 163, b: 74 };
+  const RED = { r: 220, g: 38, b: 38 };
 
-    const W = doc.internal.pageSize.getWidth();
-    const M = 36;
-    let y = 0;
+  const W = doc.internal.pageSize.getWidth();
+  const M = 36;
+  let y = 0;
 
-    doc.setFillColor(BLUE.r, BLUE.g, BLUE.b);
-    doc.rect(0, 0, W, 80, "F");
-    y = 80;
+  doc.setFillColor(BLUE.r, BLUE.g, BLUE.b);
+  doc.rect(0, 0, W, 80, "F");
+  y = 80;
 
-    let titleX = M + 140;
-    if (logoUrl) {
-      const img = await fetchImageAsDataURL(logoUrl);
-      if (img) {
-        const dims = await getImageSize(img.dataUrl);
-        const MAX_W = 160,
-          MAX_H = 40;
-        let drawW = 120,
-          drawH = 40;
-        if (dims) {
-          const ar = dims.w / dims.h,
-            boxAr = MAX_W / MAX_H;
-          if (ar > boxAr) (drawW = MAX_W), (drawH = MAX_W / ar);
-          else (drawH = MAX_H), (drawW = MAX_H * ar);
-        }
-        doc.addImage(img.dataUrl, img.format, M, 20, drawW, drawH);
-        titleX = M + drawW + 24;
+  let titleX = M + 140;
+  if (logoUrl) {
+    const img = await fetchImageAsDataURL(logoUrl);
+    if (img) {
+      const dims = await getImageSize(img.dataUrl);
+      const MAX_W = 160, MAX_H = 40;
+      let drawW = 120, drawH = 40;
+      if (dims) {
+        const ar = dims.w / dims.h, boxAr = MAX_W / MAX_H;
+        if (ar > boxAr) (drawW = MAX_W), (drawH = MAX_W / ar);
+        else (drawH = MAX_H), (drawW = MAX_H * ar);
       }
+      doc.addImage(img.dataUrl, img.format, M, 20, drawW, drawH);
+      titleX = M + drawW + 24;
     }
+  }
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.text("Solicitud Evaluación de Comodato", titleX, 45);
+  doc.setTextColor(0, 0, 0);
+
+  const drawSectionHeader = (title: string) => {
+    doc.setFillColor(BLUE.r, BLUE.g, BLUE.b);
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.text("Solicitud Evaluación de Comodato", titleX, 45);
+    doc.setFontSize(12);
+    doc.rect(M, y + 16, W - 2 * M, 24, "F");
+    doc.text(title, M + 10, y + 33);
     doc.setTextColor(0, 0, 0);
+    y += 16 + 24 + 8;
+  };
 
-    const drawSectionHeader = (title: string) => {
-      doc.setFillColor(BLUE.r, BLUE.g, BLUE.b);
-      doc.setTextColor(255, 255, 255);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(12);
-      doc.rect(M, y + 16, W - 2 * M, 24, "F");
-      doc.text(title, M + 10, y + 33);
-      doc.setTextColor(0, 0, 0);
-      y += 16 + 24 + 8;
-    };
-
-    const drawKVTable = (rows: [string, string][]) => {
-      const col1 = 120,
-        col2 = W - 2 * M - col1,
-        rowH = 18;
-      doc.setDrawColor(230, 230, 230);
-      doc.setLineWidth(0.5);
-      rows.forEach(([k, v], idx) => {
-        const py = y + idx * rowH;
-        doc.line(M, py, W - M, py);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10);
-        doc.text(k, M + 6, py + 13);
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(10);
-        doc.text(v || "—", M + col1 + 6, py + 13, { maxWidth: col2 - 12 });
-      });
-      const endY = y + rows.length * rowH;
-      doc.line(M, endY, W - M, endY);
-      y = endY + 12;
-    };
-
-    const drawSimpleTable = (headers: string[], rows: (string | number)[][]) => {
-      const tableW = W - 2 * M;
-      const widths = [0.18, 0.42, 0.14, 0.13, 0.13].map((p) => Math.floor(tableW * p));
-      doc.setFillColor(BLUE.r, BLUE.g, BLUE.b);
-      doc.setTextColor(255, 255, 255);
+  const drawKVTable = (rows: [string, string][]) => {
+    const col1 = 120, col2 = W - 2 * M - col1, rowH = 18;
+    doc.setDrawColor(230, 230, 230);
+    doc.setLineWidth(0.5);
+    rows.forEach(([k, v], idx) => {
+      const py = y + idx * rowH;
+      doc.line(M, py, W - M, py);
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
-      let x = M;
-      const th = 20;
-      doc.rect(M, y, tableW, th, "F");
-      headers.forEach((h, i) => {
-        doc.text(h, x + 6, y + 13);
-        x += widths[i];
-      });
-      y += th;
-      doc.setTextColor(0, 0, 0);
+      doc.text(k, M + 6, py + 13);
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      const rowH = 16;
-      rows.forEach((r) => {
-        let px = M;
-        r.forEach((cell, i) => {
-          const txt = typeof cell === "string" ? cell : String(cell ?? "");
-          doc.text(txt, px + 6, y + 12, { maxWidth: widths[i] - 12 });
-          px += widths[i];
-        });
-        y += rowH;
-        if (y > 760) {
-          doc.addPage();
-          y = 48;
-        }
-      });
-      y += 8;
-    };
+      doc.setFontSize(10);
+      doc.text(v || "—", M + col1 + 6, py + 13, { maxWidth: col2 - 12 });
+    });
+    const endY = y + rows.length * rowH;
+    doc.line(M, endY, W - M, endY);
+    y = endY + 12;
+  };
 
-    drawSectionHeader("Datos del cliente");
-    drawKVTable([
-      ["Fecha", `${fechaEval}`],
-      ["Cliente", `${clienteNombre || "—"}`],
-      ["RUT", `${formatRut(rutFiltro) || "—"}`],
-      ["Dirección", `${clienteDireccion || "—"}`],
-      ["Ejecutivo", `${ejecutivoNombre || "—"}`],
-    ]);
-
-    drawSectionHeader("KPIs");
-    drawKVTable([
-      ["Prom. venta mensual ", money(promVentaMensual6m)],
-      ["Comodato mensual ", money(comodatoMensual6m)],
-      ["% Relación cdto/vta", pct(relComVta6m)],
-      ["% Comisión final", pct(commissionFinal6m)],
-    ]);
-
-    const label = isViable ? "Viable" : "No viable";
-    const color = isViable ? GREEN : RED;
-    doc.setFillColor(color.r, color.g, color.b);
+  const drawSimpleTable = (headers: string[], rows: (string | number)[][]) => {
+    const tableW = W - 2 * M;
+    const widths = [0.18, 0.42, 0.14, 0.13, 0.13].map((p) => Math.floor(tableW * p));
+    doc.setFillColor(BLUE.r, BLUE.g, BLUE.b);
     doc.setTextColor(255, 255, 255);
-    doc.rect(M, y, 160, 30, "F");
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(14);
-    doc.text(`Estado: ${label}`, M + 10, y + 20);
+    doc.setFontSize(10);
+    let x = M;
+    const th = 20;
+    doc.rect(M, y, tableW, th, "F");
+    headers.forEach((h, i) => {
+      doc.text(h, x + 6, y + 13);
+      x += widths[i];
+    });
+    y += th;
     doc.setTextColor(0, 0, 0);
-    y += 42;
-
-    drawSectionHeader("Evaluación en vivo — Nuevos equipos");
-    const headers = ["Código", "Descripción", "Cantidad", "Valor unitario", "Valor total"];
-    const rows = (proposed.length ? proposed : []).map((p) => [p.code || "", p.name || "", String(p.qty || 0), money(p.unit || 0), money(p.total || 0)]);
-    drawSimpleTable(headers, rows);
-
-    const fname = `Solicitud_Comodato_${(clienteNombre || "Cliente").replace(/[^A-Za-z0-9_-]+/g, "_")}_${fechaEval}.pdf`;
-    doc.save(fname);
-    return fname;
-  }
-
-  async function descargarYEnviar() {
-    if (!isViable) {
-      alert("Solo se envía por correo si el estado es Viable.");
-      return;
-    }
-  
-    try {
-      // 1️⃣ Generar el PDF usando tu función existente
-      const { jsPDF } = await import("jspdf");
-      const doc = new jsPDF({ unit: "pt", format: "a4" });
-      // Reutiliza tu función actual para mantener formato visual:
-      await descargarPdf();
-  
-      // 2️⃣ Convertir PDF a Base64
-      const pdfDataUri = doc.output("datauristring");
-      const base64Data = pdfDataUri.split(",")[1];
-      const filename = `Solicitud_Comodato_${(clienteNombre || "Cliente")
-        .replace(/[^A-Za-z0-9_-]+/g, "_")}_${fechaEval}.pdf`;
-  
-      // 3️⃣ Enviar al backend para que lo remita vía Resend
-      const res = await fetch("/api/send-comodato", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject: `Solicitud Evaluación de Comodato — ${clienteNombre || "Cliente"}`,
-          cliente: clienteNombre,
-          rut: formatRut(rutFiltro),
-          ejecutivo: ejecutivoNombre,
-          fecha: fechaEval,
-          viable: isViable,
-          score: Math.round(commissionFinal6m * 100),
-          comentarios: "Se solicita gestionar VB a comodato.",
-          indicadores: [
-            { label: "Prom. venta mensual", valor: money(promVentaMensual6m) },
-            { label: "Comodato mensual", valor: money(comodatoMensual6m) },
-            { label: "% Relación cdto/vta", valor: pct(relComVta6m) },
-            { label: "% Comisión final", valor: pct(commissionFinal6m) },
-          ],
-          pdfBase64: base64Data, // 👈 adjunto PDF
-          filename,
-        }),
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    const rowH = 16;
+    rows.forEach((r) => {
+      let px = M;
+      r.forEach((cell, i) => {
+        const txt = typeof cell === "string" ? cell : String(cell ?? "");
+        doc.text(txt, px + 6, y + 12, { maxWidth: widths[i] - 12 });
+        px += widths[i];
       });
-  
-      const data = await res.json();
-      if (data.success) {
-        alert("✅ Solicitud de Comodato enviada con PDF adjunto.");
-      } else {
-        console.error("❌ Error Resend:", data.error);
-        alert("No se pudo enviar el correo.");
+      y += rowH;
+      if (y > 760) {
+        doc.addPage();
+        y = 48;
       }
-    } catch (err) {
-      console.error("❌ Error:", err);
-      alert("Fallo al generar o enviar el PDF.");
+    });
+    y += 8;
+  };
+
+  drawSectionHeader("Datos del cliente");
+  drawKVTable([
+    ["Fecha", `${fechaEval}`],
+    ["Cliente", `${clienteNombre || "—"}`],
+    ["RUT", `${formatRut(rutFiltro) || "—"}`],
+    ["Dirección", `${clienteDireccion || "—"}`],
+    ["Ejecutivo", `${ejecutivoNombre || "—"}`],
+  ]);
+
+  drawSectionHeader("KPIs");
+  drawKVTable([
+    ["Prom. venta mensual ", money(promVentaMensual6m)],
+    ["Comodato mensual ", money(comodatoMensual6m)],
+    ["% Relación cdto/vta", pct(relComVta6m)],
+    ["% Comisión final", pct(commissionFinal6m)],
+  ]);
+
+  const label = isViable ? "Viable" : "No viable";
+  const color = isViable ? GREEN : RED;
+  doc.setFillColor(color.r, color.g, color.b);
+  doc.setTextColor(255, 255, 255);
+  doc.rect(M, y, 160, 30, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text(`Estado: ${label}`, M + 10, y + 20);
+  doc.setTextColor(0, 0, 0);
+  y += 42;
+
+  drawSectionHeader("Evaluación en vivo — Nuevos equipos");
+  const headers = ["Código", "Descripción", "Cantidad", "Valor unitario", "Valor total"];
+  const rows = (proposed.length ? proposed : []).map((p) => [p.code || "", p.name || "", String(p.qty || 0), money(p.unit || 0), money(p.total || 0)]);
+  drawSimpleTable(headers, rows);
+
+  const filename = `Solicitud_Comodato_${(clienteNombre || "Cliente").replace(/[^A-Za-z0-9_-]+/g, "_")}_${fechaEval}.pdf`;
+
+  // ✅ Devolver en base64
+  const pdfDataUri = doc.output("datauristring");
+  const base64 = pdfDataUri.split(",")[1];
+  return { base64, filename };
+}
+
+/* ---------- PDF y envío automático ---------- */
+async function descargarPdf() {
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+
+  const BLUE = { r: 31, g: 78, b: 216 };
+  const GREEN = { r: 22, g: 163, b: 74 };
+  const RED = { r: 220, g: 38, b: 38 };
+
+  const W = doc.internal.pageSize.getWidth();
+  const M = 36;
+  let y = 0;
+
+  // Header
+  doc.setFillColor(BLUE.r, BLUE.g, BLUE.b);
+  doc.rect(0, 0, W, 80, "F");
+  y = 80;
+
+  // Logo y título
+  let titleX = M + 140;
+  if (logoUrl) {
+    const img = await fetchImageAsDataURL(logoUrl);
+    if (img) {
+      const dims = await getImageSize(img.dataUrl);
+      const MAX_W = 160, MAX_H = 40;
+      let drawW = 120, drawH = 40;
+      if (dims) {
+        const ar = dims.w / dims.h, boxAr = MAX_W / MAX_H;
+        if (ar > boxAr) (drawW = MAX_W), (drawH = MAX_W / ar);
+        else (drawH = MAX_H), (drawW = MAX_H * ar);
+      }
+      doc.addImage(img.dataUrl, img.format, M, 20, drawW, drawH);
+      titleX = M + drawW + 24;
     }
   }
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.text("Solicitud Evaluación de Comodato", titleX, 45);
+  doc.setTextColor(0, 0, 0);
+
+  // Helpers
+  const drawSectionHeader = (title: string) => {
+    doc.setFillColor(BLUE.r, BLUE.g, BLUE.b);
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.rect(M, y + 16, W - 2 * M, 24, "F");
+    doc.text(title, M + 10, y + 33);
+    doc.setTextColor(0, 0, 0);
+    y += 16 + 24 + 8;
+  };
+  const drawKVTable = (rows: [string, string][]) => {
+    const col1 = 120, col2 = W - 2 * M - col1, rowH = 18;
+    rows.forEach(([k, v], idx) => {
+      const py = y + idx * rowH;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text(k, M + 6, py + 13);
+      doc.setFont("helvetica", "normal");
+      doc.text(v || "—", M + col1 + 6, py + 13, { maxWidth: col2 - 12 });
+    });
+    y += rows.length * rowH + 12;
+  };
+
+  // Datos
+  drawSectionHeader("Datos del cliente");
+  drawKVTable([
+    ["Fecha", fechaEval],
+    ["Cliente", clienteNombre || "—"],
+    ["RUT", formatRut(rutFiltro) || "—"],
+    ["Dirección", clienteDireccion || "—"],
+    ["Ejecutivo", ejecutivoNombre || "—"],
+  ]);
+
+  drawSectionHeader("KPIs");
+  drawKVTable([
+    ["Prom. venta mensual", money(promVentaMensual6m)],
+    ["Comodato mensual", money(comodatoMensual6m)],
+    ["% Relación cdto/vta", pct(relComVta6m)],
+    ["% Comisión final", pct(commissionFinal6m)],
+  ]);
+
+  const label = isViable ? "Viable" : "No viable";
+  const color = isViable ? GREEN : RED;
+  doc.setFillColor(color.r, color.g, color.b);
+  doc.setTextColor(255, 255, 255);
+  doc.rect(M, y, 160, 30, "F");
+  doc.text(`Estado: ${label}`, M + 10, y + 20);
+  y += 42;
+  doc.setTextColor(0, 0, 0);
+
+  drawSectionHeader("Evaluación en vivo — Nuevos equipos");
+  const headers = ["Código", "Descripción", "Cantidad", "Valor unitario", "Valor total"];
+  const rows = (proposed.length ? proposed : []).map((p) => [
+    p.code || "", p.name || "", String(p.qty || 0), money(p.unit || 0), money(p.total || 0)
+  ]);
+  let x = M;
+  const tableW = W - 2 * M;
+  const colW = [0.18, 0.42, 0.14, 0.13, 0.13].map(p => p * tableW);
+  doc.setFont("helvetica", "bold");
+  doc.setFillColor(BLUE.r, BLUE.g, BLUE.b);
+  doc.setTextColor(255, 255, 255);
+  doc.rect(M, y, tableW, 20, "F");
+  headers.forEach((h, i) => { doc.text(h, x + 6, y + 14); x += colW[i]; });
+  y += 28;
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(0, 0, 0);
+  rows.forEach(r => {
+    let px = M;
+    r.forEach((cell, i) => { doc.text(String(cell), px + 6, y + 12); px += colW[i]; });
+    y += 16;
+  });
+
+  const filename = `Solicitud_Comodato_${(clienteNombre || "Cliente").replace(/[^A-Za-z0-9_-]+/g, "_")}_${fechaEval}.pdf`;
+  const pdfDataUri = doc.output("datauristring");
+  const base64 = pdfDataUri.split(",")[1];
+  return { base64, filename };
+}
+
+/* ---------- Envío automático ---------- */
+async function descargarYEnviar() {
+  if (!isViable) {
+    alert("Solo se envía por correo si el estado es Viable.");
+    return;
+  }
+
+  try {
+    const { base64, filename } = await descargarPdf();
+
+    const res = await fetch("/api/send-comodato", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subject: `Solicitud Evaluación de Comodato — ${clienteNombre || "Cliente"}`,
+        cliente: clienteNombre,
+        rut: formatRut(rutFiltro),
+        ejecutivo: ejecutivoNombre,
+        fecha: fechaEval,
+        viable: isViable,
+        score: Math.round(commissionFinal6m * 100),
+        comentarios: "Se solicita gestionar VB a comodato.",
+        indicadores: [
+          { label: "Prom. venta mensual", valor: money(promVentaMensual6m) },
+          { label: "Comodato mensual", valor: money(comodatoMensual6m) },
+          { label: "% Relación cdto/vta", valor: pct(relComVta6m) },
+          { label: "% Comisión final", valor: pct(commissionFinal6m) },
+        ],
+        pdfBase64: base64,
+        filename,
+      }),
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      alert("✅ Solicitud de Comodato enviada con PDF adjunto.");
+    } else {
+      console.error("❌ Error Resend:", data.error);
+      alert("No se pudo enviar el correo.");
+    }
+  } catch (err) {
+    console.error("❌ Error:", err);
+    alert("Fallo al generar o enviar el PDF.");
+  }
+}
+
   
   /* ------- Limpiar ------- */
   function limpiarTodo() {
