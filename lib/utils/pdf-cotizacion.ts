@@ -154,13 +154,13 @@ export function generarPdfCotizacion(data: DatosPDF) {
   /* ----------- LOGO EN ESQUINA ----------- */
 try {
   const logoX = mm(15);
-  const logoY = mm(12);
+  const logoY = mm(10);
 
   // Obtener proporciones reales del logo
   const imgProps = doc.getImageProperties(logoBase64);
 
   // Mantener proporción original (ajusta el ancho deseado)
-  const logoW = mm(35); // ancho fijo deseado
+  const logoW = mm(22); // ancho fijo deseado
   const logoH = (logoW * imgProps.height) / imgProps.width; // alto proporcional
 
   doc.addImage(logoBase64, "PNG", logoX, logoY, logoW, logoH);
