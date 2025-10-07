@@ -180,7 +180,7 @@ try {
   doc.text(`CTZ N° ${numeroLimpio}`, pageW - marginX, mm(22), { align: "right" });
   doc.text(fecha, pageW - marginX, mm(27), { align: "right" });
 
-  let y = mm(35);
+  let y = mm(42);
 
   /* ---------- DATOS CLIENTE ---------- */
   doc.setFontSize(10);
