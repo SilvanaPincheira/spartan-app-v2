@@ -922,19 +922,62 @@ const { start, end, meses } = rango6MesesCompletos(ref);
     return fname;
   }
 
-  function descargarYEnviar() {
+  async function descargarYEnviar() {
     if (!isViable) {
       alert("Solo se envía por correo si el estado es Viable.");
       return;
     }
-    descargarPdf().then(() => {
-      const to = "patricia.acuna@spartan.cl";
-      const subject = encodeURIComponent(`Solicitud Evaluación de Comodato — ${clienteNombre || "Cliente"}`);
-      const body = encodeURIComponent("Estimada, se solicita gestionar VB a comodato. Saludos.");
-      window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
-    });
+  
+    try {
+      // 1️⃣ Generar el PDF usando tu función existente
+      const { jsPDF } = await import("jspdf");
+      const doc = new jsPDF({ unit: "pt", format: "a4" });
+      // Reutiliza tu función actual para mantener formato visual:
+      await descargarPdf();
+  
+      // 2️⃣ Convertir PDF a Base64
+      const pdfDataUri = doc.output("datauristring");
+      const base64Data = pdfDataUri.split(",")[1];
+      const filename = `Solicitud_Comodato_${(clienteNombre || "Cliente")
+        .replace(/[^A-Za-z0-9_-]+/g, "_")}_${fechaEval}.pdf`;
+  
+      // 3️⃣ Enviar al backend para que lo remita vía Resend
+      const res = await fetch("/api/send-comodato", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: `Solicitud Evaluación de Comodato — ${clienteNombre || "Cliente"}`,
+          cliente: clienteNombre,
+          rut: formatRut(rutFiltro),
+          ejecutivo: ejecutivoNombre,
+          fecha: fechaEval,
+          viable: isViable,
+          score: Math.round(commissionFinal6m * 100),
+          comentarios: "Se solicita gestionar VB a comodato.",
+          indicadores: [
+            { label: "Prom. venta mensual", valor: money(promVentaMensual6m) },
+            { label: "Comodato mensual", valor: money(comodatoMensual6m) },
+            { label: "% Relación cdto/vta", valor: pct(relComVta6m) },
+            { label: "% Comisión final", valor: pct(commissionFinal6m) },
+          ],
+          pdfBase64: base64Data, // 👈 adjunto PDF
+          filename,
+        }),
+      });
+  
+      const data = await res.json();
+      if (data.success) {
+        alert("✅ Solicitud de Comodato enviada con PDF adjunto.");
+      } else {
+        console.error("❌ Error Resend:", data.error);
+        alert("No se pudo enviar el correo.");
+      }
+    } catch (err) {
+      console.error("❌ Error:", err);
+      alert("Fallo al generar o enviar el PDF.");
+    }
   }
-
+  
   /* ------- Limpiar ------- */
   function limpiarTodo() {
     setRutFiltro("");
