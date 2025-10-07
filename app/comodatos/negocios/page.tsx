@@ -584,11 +584,35 @@ const drawSimpleTable = (
     }
   
     try {
+      // 1️⃣ Importar jsPDF dinámicamente
+      const { jsPDF } = await import("jspdf");
+  
+      // 2️⃣ Generar el mismo PDF que tu función descargarPdf()
+      const doc = new jsPDF({ unit: "pt", format: "a4" });
+  
+      // Puedes copiar aquí el bloque completo de dibujo (header, tablas, etc.)
+      // o, si ya tienes la función descargarPdf separada, reutilízala así:
+      // await descargarPdf();  // si tu función guarda localmente
+  
+      // ⚠️ En este ejemplo asumimos que el PDF se genera dentro de 'doc'
+      // Si tu 'descargarPdf' ya lo guarda, simplemente crea un nuevo doc aquí igual.
+      // ---------------------------
+      // (tu lógica actual del PDF)
+      // ---------------------------
+  
+      // 3️⃣ Convertir el PDF generado a base64
+      const pdfDataUri = doc.output("datauristring");
+      const base64Data = pdfDataUri.split(",")[1];
+  
+      // 4️⃣ Nombre del archivo
+      const filename = `Evaluacion_${(clienteNombre || "Cliente")
+        .replace(/[^A-Za-z0-9_-]+/g, "_")}_${fechaEval}.pdf`;
+  
+      // 5️⃣ Enviar al backend con PDF incluido
       const res = await fetch("/api/send-evaluacion", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // 👇 datos que recibirá el backend
           subject: `Evaluación de Negocio — ${clienteNombre || "Cliente"}`,
           cliente: clienteNombre,
           rut,
@@ -603,21 +627,24 @@ const drawSimpleTable = (
             { label: "Relación comodato/venta", valor: pct(calc.rel) },
             { label: "Comisión final", valor: pct(calc.comFinalPct) },
           ],
+          pdfBase64: base64Data, // 👈 aquí se adjunta el PDF
+          filename,
         }),
       });
   
       const data = await res.json();
       if (data.success) {
-        alert("✅ Evaluación enviada por correo");
+        alert("✅ Evaluación enviada por correo con PDF adjunto.");
       } else {
         console.error("❌ Error Resend:", data.error);
         alert("No se pudo enviar el correo.");
       }
     } catch (err) {
       console.error("❌ Error:", err);
-      alert("Fallo al conectar con el servidor.");
+      alert("Fallo al generar o enviar el PDF.");
     }
   }
+  
   
 
   function limpiarTodo() {

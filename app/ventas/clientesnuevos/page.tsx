@@ -95,7 +95,7 @@ export default function ClientesNuevosPage() {
       const json = await res.json();
 
       if (json.ok || json.status === "ok") {
-        setMensaje("📨 Enviando correo a cobranzas@sac...");
+        setMensaje("📨 Enviando correo a pagos@sac...");
         
         // Envío automático de correo
         const sendRes = await fetch("/api/send-client", {
