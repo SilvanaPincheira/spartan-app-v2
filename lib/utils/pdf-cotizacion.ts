@@ -151,14 +151,21 @@ export function generarPdfCotizacion(data: DatosPDF) {
   const pageW = doc.internal.pageSize.getWidth();
   const marginX = mm(15);
 
-  /* ---------- LOGO EN ESQUINA ---------- */
-  try {
-    const logoW = mm(35);
-    const logoH = mm(10);
-    const logoX = mm(15);
-    const logoY = mm(12);
-    doc.addImage(logoBase64, "PNG", logoX, logoY, logoW, logoH);
-  } catch {}
+  /* ----------- LOGO EN ESQUINA ----------- */
+try {
+  const logoX = mm(15);
+  const logoY = mm(12);
+
+  // Obtener proporciones reales del logo
+  const imgProps = doc.getImageProperties(logoBase64);
+
+  // Mantener proporción original (ajusta el ancho deseado)
+  const logoW = mm(35); // ancho fijo deseado
+  const logoH = (logoW * imgProps.height) / imgProps.width; // alto proporcional
+
+  doc.addImage(logoBase64, "PNG", logoX, logoY, logoW, logoH);
+} catch {}
+
 
   /* ---------- TÍTULO Y NÚMERO ---------- */
   doc.setFont("helvetica", "bold");
