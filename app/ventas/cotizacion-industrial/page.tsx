@@ -302,25 +302,83 @@ export default function CotizacionPage() {
       return n;
     });
   }
+
+  // 🔁 Recalcular totales cuando cambia el modo de precio
+  useEffect(() => {
+    setLines((old) => old.map((r) => computeLine(r)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modoPrecio]);
+
   function updateLine(i: number, field: keyof Line, value: unknown) {
     setLines((old) => {
       const n = [...old];
       const current = n[i];
       if (!current) return old;
       const row: Line = { ...current };
+
+      const esPT = (row.code || "").toUpperCase().startsWith("PT");
+      const basePorKg = num(row.priceBase) || 0;     // base por kg
+      const basePresentacion = Math.round(basePorKg * (num(row.kilos) || 1)); // base por presentación
+
       if (field === "precioVenta") {
-        row.precioVenta = value === "" || value === undefined ? 0 : Math.round(num(value));
+        const pv = value === "" || value === undefined ? 0 : Math.round(num(value));
+
+        // ================== RESTRICCIÓN DESCUENTO 20% ==================
+        // Determinar base de comparación según modo y tipo
+        let baseComparacion = basePorKg;
+        if (esPT && modoPrecio === "presentacion") {
+          baseComparacion = basePresentacion; // en este modo el usuario ingresa precio por presentación
+        } else {
+          // PT + kilo  => base por kg
+          // no-PT      => base unitario (priceBase)
+          baseComparacion = basePorKg;
+        }
+
+        const descCalc = baseComparacion > 0 ? ((baseComparacion - pv) / baseComparacion) * 100 : 0;
+
+        if (descCalc > 20) {
+          // 🚫 no permitir >20% descuento
+          alert(
+            `❌ Precio inferior al 80% del precio base.\n\n` +
+              `Precio base de comparación: ${money(baseComparacion)}\n` +
+              `Digitado: ${money(pv)}\n\n` +
+              `El descuento calculado sería ${descCalc.toFixed(2)}%, lo que supera el máximo permitido (20%).\n\n` +
+              `El precio será restablecido al valor base.`
+          );
+          row.precioVenta = baseComparacion; // restablecer al base correspondiente
+        } else {
+          row.precioVenta = pv;
+        }
       } else {
         (row as any)[field] = value as any;
         row.kilos = num(row.kilos) || 1;
         row.qty = num(row.qty) || 0;
         row.priceBase = num(row.priceBase) || 0;
         row.precioVenta = num(row.precioVenta) || 0;
+
+        // Si cambia kilos y estamos en modo "presentación" para PT,
+        // revalidamos que el precio por presentación no caiga bajo 80% del nuevo base
+        if (field === "kilos" && esPT && modoPrecio === "presentacion") {
+          const basePres = Math.round((num(row.priceBase) || 0) * (num(row.kilos) || 1));
+          const pv = Math.round(num(row.precioVenta));
+          const descCalc = basePres > 0 ? ((basePres - pv) / basePres) * 100 : 0;
+          if (descCalc > 20) {
+            alert(
+              `❌ El precio por presentación quedó bajo el 80% del precio base al cambiar los Kg.\n\n` +
+                `Nuevo base presentación: ${money(basePres)}\n` +
+                `Precio: ${money(pv)}\n\n` +
+                `Se restablecerá al precio base.`
+            );
+            row.precioVenta = basePres;
+          }
+        }
       }
+
       n[i] = computeLine(row);
       return n;
     });
   }
+
   function computeLine(row: Line): Line {
     const out = { ...row };
     const esPT = (out.code || "").toUpperCase().startsWith("PT");
@@ -383,6 +441,31 @@ export default function CotizacionPage() {
       if (!emailEjecutivo) throw new Error("Falta el email del ejecutivo.");
       if (lines.length === 0) throw new Error("Agrega al menos un ítem.");
 
+      // 🚨 Validación de descuentos > 20% antes de guardar
+      const descuentosInvalidos = lines
+        .map((l) => {
+          const esPT = (l.code || "").toUpperCase().startsWith("PT");
+          const basePorKg = num(l.priceBase) || 0;
+          const basePresentacion = Math.round(basePorKg * (num(l.kilos) || 1));
+          let baseComparacion = basePorKg;
+          if (esPT && modoPrecio === "presentacion") baseComparacion = basePresentacion;
+          const pv = Math.round(num(l.precioVenta) || 0);
+          const descCalc = baseComparacion > 0 ? ((baseComparacion - pv) / baseComparacion) * 100 : 0;
+          return { l, descCalc };
+        })
+        .filter(({ descCalc }) => descCalc > 20);
+
+      if (descuentosInvalidos.length > 0) {
+        const detalle = descuentosInvalidos
+          .map(({ l, descCalc }) => `• ${l.code} (${l.name}) — Descuento ${descCalc.toFixed(2)}%`)
+          .join("\n");
+        throw new Error(
+          `❌ No se puede generar la Cotización.\n\n` +
+          `Hay ${descuentosInvalidos.length} ítem(s) con descuento superior al 20%:\n\n` +
+          `${detalle}\n\nCorrige los precios antes de continuar.`
+        );
+      }
+
       const fecha = hoyCL();
 
       // Payload para Sheets (una fila por ítem)
@@ -429,7 +512,7 @@ export default function CotizacionPage() {
       const rows = Number(saved?.rows ?? datos.length) || datos.length;
       setInfoMsg(`✅ Cotización guardada con ${rows} ítem(s) en "Cotizaciones".`);
 
-      // 2) Generar PDF corporativo
+      // 2) Generar PDF corporativo (pasa TODAS las preferencias correctas)
       const { filename, base64 } = await generarPdfCotizacion({
         numero: numeroCTZ,
         fecha: `Santiago, ${new Date().toLocaleDateString("es-CL", {
@@ -460,9 +543,10 @@ export default function CotizacionPage() {
         iva,
         total,
         opciones: {
-          modoPrecio,           // "kilo" | "presentacion"
-          mostrarTotales,       // true/false
-          mostrarIva,           // true/false
+          modoPrecio,                 // "kilo" | "presentacion"
+          mostrarTotales,             // true/false (leyenda y totales)
+          mostrarIva,                 // true/false (incluye IVA)
+          mostrarTotalColumna: mostrarTotales, // 👈 importante para la TABLA del PDF
         },
         ejecutivo: {
           nombre: ejecutivoNombre,
