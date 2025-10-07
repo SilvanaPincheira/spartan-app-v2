@@ -21,6 +21,9 @@ function num(x: unknown) {
   const v = Number(x);
   return Number.isFinite(v) ? v : 0;
 }
+function clamp(v: number, min: number, max: number) {
+  return Math.min(Math.max(v, min), max);
+}
 function money(n: number) {
   return (n || 0).toLocaleString("es-CL", {
     style: "currency",
@@ -109,8 +112,9 @@ type Line = {
   name: string;
   kilos: number;      // solo aplica a PT
   qty: number;
-  priceBase: number;  // referencia
+  priceBase: number;  // referencia: $/kg si PT (o $ unit para no-PT)
   precioVenta: number; // $/kg si PT (modo kilo), $/presentación si PT (modo presentación), $ unit si no-PT
+  descuento: number;  // % entre -20 y 20 (positivo = rebaja)
   total: number;
 };
 
@@ -125,7 +129,6 @@ export default function CotizacionPage() {
   const [mostrarIva, setMostrarIva] = useState<boolean>(true);
 
   useEffect(() => {
-    // Cargar preferencias
     try {
       const mp = window.localStorage.getItem("ctz.pref.modoPrecio") as "kilo" | "presentacion" | null;
       const mt = window.localStorage.getItem("ctz.pref.mostrarTotales");
@@ -136,7 +139,6 @@ export default function CotizacionPage() {
     } catch {}
   }, []);
   useEffect(() => {
-    // Guardar preferencias
     try {
       window.localStorage.setItem("ctz.pref.modoPrecio", modoPrecio);
       window.localStorage.setItem("ctz.pref.mostrarTotales", mostrarTotales ? "1" : "0");
@@ -276,7 +278,7 @@ export default function CotizacionPage() {
   function addLine() {
     setLines((old) => [
       ...old,
-      { code: "", name: "", kilos: 1, qty: 1, priceBase: 0, precioVenta: 0, total: 0 },
+      { code: "", name: "", kilos: 1, qty: 1, priceBase: 0, precioVenta: 0, descuento: 0, total: 0 },
     ]);
   }
   function rmLine(i: number) {
@@ -288,7 +290,7 @@ export default function CotizacionPage() {
     setLines((old) => {
       const n = [...old];
       const base = n[i] ?? {
-        code: "", name: "", kilos: 1, qty: 1, priceBase: 0, precioVenta: 0, total: 0,
+        code: "", name: "", kilos: 1, qty: 1, priceBase: 0, precioVenta: 0, descuento: 0, total: 0,
       };
       const row: Line = {
         ...base,
@@ -297,6 +299,7 @@ export default function CotizacionPage() {
         kilos: prod.kilos || 1,
         priceBase: prod.price_list || 0,
         precioVenta: prod.price_list || 0, // editable
+        descuento: 0,
       };
       n[i] = computeLine(row);
       return n;
@@ -309,7 +312,7 @@ export default function CotizacionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modoPrecio]);
 
-  function updateLine(i: number, field: keyof Line, value: unknown) {
+  function updateLine(i: number, field: keyof Line | "descuento", value: unknown) {
     setLines((old) => {
       const n = [...old];
       const current = n[i];
@@ -317,23 +320,15 @@ export default function CotizacionPage() {
       const row: Line = { ...current };
 
       const esPT = (row.code || "").toUpperCase().startsWith("PT");
-      const basePorKg = num(row.priceBase) || 0;     // base por kg
-      const basePresentacion = Math.round(basePorKg * (num(row.kilos) || 1)); // base por presentación
+      const basePorKg = num(row.priceBase) || 0;     // base por kg (PT) o base unit (no-PT)
+      const basePresentacion = Math.round(basePorKg * (num(row.kilos) || 1)); // base por presentación (PT)
+
+      // Helper: base correspondiente según modo
+      const baseComparacion =
+        esPT && modoPrecio === "presentacion" ? basePresentacion : basePorKg;
 
       if (field === "precioVenta") {
         const pv = value === "" || value === undefined ? 0 : Math.round(num(value));
-
-        // ================== RESTRICCIÓN DESCUENTO 20% ==================
-        // Determinar base de comparación según modo y tipo
-        let baseComparacion = basePorKg;
-        if (esPT && modoPrecio === "presentacion") {
-          baseComparacion = basePresentacion; // en este modo el usuario ingresa precio por presentación
-        } else {
-          // PT + kilo  => base por kg
-          // no-PT      => base unitario (priceBase)
-          baseComparacion = basePorKg;
-        }
-
         const descCalc = baseComparacion > 0 ? ((baseComparacion - pv) / baseComparacion) * 100 : 0;
 
         if (descCalc > 20) {
@@ -346,10 +341,30 @@ export default function CotizacionPage() {
               `El precio será restablecido al valor base.`
           );
           row.precioVenta = baseComparacion; // restablecer al base correspondiente
+          row.descuento = 0;
         } else {
           row.precioVenta = pv;
+          // sincroniza % desc (puede ser negativo si sube el precio)
+          row.descuento = Math.round((baseComparacion - pv) / baseComparacion * 100);
+          // clamp sólo para visualización; no alerta si es < -20
+          row.descuento = clamp(row.descuento, -20, 20);
         }
+      } else if (field === "descuento") {
+        // Usuario edita % desc
+        let d = Math.round(num(value));
+        if (d > 20) {
+          alert("❌ Descuento máximo permitido es 20%. Se restablece al precio base.");
+          d = 0;
+          row.precioVenta = baseComparacion;
+        } else {
+          d = clamp(d, -20, 20); // permite -20% (recargo) hasta +20% (rebaja)
+          // aplica al precio
+          const precio = Math.round(baseComparacion * (1 - d / 100));
+          row.precioVenta = precio;
+        }
+        row.descuento = d;
       } else {
+        // Otros campos
         (row as any)[field] = value as any;
         row.kilos = num(row.kilos) || 1;
         row.qty = num(row.qty) || 0;
@@ -370,6 +385,11 @@ export default function CotizacionPage() {
                 `Se restablecerá al precio base.`
             );
             row.precioVenta = basePres;
+            row.descuento = 0;
+          } else {
+            // sincroniza el % desc frente a cambio de kilos
+            row.descuento = Math.round((basePres - pv) / basePres * 100);
+            row.descuento = clamp(row.descuento, -20, 20);
           }
         }
       }
@@ -493,10 +513,10 @@ export default function CotizacionPage() {
         descripcion: item.name,
         kilos: item.kilos,
         cantidad: item.qty,
-        // guardamos lo digitado según el modo seleccionado
         precioUnitarioPresentacion: Math.round(item.precioVenta || 0),
+        descuento: item.descuento,
         totalItem: Math.round(item.total || 0),
-        modoPrecio,                 // 👈 útil para auditar
+        modoPrecio,
         mostrarTotales: mostrarTotales ? "Sí" : "No",
         mostrarIva: mostrarIva ? "Sí" : "No",
       }));
@@ -512,7 +532,7 @@ export default function CotizacionPage() {
       const rows = Number(saved?.rows ?? datos.length) || datos.length;
       setInfoMsg(`✅ Cotización guardada con ${rows} ítem(s) en "Cotizaciones".`);
 
-      // 2) Generar PDF corporativo (pasa TODAS las preferencias correctas)
+      // 2) Generar PDF corporativo
       const { filename, base64 } = await generarPdfCotizacion({
         numero: numeroCTZ,
         fecha: `Santiago, ${new Date().toLocaleDateString("es-CL", {
@@ -531,8 +551,9 @@ export default function CotizacionPage() {
           codigo: r.code,
           descripcion: r.name,
           cantidad: r.qty,
-          // en el PDF, el total de la fila ya viene calculado con la dinámica
+          kilos: r.kilos,
           precioUnitario: r.precioVenta,
+          descuento: r.descuento,
           total: r.total,
         })),
         validez,
@@ -879,8 +900,9 @@ export default function CotizacionPage() {
                   <th className="px-2 py-1 text-left" style={{ width: "80px" }}>Código</th>
                   <th className="px-2 py-1 text-left">Descripción</th>
                   <th className="px-2 py-1 text-right print:hidden" style={{ width: "70px" }}>Kg (PT)</th>
-                  <th className="px-2 py-1 text-right" style={{ width: "80px" }}>Cant</th>
+                  <th className="px-2 py-1 text-right" style={{ width: "70px" }}>Cant</th>
                   <th className="px-2 py-1 text-right print:hidden" style={{ width: "110px" }}>Precio base</th>
+                  <th className="px-2 py-1 text-right" style={{ width: "85px" }}>% Desc</th>
                   <th className="px-2 py-1 text-right" style={{ width: "140px" }}>
                     {(modoPrecio === "kilo") ? "$ por kg / $ unit" : "$ presentación / $ unit"}
                   </th>
@@ -936,6 +958,27 @@ export default function CotizacionPage() {
                         <span className="hidden print:inline">{r.qty}</span>
                       </td>
                       <td className="px-2 py-1 text-right print:hidden">{money(r.priceBase)}</td>
+
+                      {/* % Desc */}
+                      <td className="px-2 py-1 text-right">
+                        <input
+                          type="number"
+                          step={1}
+                          className="w-20 rounded border px-2 py-1 text-right"
+                          value={String(r.descuento ?? 0)}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            // Permitimos escribir libremente y validamos en blur
+                            const n = [...lines];
+                            n[i].descuento = num(val);
+                            setLines(n);
+                          }}
+                          onBlur={(e) => updateLine(i, "descuento", e.target.value)}
+                        />
+                        <div className="text-[10px] text-zinc-500 mt-1">[-20%, +20%]</div>
+                      </td>
+
+                      {/* Precio Venta */}
                       <td className="px-2 py-1 text-right">
                         <input
                           type="number"
@@ -956,6 +999,7 @@ export default function CotizacionPage() {
                             : "$ unitario"}
                         </div>
                       </td>
+
                       <td className="px-2 py-1 text-right">{money(r.total)}</td>
                       <td className="px-2 py-1 print:hidden">
                         <button className="text-red-600 text-xs" onClick={() => rmLine(i)}>Eliminar</button>
@@ -968,7 +1012,7 @@ export default function CotizacionPage() {
               {lines.length > 0 && mostrarTotales && (
                 <tfoot>
                   <tr className="font-semibold bg-zinc-50">
-                    <td colSpan={5} />
+                    <td colSpan={6} />
                     <td className="text-right px-2 py-1 border-t">Subtotal</td>
                     <td className="text-right px-2 py-1 border-t">{money(subtotal)}</td>
                     <td />
@@ -976,13 +1020,13 @@ export default function CotizacionPage() {
                   {mostrarIva && (
                     <>
                       <tr className="bg-zinc-50">
-                        <td colSpan={5} />
+                        <td colSpan={6} />
                         <td className="text-right px-2 py-1">IVA (19%)</td>
                         <td className="text-right px-2 py-1">{money(iva)}</td>
                         <td />
                       </tr>
                       <tr className="font-bold bg-zinc-50">
-                        <td colSpan={5} />
+                        <td colSpan={6} />
                         <td className="text-right px-2 py-1" style={{ borderTop: "2px solid #2B6CFF" }}>
                           TOTAL
                         </td>

@@ -28,7 +28,6 @@ type ProductoPDF = {
   codigo: string;
   descripcion: string;
   cantidad: number;
-  precioBase?: number;
   precioUnitario: number;
   total: number;
 };
@@ -37,7 +36,7 @@ type EjecutivoPDF = {
   nombre: string;
   correo: string;
   celular: string;
-  cargo?: string;
+  cargo: string;
 };
 
 type DatosPDF = {
@@ -82,7 +81,7 @@ function drawTableHeader(doc: jsPDF, y: number, x: number, widths: number[], hea
 
   let cursorX = x;
   for (let i = 0; i < headers.length; i++) {
-    doc.text(headers[i], cursorX + mm(2), y + mm(4.5));
+    doc.text(headers[i], cursorX + mm(2), y + mm(5));
     cursorX += widths[i];
   }
 
@@ -96,7 +95,8 @@ function drawRow(
   x: number,
   widths: number[],
   cells: (string | number)[],
-  lineHeight: number
+  lineHeight: number,
+  withBorder = true
 ) {
   const totalWidth = widths.reduce((a, b) => a + b, 0);
   const wrapped: string[][] = cells.map((c, idx) => {
@@ -107,8 +107,10 @@ function drawRow(
   const lines = Math.max(...wrapped.map((arr) => arr.length));
   const height = Math.max(lineHeight * lines, lineHeight);
 
-  doc.setDrawColor(GRIS_BORDE);
-  doc.rect(x, y, totalWidth, height);
+  if (withBorder) {
+    doc.setDrawColor(GRIS_BORDE);
+    doc.rect(x, y, totalWidth, height);
+  }
 
   let cursorX = x;
   for (let i = 0; i < cells.length; i++) {
@@ -120,6 +122,7 @@ function drawRow(
     }
     cursorX += widths[i];
   }
+
   return height;
 }
 
@@ -127,7 +130,7 @@ function ensureSpace(doc: jsPDF, y: number, needed: number) {
   const pageH = doc.internal.pageSize.getHeight();
   if (y + needed > pageH - mm(15)) {
     doc.addPage();
-    return mm(20);
+    return mm(15);
   }
   return y;
 }
@@ -147,33 +150,32 @@ export function generarPdfCotizacion(data: DatosPDF) {
 
   const pageW = doc.internal.pageSize.getWidth();
   const marginX = mm(15);
-  let y = mm(15);
 
-  /* ---------- LOGO Y ENCABEZADO ---------- */
+  /* ---------- LOGO EN ESQUINA ---------- */
   try {
-    const logoW = mm(55);
-    const logoH = mm(13);
-    const logoX = (pageW - logoW) / 2;
-    doc.addImage(logoBase64, "PNG", logoX, y, logoW, logoH);
-    y += mm(22);
-  } catch {
-    y += mm(22);
-  }
+    const logoW = mm(35);
+    const logoH = mm(10);
+    const logoX = mm(15);
+    const logoY = mm(12);
+    doc.addImage(logoBase64, "PNG", logoX, logoY, logoW, logoH);
+  } catch {}
 
+  /* ---------- TÍTULO Y NÚMERO ---------- */
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
   doc.setTextColor(AZUL);
-  doc.text("COTIZACIÓN", pageW / 2, y, { align: "center" });
+  doc.text("COTIZACIÓN", pageW / 2, mm(25), { align: "center" });
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   doc.setTextColor(GRIS_TEXTO);
-  doc.text(`CTZ N° ${numero}`, pageW - marginX, y - 1, { align: "right" });
-  y += mm(5);
-  doc.text(fecha, pageW - marginX, y, { align: "right" });
-  y += mm(10);
+  const numeroLimpio = numero.replace(/^CTZ-?/i, ""); // elimina prefijo duplicado
+  doc.text(`CTZ N° ${numeroLimpio}`, pageW - marginX, mm(22), { align: "right" });
+  doc.text(fecha, pageW - marginX, mm(27), { align: "right" });
 
-  /* ---------- CLIENTE ---------- */
+  let y = mm(35);
+
+  /* ---------- DATOS CLIENTE ---------- */
   doc.setFontSize(10);
   doc.setTextColor(GRIS_TEXTO);
   doc.text("Señores", marginX, y);
@@ -197,13 +199,13 @@ export function generarPdfCotizacion(data: DatosPDF) {
     doc.text(dir, marginX + mm(20), y);
     y += mm(6);
   }
-  y += mm(3);
+  y += mm(2);
 
-  /* ---------- INTRO ---------- */
-  doc.setTextColor(0, 0, 0);
+  /* ---------- INTRODUCCIÓN ---------- */
   const intro =
-    "De acuerdo a lo solicitado, tenemos el agrado de cotizar los siguientes productos que Spartan de Chile Ltda. fabrica y distribuye en el país.";
+    "De acuerdo a lo solicitado, tenemos el agrado de cotizar algunos de los productos que Spartan de Chile Ltda., fabrica y distribuye en el país, y/o maquinaria / accesorios de limpieza industrial.";
   const introWrapped = wrapText(doc, intro, pageW - marginX * 2);
+  doc.setTextColor(0, 0, 0);
   introWrapped.forEach((ln) => {
     doc.text(ln, marginX, y);
     y += mm(4);
@@ -215,42 +217,66 @@ export function generarPdfCotizacion(data: DatosPDF) {
   const widths = showTotalCol
     ? [mm(25), mm(85), mm(25), mm(22), mm(23)]
     : [mm(25), mm(100), mm(28), mm(27)];
+
   const headers = showTotalCol
     ? ["Código", "Producto / Descripción", "Cantidad", "Precio Neto", "Total S/IVA"]
     : ["Código", "Producto / Descripción", "Cantidad", "Precio Neto"];
 
-  doc.setFontSize(9);
   y = ensureSpace(doc, y, mm(10));
+  doc.setFontSize(9);
   drawTableHeader(doc, y, marginX, widths, headers);
   y += mm(7);
   doc.setFontSize(8.5);
 
   let accSubtotal = 0;
   for (const p of productos) {
-    // 🚫 Validación descuento > 20%
-    if (p.precioBase && p.precioUnitario < p.precioBase * 0.8) continue;
-
     const cantTxt = String(p.cantidad) + " unidad" + (p.cantidad > 1 ? "es" : "");
     const cells = showTotalCol
       ? [p.codigo, p.descripcion, cantTxt, moneyCL(p.precioUnitario), moneyCL(p.total)]
       : [p.codigo, p.descripcion, cantTxt, moneyCL(p.precioUnitario)];
-    const h = drawRow(doc, y, marginX, widths, cells, mm(6.5));
+    const h = drawRow(doc, y, marginX, widths, cells, mm(6.5), true);
     y += h;
     accSubtotal += Math.round(p.total || 0);
   }
 
+  /* ---------- TOTALES ---------- */
+  if (opts.mostrarTotales) {
+    y += mm(6);
+    const xTot = pageW - marginX - mm(60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("Totales", xTot, y);
+    y += mm(5);
+    doc.setFont("helvetica", "normal");
+
+    doc.text("Subtotal:", xTot, y);
+    doc.text(moneyCL(data.subtotal || 0), pageW - marginX, y, { align: "right" });
+    y += mm(5);
+
+    if (opts.mostrarIva) {
+      doc.text("IVA (19%):", xTot, y);
+      doc.text(moneyCL(data.iva || 0), pageW - marginX, y, { align: "right" });
+      y += mm(5);
+
+      doc.setFont("helvetica", "bold");
+      doc.text("TOTAL:", xTot, y);
+      doc.text(moneyCL(data.total || 0), pageW - marginX, y, { align: "right" });
+      doc.setFont("helvetica", "normal");
+    }
+  }
+
   /* ---------- CONDICIONES ---------- */
-  y += mm(8);
+  y += mm(10);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9.5);
   const condiciones: string[] = [
     "Estos precios son unitarios netos y no incluyen I.V.A.",
-    "Despacho mínimo: $50.000 + IVA, puesto en sus bodegas Región Metropolitana.",
+    "Despacho Mínimo: $50.000 + IVA, puesto en sus bodegas Región Metropolitana, cualquier pedido menor a este monto debe pagar despacho de $19.900 + IVA",
     `Plazo de entrega: ${data.entrega || "A convenir"}`,
     `Validez cotización: ${data.validez || "10 días"}`,
     `Forma de pago: ${data.formaPago || "Contado - Transferencia"}`,
     "",
-    "Spartan de Chile Ltda. presta asesoría técnica permanente, sin costo para el cliente.",
+    "Spartan de Chile Ltda. presta asesoría técnica permanente, sin costo para el cliente, en el uso de su amplia gama de productos.",
   ];
   condiciones.forEach((linea) => {
     const wrapped = wrapText(doc, linea, pageW - marginX * 2);
@@ -261,10 +287,9 @@ export function generarPdfCotizacion(data: DatosPDF) {
   });
 
   /* ---------- FIRMA ---------- */
-  y += mm(8);
+  y += mm(10);
   const firmaX = marginX + mm(90);
-  doc.setFont("helvetica", "normal");
-  doc.text("Sin otro particular, les saluda muy atentamente.", firmaX, y);
+  doc.text("Sin otro particular, les saluda muy atentamente.", firmaX, y, { align: "left" });
   y += mm(10);
   doc.setFont("helvetica", "bold");
   doc.text(ejecutivo.nombre, firmaX, y);
