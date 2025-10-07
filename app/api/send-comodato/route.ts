@@ -21,15 +21,16 @@ function buildComodatoHTML(body: any) {
     ? `<span style="background:#16a34a;color:#fff;padding:2px 8px;border-radius:9999px;font-size:12px">Viable</span>`
     : `<span style="background:#dc2626;color:#fff;padding:2px 8px;border-radius:9999px;font-size:12px">No viable</span>`;
 
-  const indicadoresRows = indicadores
+    const indicadoresRows = indicadores
     ?.map(
-      (i) => `
+      (i: { label: string; valor: string | number }) => `
         <tr>
           <td style="border:1px solid #e5e7eb;padding:6px">${i.label}</td>
           <td style="border:1px solid #e5e7eb;padding:6px;text-align:right">${i.valor}</td>
         </tr>`
     )
     .join("") ?? "";
+  
 
   return `
   <div style="font-family:Inter,system-ui,Arial,sans-serif;color:#111827">
