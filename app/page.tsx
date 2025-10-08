@@ -24,60 +24,56 @@ export default function HomeMenu() {
 
   useEffect(() => {
     (async () => {
+      // 1️⃣ Obtener sesión
       const {
         data: { session },
       } = await supabase.auth.getSession();
-      if (session?.user?.email) {
-        setUserEmail(session.user.email);
-      }
-
+      const email = session?.user?.email || null;
+      setUserEmail(email);
+  
+      // 2️⃣ No continuar si no hay correo
+      if (!email) return;
+  
       try {
         // ⚡ Consumir APIs internas
-        const [metasRes, comodatosRes, facturasRes, alertasRes] =
-          await Promise.all([
-            fetch("/api/metas"),
-            fetch("/api/comodatos"),
-            fetch("/api/facturas"),
-            fetch("/api/kpi/alertas-clientes-comodatos"),
-          ]);
-
+        const [metasRes, comodatosRes, facturasRes, alertasRes] = await Promise.all([
+          fetch("/api/metas"),
+          fetch("/api/comodatos"),
+          fetch(`/api/facturas?email=${encodeURIComponent(email)}`),
+          fetch("/api/kpi/alertas-clientes-comodatos"),
+        ]);
+  
         // Metas y ventas
         if (metasRes.ok) {
           const json = await metasRes.json();
           const row = json?.data?.[0];
           if (row) {
-            const ventasReal = Number(
-              String(row["total_quimicos"]).replace(/[^0-9.-]/g, "")
-            );
-            const metaReal = Number(
-              String(row["meta_septiembre_2025"]).replace(/[^0-9.-]/g, "")
-            );
-
+            const ventasReal = Number(String(row["total_quimicos"]).replace(/[^0-9.-]/g, ""));
+            const metaReal = Number(String(row["meta_septiembre_2025"]).replace(/[^0-9.-]/g, ""));
             setVentas(ventasReal || 0);
             setMeta(metaReal || 1);
-            setPorcentaje(
-              metaReal > 0 ? Math.round((ventasReal / metaReal) * 100) : 0
-            );
+            setPorcentaje(metaReal > 0 ? Math.round((ventasReal / metaReal) * 100) : 0);
           }
         }
-
+  
         // Comodatos
         if (comodatosRes.ok) {
           const json = await comodatosRes.json();
           setComodatos(json?.data?.length || 0);
         }
-
-        // Facturas (filtradas por email del usuario logueado)
-if (facturasRes.ok && userEmail) {
-  const json = await facturasRes.json();
-  const facturasUser = (json?.data || []).filter(
-    (f: any) =>
-      f.EMAIL_COL?.toLowerCase().trim() === userEmail.toLowerCase().trim()
-  );
-  setFacturas(facturasUser.length);
-}
-
-
+  
+        // Facturas (filtradas por correo del usuario logueado)
+        if (facturasRes.ok) {
+          const json = await facturasRes.json();
+          const facturasUser = (json?.data || []).filter(
+            (f: any) =>
+              String(f.EMAIL_COL || "")
+                .toLowerCase()
+                .trim() === email.toLowerCase().trim()
+          );
+          setFacturas(facturasUser.length);
+        }
+  
         // Alertas
         if (alertasRes.ok) {
           const json = await alertasRes.json();
@@ -88,6 +84,7 @@ if (facturasRes.ok && userEmail) {
       }
     })();
   }, [supabase]);
+  
 
   // Fecha actual
   const today = new Date().toLocaleDateString("es-CL", {

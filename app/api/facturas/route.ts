@@ -1,39 +1,39 @@
+// app/api/facturas/route.ts
 import { NextResponse } from "next/server";
 import Papa from "papaparse";
 
 /**
  * API: Devuelve las facturas emitidas desde Google Sheets
- * Filtradas por correo del ejecutivo (param ?email=)
+ * Filtra por email si se pasa como query param (?email=)
  */
 export async function GET(req: Request) {
   try {
-    // ✅ URL de tu hoja pública (modo export CSV)
+    // ✅ URL pública de tu hoja "Facturas Emitidas"
     const SHEET_URL =
       "https://docs.google.com/spreadsheets/d/1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s/export?format=csv&gid=871602912";
 
+    // Leer parámetro de búsqueda (?email=)
+    const { searchParams } = new URL(req.url);
+    const email = searchParams.get("email")?.toLowerCase().trim();
+
+    // Descargar CSV
     const res = await fetch(SHEET_URL, { cache: "no-store" });
     if (!res.ok) throw new Error("No se pudo acceder al CSV de Google Sheets");
 
     const csv = await res.text();
     const parsed = Papa.parse(csv, { header: true });
-    let data = parsed.data.filter((r: any) => r && Object.keys(r).length > 0);
+    const rows = parsed.data.filter((r: any) => r && Object.keys(r).length > 0);
 
-    // 👇 Obtener email desde la query string (?email=...)
-    const url = new URL(req.url);
-    const email = url.searchParams.get("email");
+    // ✅ Filtrar por email en cualquiera de las columnas
+    const filtered = email
+      ? rows.filter((r: any) => {
+          const email1 = String(r.EMAIL_COL || "").toLowerCase().trim();
+          const email2 = String(r.EMAIL_COLUMNA || "").toLowerCase().trim();
+          return email1 === email || email2 === email;
+        })
+      : rows;
 
-    // ⚙️ Nombre exacto de la columna donde está el correo del ejecutivo
-    const EMAIL_COL = "email_ejecutivo"; // ← cámbialo si tu hoja tiene otro encabezado
-
-    if (email && data.length > 0) {
-      // Filtrar por coincidencia exacta o parcial del correo
-      data = data.filter((r: any) => {
-        const val = (r[EMAIL_COL] || "").toString().toLowerCase().trim();
-        return val === email.toLowerCase();
-      });
-    }
-
-    return NextResponse.json({ success: true, data });
+    return NextResponse.json({ success: true, data: filtered });
   } catch (err: any) {
     console.error("❌ Error cargando facturas:", err);
     return NextResponse.json(
