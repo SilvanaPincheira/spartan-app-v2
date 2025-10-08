@@ -72,7 +72,7 @@ if (facturasRes.ok && userEmail) {
   const json = await facturasRes.json();
   const facturasUser = (json?.data || []).filter(
     (f: any) =>
-      f.email?.toLowerCase().trim() === userEmail.toLowerCase().trim()
+      f.EMAIL_COL?.toLowerCase().trim() === userEmail.toLowerCase().trim()
   );
   setFacturas(facturasUser.length);
 }
