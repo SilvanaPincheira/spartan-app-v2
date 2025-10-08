@@ -67,11 +67,16 @@ export default function HomeMenu() {
           setComodatos(json?.data?.length || 0);
         }
 
-        // Facturas
-        if (facturasRes.ok) {
-          const json = await facturasRes.json();
-          setFacturas(json?.data?.length || 0);
-        }
+        // Facturas (filtradas por email del usuario logueado)
+if (facturasRes.ok && userEmail) {
+  const json = await facturasRes.json();
+  const facturasUser = (json?.data || []).filter(
+    (f: any) =>
+      f.email?.toLowerCase().trim() === userEmail.toLowerCase().trim()
+  );
+  setFacturas(facturasUser.length);
+}
+
 
         // Alertas
         if (alertasRes.ok) {
