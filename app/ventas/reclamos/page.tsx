@@ -71,19 +71,34 @@ export default function ReclamosPage() {
       // Helper para líneas con salto de página
       const writeLine = (label: string, value: string) => {
         if (!value) return;
+      
+        const maxWidth = W - 2 * M - 140; // más espacio entre columnas
+        const lines = doc.splitTextToSize(value, maxWidth);
+        const lineHeight = 14 + (lines.length - 1) * 10;
+      
+        // Fondo de línea para mejor lectura
+        doc.setFillColor(255, 255, 255);
+        doc.rect(M, y - 8, W - 2 * M, lineHeight + 12, "F");
+      
+        // Etiqueta
         doc.setFont("helvetica", "bold");
-        doc.text(`${label}:`, M, y);
+        doc.setTextColor(0, 0, 0);
+        doc.text(`${label}:`, M + 4, y + 4);
+      
+        // Valor
         doc.setFont("helvetica", "normal");
-        const text = value;
-        const maxWidth = W - 2 * M - 100;
-        const lines = doc.splitTextToSize(text, maxWidth);
-        doc.text(lines, M + 100, y);
-        y += 18 + (lines.length - 1) * 12;
+        doc.text(lines, M + 160, y + 4);
+      
+        // Avanzar
+        y += lineHeight + 16;
+      
+        // Saltar de página si se pasa
         if (y > 760) {
           doc.addPage();
           y = 60;
         }
       };
+      
 
       // Campo a etiqueta legible
       const labelOf: Record<string, string> = {
