@@ -1,4 +1,3 @@
-// app/page.tsx
 "use client";
 
 import Image from "next/image";
@@ -16,34 +15,35 @@ export default function HomeMenu() {
 
   // Datos del dashboard
   const [ventas, setVentas] = useState(0);
-  const [meta, setMeta] = useState(1); // evitar división por cero
+  const [meta, setMeta] = useState(1);
   const [porcentaje, setPorcentaje] = useState(0);
   const [comodatos, setComodatos] = useState(0);
   const [facturas, setFacturas] = useState(0);
   const [alertas, setAlertas] = useState(0);
 
+  // Encuesta
+  const [rating, setRating] = useState<number | null>(null);
+  const [comentario, setComentario] = useState("");
+  const [enviado, setEnviado] = useState(false);
+
   useEffect(() => {
     (async () => {
-      // 1️⃣ Obtener sesión
       const {
         data: { session },
       } = await supabase.auth.getSession();
       const email = session?.user?.email || null;
       setUserEmail(email);
-  
-      // 2️⃣ No continuar si no hay correo
+
       if (!email) return;
-  
+
       try {
-        // ⚡ Consumir APIs internas
         const [metasRes, comodatosRes, facturasRes, alertasRes] = await Promise.all([
           fetch("/api/metas"),
           fetch("/api/comodatos"),
           fetch(`/api/facturas?email=${encodeURIComponent(email)}`),
           fetch("/api/kpi/alertas-clientes-comodatos"),
         ]);
-  
-        // Metas y ventas
+
         if (metasRes.ok) {
           const json = await metasRes.json();
           const row = json?.data?.[0];
@@ -55,26 +55,21 @@ export default function HomeMenu() {
             setPorcentaje(metaReal > 0 ? Math.round((ventasReal / metaReal) * 100) : 0);
           }
         }
-  
-        // Comodatos
+
         if (comodatosRes.ok) {
           const json = await comodatosRes.json();
           setComodatos(json?.data?.length || 0);
         }
-  
-        // Facturas (filtradas por correo del usuario logueado)
+
         if (facturasRes.ok) {
           const json = await facturasRes.json();
           const facturasUser = (json?.data || []).filter(
             (f: any) =>
-              String(f.EMAIL_COL || "")
-                .toLowerCase()
-                .trim() === email.toLowerCase().trim()
+              String(f.EMAIL_COL || "").toLowerCase().trim() === email.toLowerCase().trim()
           );
           setFacturas(facturasUser.length);
         }
-  
-        // Alertas
+
         if (alertasRes.ok) {
           const json = await alertasRes.json();
           setAlertas(json?.data?.length || 0);
@@ -84,9 +79,26 @@ export default function HomeMenu() {
       }
     })();
   }, [supabase]);
-  
 
-  // Fecha actual
+  // Manejo de envío de encuesta
+  async function enviarEncuesta(e: React.FormEvent) {
+    e.preventDefault();
+    if (!rating) return alert("Selecciona una puntuación.");
+
+    const { data: { user } } = await supabase.auth.getUser();
+    const { error } = await supabase.from("encuesta_app").insert([
+      {
+        user_id: user?.id || null,
+        rating,
+        comentario,
+      },
+    ]);
+
+    if (error) console.error(error);
+    else setEnviado(true);
+  }
+
+  // Fecha y mensajes
   const today = new Date().toLocaleDateString("es-CL", {
     weekday: "long",
     year: "numeric",
@@ -94,7 +106,6 @@ export default function HomeMenu() {
     day: "numeric",
   });
 
-  // Mensajes dinámicos
   const mensajes = [
     "🚀 Listo para un día productivo.",
     "📊 Revisa tus reportes y KPIs.",
@@ -131,8 +142,9 @@ export default function HomeMenu() {
         </div>
       </header>
 
-      {/* Mensaje dinámico */}
+      {/* Contenido principal */}
       <main className="relative mx-auto max-w-7xl px-6 py-10 space-y-8">
+        {/* Saludo */}
         <section className="rounded-2xl border bg-white shadow-sm p-6 text-center">
           <h2 className="text-2xl font-bold text-[#2B6CFF] mb-2">
             👋 Bienvenido{userEmail ? `, ${userEmail}` : ""}
@@ -141,9 +153,8 @@ export default function HomeMenu() {
           <p className="text-lg font-medium">{randomMsg}</p>
         </section>
 
-        {/* === Dashboard === */}
+        {/* Dashboard */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Odómetro */}
           <div className="bg-white shadow rounded-2xl p-6 flex flex-col items-center">
             <h2 className="text-lg font-semibold text-blue-600 mb-4">
               Avance Meta Mensual
@@ -170,7 +181,6 @@ export default function HomeMenu() {
             </p>
           </div>
 
-          {/* Tarjetas */}
           <div className="grid grid-cols-2 gap-4">
             <Card>
               <CardContent className="p-4">
@@ -210,7 +220,6 @@ export default function HomeMenu() {
               </CardContent>
             </Card>
 
-            {/* Alerta rápida */}
             <Card className="border-l-4 border-red-600 col-span-2">
               <CardContent className="p-4">
                 <h3 className="text-sm text-red-600 font-semibold">⚠️ Alertas</h3>
@@ -227,6 +236,53 @@ export default function HomeMenu() {
             </Card>
           </div>
         </div>
+
+        {/* Encuesta de satisfacción */}
+        <section className="bg-white rounded-2xl shadow p-6 max-w-xl mx-auto mt-10 text-center">
+          <h2 className="text-xl font-semibold mb-3 text-blue-600">
+            💬 ¿Qué te ha parecido SpartanOne?
+          </h2>
+
+          {enviado ? (
+            <p className="text-green-600 font-medium">
+              ✅ ¡Gracias por tu opinión!
+            </p>
+          ) : (
+            <form onSubmit={enviarEncuesta}>
+              <div className="flex justify-center space-x-2 mb-4">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setRating(n)}
+                    className={`text-3xl ${
+                      n <= (rating || 0)
+                        ? "text-yellow-400"
+                        : "text-gray-300 hover:text-yellow-200"
+                    }`}
+                  >
+                    ★
+                  </button>
+                ))}
+              </div>
+
+              <textarea
+                placeholder="¿Qué podríamos mejorar?"
+                value={comentario}
+                onChange={(e) => setComentario(e.target.value)}
+                className="w-full border rounded-md p-2 mb-3 text-sm"
+                rows={3}
+              />
+
+              <button
+                type="submit"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-md"
+              >
+                Enviar opinión
+              </button>
+            </form>
+          )}
+        </section>
       </main>
     </div>
   );
