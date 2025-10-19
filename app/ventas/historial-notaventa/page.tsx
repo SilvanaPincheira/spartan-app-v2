@@ -15,34 +15,35 @@ export default function HistorialNotasVenta() {
   useEffect(() => {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      const email = session?.user?.email || null;
+      const email = session?.user?.email?.toLowerCase() || null;
       setUserEmail(email);
-
+  
       try {
-        const res = await fetch("/api/historial-notaventa");
+        // ✅ Pasamos el email como query param al backend
+        const url = email
+          ? `/api/historial-notaventa?email=${encodeURIComponent(email)}`
+          : `/api/historial-notaventa`;
+  
+        const res = await fetch(url);
         const json = await res.json();
-
+  
         if (!json.ok) throw new Error(json.error);
         let data = json.data || [];
-
+  
         if (email) {
           // 🧩 Login sin dominio y normalizado
           const usuario = email.split("@")[0].toLowerCase(); // ejemplo: hernan.lopez
           const partes = usuario.split(".");
           const nombre = partes[0];
           const apellido = partes[1] || "";
-
-          // 🔍 Filtro flexible por nombre, apellido o correo parcial
+  
+          // 🔍 Filtro flexible (por nombre o apellido si lo necesitas)
           data = data.filter((n: any) => {
-            const ejecutivo = (n.ejecutivo || "").toLowerCase().replace(/\./g, " ");
-            return (
-              ejecutivo.includes(usuario) ||
-              ejecutivo.includes(nombre) ||
-              ejecutivo.includes(apellido)
-            );
+            const correo = (n.correoEjecutivo || "").toLowerCase();
+            return correo.includes(email); // 👈 ahora el filtro es directo por login
           });
         }
-
+  
         // 🟢 Si no hay coincidencias, mostrar todo (modo supervisor)
         if (data.length === 0) {
           console.warn("⚠️ No se encontraron coincidencias. Modo supervisor activo.");
@@ -50,7 +51,7 @@ export default function HistorialNotasVenta() {
           const jsonAll = await resAll.json();
           if (jsonAll.ok) data = jsonAll.data || [];
         }
-
+  
         setNotas(data);
       } catch (e: any) {
         console.error(e);
@@ -58,6 +59,7 @@ export default function HistorialNotasVenta() {
       }
     })();
   }, [supabase]);
+  
 
   // 🔍 Búsqueda en tabla
   const notasFiltradas = notas.filter(
