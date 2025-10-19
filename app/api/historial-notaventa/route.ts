@@ -28,7 +28,7 @@ function parseCsv(text: string): Record<string, string>[] {
 }
 
 /* ============================================================================
-   🚀 GET — agrupa por N° NV y filtra por EMAIL_COL si se pasa ?email=
+   🚀 GET — agrupa por N° NV y filtra por login (EMAIL_COL) si se pasa ?email=
    ============================================================================ */
 export async function GET(req: Request) {
   try {
@@ -52,17 +52,16 @@ export async function GET(req: Request) {
       else f["Número NV"] = ultimoNumero;
     }
 
-    // 🔍 Filtrar por EMAIL_COL (login Supabase)
+    // 🔍 Filtrar por EMAIL_COL (único por ejecutivo/login)
     let filtradas = filas;
     if (emailParam) {
       filtradas = filtradas.filter((f) => {
-        const correo =
-          (f["EMAIL_COL"] || f["Correo Ejecutivo"] || "").toLowerCase().trim();
-        return correo === emailParam; // 👈 identificación única
+        const emailCol = (f["EMAIL_COL"] || "").toLowerCase().trim();
+        return emailCol === emailParam;
       });
     }
 
-    // 🔍 Si llega ?nv=..., filtrar además por número NV
+    // 🔍 Si llega ?nv=..., filtrar adicionalmente
     if (nvParam) {
       filtradas = filtradas.filter((f) => {
         const nv = (f["Número NV"] || f["Numero NV"] || f["N° NV"] || "").trim();
@@ -83,8 +82,9 @@ export async function GET(req: Request) {
           cliente: r["Cliente"] || "",
           rut: r["RUT"] || "",
           codigoCliente: r["Codigo Cliente"] || r["Código Cliente"] || "",
-          ejecutivo: r["Ejecutivo"] || "",
-          correoEjecutivo: r["EMAIL_COL"] || r["Correo Ejecutivo"] || "",
+          ejecutivo: r["Ejecutivo"] || r["Empleado Ventas"] || "",
+          correoEjecutivo: r["Correo Ejecutivo"] || "",
+          emailCol: r["EMAIL_COL"] || "",
           direccion: r["Direccion"] || r["Dirección"] || "",
           comentarios: r["Comentarios"] || "",
           subtotal: Number(r["Subtotal"] || 0),
@@ -94,29 +94,51 @@ export async function GET(req: Request) {
       }
 
       // ⚙️ Agregar ítems válidos
-      const codigo = r["Código"] || "";
-      const descripcion = r["Descripción"] || "";
+      const codigo = r["Código"] || r["Codigo Producto"] || r["ItemCode"] || "";
+      const descripcion =
+        r["Descripción"] || r["Producto"] || r["Dscription"] || "";
       if (!codigo && !descripcion) continue;
 
       agrupadas[numeroNV].items.push({
         numeroNV,
         codigo,
         descripcion,
-        cantidad: Number(r["Cantidad"] || 0),
-        kilos: Number(r["Kg"] || r["Kilos"] || 0),
-        precioBase: Number(r["Precio base"] || 0),
-        descuento: Number(r["% Desc"] || 0),
-        precioVenta: Number(r["Precio venta"] || 0),
-        totalItem: Number(r["Total Item"] || r["Total"] || 0),
+        cantidad: Number(r["Cantidad"] || r["Quantity"] || 0),
+        kilos: Number(r["Kg"] || r["Kilos"] || r["Cantidad Kilos"] || 0),
+        precioBase: Number(
+          r["Precio base"] ||
+            r["Precio Base"] ||
+            r["Precio Unitario"] ||
+            r["Precio Por Linea"] ||
+            0
+        ),
+        descuento: Number(
+          r["% Desc"] || r["% Descuento"] || r["Descuento"] || 0
+        ),
+        precioVenta: Number(
+          r["Precio venta"] ||
+            r["Precio Venta"] ||
+            r["Precio Por Linea"] ||
+            r["Precio Unitario"] ||
+            0
+        ),
+        totalItem: Number(
+          r["Total Item"] ||
+            r["Total Línea"] ||
+            r["Total Linea"] ||
+            r["Total"] ||
+            0
+        ),
       });
     }
 
     const data = Object.values(agrupadas);
 
+    // 🧩 Si no hay resultados, devolver mensaje claro
     if (nvParam && data.length === 0) {
       return NextResponse.json({
         ok: false,
-        error: `No se encontró la Nota de Venta ${nvParam} para ${emailParam || "usuario"}`,
+        error: `No se encontró la Nota de Venta ${nvParam} para el usuario ${emailParam}`,
       });
     }
 
@@ -127,6 +149,9 @@ export async function GET(req: Request) {
     });
   } catch (err: any) {
     console.error("❌ Error en historial-notaventa:", err);
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: err.message },
+      { status: 500 }
+    );
   }
 }
