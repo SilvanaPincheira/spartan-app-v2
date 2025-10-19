@@ -632,13 +632,39 @@ const html = `
   </p>
 `;
 
-// ✅ adjunto PDF correctamente formateado
-const attachments = [
+// // ✅ adjunto PDF correctamente formateado
+const attachments: { filename: string; content: string }[] = [
   {
     filename,
     content: `data:application/pdf;base64,${base64}`,
   },
 ];
+
+// 📎 Adjuntar archivos adicionales desde el input (PDF, fotos, Word, Excel, etc.)
+try {
+  const fileInput = document.querySelector("#adjunto") as HTMLInputElement | null; // 👈 usa el mismo id que en tu JSX
+
+  if (fileInput && fileInput.files && fileInput.files.length > 0) {
+    for (const file of Array.from(fileInput.files)) {
+      const base64Extra = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(",")[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const mimeType = file.type || "application/octet-stream";
+      attachments.push({
+        filename: file.name,
+        content: `data:${mimeType};base64,${base64Extra}`,
+      });
+    }
+  }
+} catch (err) {
+  console.error("⚠️ Error al procesar adjuntos:", err);
+}
+
+
 
 const resMail = await fetch("/api/send-cotizacion", {
   method: "POST",
@@ -1096,15 +1122,17 @@ const resMail = await fetch("/api/send-cotizacion", {
      {/* Botones */}
 <div className="flex flex-wrap gap-4 print:hidden px-6 pb-8 items-center">
   {/* 📎 Adjunto opcional */}
-  <label className="flex flex-col text-sm text-zinc-700">
-    📎 Adjuntar archivo (opcional)
-    <input
-      id="adjunto"
-      type="file"
-      className="mt-1 text-xs text-zinc-600"
-      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
-    />
-  </label>
+<label className="flex flex-col text-sm text-zinc-700">
+  📎 Adjuntar archivo (opcional)
+  <input
+    id="adjunto"
+    type="file"
+    className="mt-1 text-xs text-zinc-600"
+    accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
+    multiple
+  />
+</label>
+
 
   {/* 💾 Guardar + PDF + Email */}
   <button
