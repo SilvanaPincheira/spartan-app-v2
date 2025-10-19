@@ -13,39 +13,38 @@ export async function POST(req: Request) {
       to = "alexandra.morales@spartan.cl",
       subject = "🧾 Nuevo Reclamo — Spartan App",
       body: htmlBody,
-      pdfBase64,
-      filename = "Reclamo_Spartan.pdf",
+      cliente,
+      ejecutivo,
+      correo,
+      attachments = [], // ✅ nuevo: puede incluir varios
     } = body;
 
-    if (!pdfBase64) throw new Error("Falta PDF adjunto");
+    if (!attachments.length) throw new Error("No se encontraron adjuntos para enviar.");
 
-    const attachments = [
-      {
-        filename,
-        content: pdfBase64,
-      },
-    ];
-
+    // Generar cuerpo HTML
     const html = `
       <div style="font-family:Arial,Helvetica,sans-serif;color:#111;">
         <h2 style="color:#1f4ed8">🧾 Nuevo Reclamo — Spartan App</h2>
         <p>Se ha recibido un nuevo reclamo generado automáticamente desde el formulario.</p>
-        <p><strong>Cliente:</strong> ${body.cliente || "—"}<br>
-        <strong>Ejecutivo:</strong> ${body.ejecutivo || "—"}<br>
-        <strong>Correo:</strong> ${body.correo || "—"}</p>
-        <p>Se adjunta el documento PDF con el detalle del reclamo.</p>
+        <p><strong>Cliente:</strong> ${cliente || "—"}<br>
+        <strong>Ejecutivo:</strong> ${ejecutivo || "—"}<br>
+        <strong>Correo:</strong> ${correo || "—"}</p>
+        <p>Se adjunta el documento PDF con el detalle del reclamo ${
+          attachments.length > 1 ? "y los archivos adicionales." : "."
+        }</p>
         <p style="color:#6b7280;font-size:12px;margin-top:20px">
           Enviado automáticamente por <b>Spartan App</b>.
         </p>
       </div>
     `;
 
+    // ✅ Envío
     const data = await resend.emails.send({
       from: "silvana.pincheira@spartan.cl",
       to,
       subject,
       html,
-      attachments,
+      attachments, // 👈 ahora soporta múltiples adjuntos base64
     });
 
     return NextResponse.json({ success: true, data });

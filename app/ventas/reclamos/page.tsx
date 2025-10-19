@@ -1,4 +1,3 @@
-// app/ventas/reclamos/page.tsx
 "use client";
 
 import { useState } from "react";
@@ -21,32 +20,32 @@ export default function ReclamosPage() {
     residuo: "",
     temperatura: "",
     descripcion: "",
-    adjunto: null as File | null, // 👈 Nuevo campo adjunto
+    adjunto: null as File | null, // 👈 nuevo
   });
 
   const [enviando, setEnviando] = useState(false);
   const [ok, setOk] = useState(false);
 
-  // Manejador de cambios
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
-    const { name, value, files } = e.target as any;
-    if (name === "adjunto") {
-      setForm((f) => ({ ...f, adjunto: files?.[0] || null }));
-    } else {
-      setForm((f) => ({ ...f, [name]: value }));
-    }
+    const { name, value } = e.target;
+    setForm((f) => ({ ...f, [name]: value }));
   };
 
-  // Enviar formulario
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setForm((f) => ({ ...f, adjunto: file }));
+  };
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (enviando) return;
     setEnviando(true);
     setOk(false);
 
     try {
-      // ========== 1️⃣ Generar PDF ==========
+      // === 1️⃣ Generar PDF con jsPDF ===
       const { jsPDF } = await import("jspdf");
       const doc = new jsPDF({ unit: "pt", format: "a4" });
 
@@ -56,7 +55,6 @@ export default function ReclamosPage() {
       const M = 40;
       let y = 60;
 
-      // Encabezado
       doc.setFillColor(...AZUL);
       doc.rect(0, 0, W, 70, "F");
       doc.setTextColor(255, 255, 255);
@@ -66,16 +64,11 @@ export default function ReclamosPage() {
 
       doc.setTextColor(0, 0, 0);
       doc.setFontSize(12);
-      doc.setFont("helvetica", "bold");
       doc.setFillColor(...GRIS);
       doc.rect(M, y, W - 2 * M, 26, "F");
       doc.text("Datos del Reclamo", M + 10, y + 18);
       y += 42;
 
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(11);
-
-      // Helper para texto con salto automático
       const writeLine = (label: string, value: string) => {
         if (!value) return;
         const maxWidth = W - 2 * M - 140;
@@ -107,7 +100,7 @@ export default function ReclamosPage() {
         tiempoAccion: "Tiempo de acción",
         aplicacion: "Aplicación",
         accionMecanica: "¿Acción mecánica?",
-        herramienta: "Herramienta usada para la aplicación",
+        herramienta: "Herramienta usada",
         residuo: "Residuo a eliminar",
         temperatura: "Temperatura de solución",
         descripcion: "Descripción del problema",
@@ -127,67 +120,55 @@ export default function ReclamosPage() {
       ];
       bloque1.forEach((k) => writeLine(labelOf[k], (form as any)[k]));
 
-      // Condiciones
-      doc.setFont("helvetica", "bold");
       doc.setFillColor(...GRIS);
       doc.rect(M, y, W - 2 * M, 24, "F");
       doc.text("Condiciones de aplicación", M + 10, y + 16);
       y += 36;
-
       ["aplicacion", "accionMecanica", "herramienta", "residuo", "temperatura"].forEach((k) =>
         writeLine(labelOf[k], (form as any)[k])
       );
 
-      // Descripción
-      doc.setFont("helvetica", "bold");
       doc.setFillColor(...GRIS);
       doc.rect(M, y, W - 2 * M, 24, "F");
       doc.text("Descripción", M + 10, y + 16);
       y += 36;
       writeLine(labelOf["descripcion"], form.descripcion);
 
-      // Exportar PDF base64
-      const pdfDataUri = doc.output("datauristring");
-      const base64 = pdfDataUri.split(",")[1];
+      const pdfBase64 = doc.output("datauristring").split(",")[1];
       const filename = `Reclamo_${(form.cliente || "Cliente").replace(/[^A-Za-z0-9_-]+/g, "_")}.pdf`;
 
-      // ========== 2️⃣ Guardar en Google Sheets ==========
+      // === 2️⃣ Guardar en Google Sheets ===
       const saveRes = await fetch("/api/save-reclamo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
 
-      // ========== 3️⃣ Enviar correo con adjuntos ==========
-      const attachments: { filename: string; content: string }[] = [
-        { filename, content: base64 },
-      ];
+      // === 3️⃣ Preparar adjuntos ===
+      const attachments: { filename: string; content: string }[] = [];
+      attachments.push({ filename, content: pdfBase64 });
 
-      // Si hay adjunto → convertirlo a base64
-  
-        if (form.adjunto) {
-          const fileBase64 = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () =>
-              resolve((reader.result as string).split(",")[1]);
-            reader.onerror = reject;
-            reader.readAsDataURL(form.adjunto!); // ✅ aseguramos que no sea null
-          });
-        
-          attachments.push({
-            filename: form.adjunto.name,
-            content: fileBase64,
-          });
-        }
-        
-    
+      if (form.adjunto && form.adjunto instanceof File) {
+        const base64Adjunto = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(",")[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(form.adjunto as Blob); // ✅ ya no da error
+        });
+        attachments.push({
+          filename: form.adjunto.name,
+          content: base64Adjunto,
+        });
+      }
+      
 
+      // === 4️⃣ Enviar correo ===
       const emailRes = await fetch("/api/send-reclamo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           subject: `🧾 Nuevo Reclamo — ${form.cliente}`,
-          body: "Se ha recibido un nuevo reclamo. Se adjunta PDF y archivo de respaldo.",
+          body: "Se ha recibido un nuevo reclamo. Se adjunta PDF con el detalle.",
           to: "alexandra.morales@spartan.cl",
           attachments,
         }),
@@ -219,24 +200,17 @@ export default function ReclamosPage() {
         alert("❌ Error al guardar o enviar correo.");
       }
     } catch (err) {
-      console.error("Error:", err);
+      console.error("Error en Reclamos:", err);
       alert("❌ Fallo al procesar el reclamo.");
     } finally {
       setEnviando(false);
     }
   }
 
-  // --- Interfaz ---
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900">
       <div className="mx-auto max-w-4xl p-8 bg-white shadow-sm rounded-2xl mt-8">
-        <h1 className="text-2xl font-bold text-[#2B6CFF] mb-4">
-          🧾 Formulario de Reclamos
-        </h1>
-        <p className="text-sm text-zinc-600 mb-6">
-          Complete todos los campos marcados con * para registrar correctamente su reclamo.
-        </p>
-
+        <h1 className="text-2xl font-bold text-[#2B6CFF] mb-4">🧾 Formulario de Reclamos</h1>
         <form onSubmit={handleSubmit} className="space-y-4">
           {[
             ["ejecutivo", "Ejecutivo de ventas *"],
@@ -262,6 +236,16 @@ export default function ReclamosPage() {
               />
             </label>
           ))}
+
+          {/* 🗂️ Subir archivo adjunto */}
+          <label className="block">
+            <span className="text-sm font-medium">Adjuntar archivo (opcional)</span>
+            <input
+              type="file"
+              onChange={handleFileChange}
+              className="mt-1 w-full text-sm"
+            />
+          </label>
 
           {/* Selects */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -294,45 +278,6 @@ export default function ReclamosPage() {
             </label>
           </div>
 
-          {/* Otros campos */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <label>
-              <span className="text-sm font-medium">Herramienta usada</span>
-              <input
-                type="text"
-                name="herramienta"
-                value={form.herramienta}
-                onChange={handleChange}
-                className="mt-1 w-full rounded border px-3 py-2 text-sm"
-              />
-            </label>
-
-            <label>
-              <span className="text-sm font-medium">Residuo a eliminar</span>
-              <input
-                type="text"
-                name="residuo"
-                value={form.residuo}
-                onChange={handleChange}
-                className="mt-1 w-full rounded border px-3 py-2 text-sm"
-              />
-            </label>
-          </div>
-
-          <label className="block">
-            <span className="text-sm font-medium">Temperatura de solución</span>
-            <select
-              name="temperatura"
-              value={form.temperatura}
-              onChange={handleChange}
-              className="mt-1 w-full rounded border px-3 py-2 text-sm"
-            >
-              <option value="">Seleccione...</option>
-              <option>Fría</option>
-              <option>Caliente</option>
-            </select>
-          </label>
-
           <label className="block">
             <span className="text-sm font-medium">Descripción del problema *</span>
             <textarea
@@ -341,18 +286,6 @@ export default function ReclamosPage() {
               value={form.descripcion}
               onChange={handleChange}
               rows={5}
-              className="mt-1 w-full rounded border px-3 py-2 text-sm"
-            />
-          </label>
-
-          {/* 📎 Adjunto */}
-          <label className="block">
-            <span className="text-sm font-medium">📎 Adjuntar archivo (opcional)</span>
-            <input
-              type="file"
-              name="adjunto"
-              accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-              onChange={handleChange}
               className="mt-1 w-full rounded border px-3 py-2 text-sm"
             />
           </label>
