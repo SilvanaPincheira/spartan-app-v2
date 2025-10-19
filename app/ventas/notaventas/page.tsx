@@ -403,8 +403,11 @@ useEffect(() => {
 
       const data = json.data || [];
       const filasNV = data.filter(
-        (n: any) => n.numeroNV === (nvToOpen || nvToDuplicate)
+        (n: any) =>
+          (n.numeroNV || "").trim() === (nvToOpen || nvToDuplicate)?.trim() &&
+          n.items?.length > 0
       );
+      
       if (filasNV.length === 0)
         return alert("❌ Nota de Venta no encontrada");
 
@@ -441,6 +444,11 @@ useEffect(() => {
       }));
 
       setLines(nuevasLineas);
+      if (nuevasLineas.length === 0) {
+        console.warn("⚠️ Nota de Venta sin ítems asociados:", cabecera.numeroNV);
+        alert("Esta Nota no tiene ítems guardados en el sheet.");
+      }
+      
 
       // 🧩 Si solo se abrió (no duplicado) => modo lectura
       if (nvToOpen) {
