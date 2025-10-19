@@ -27,6 +27,13 @@ export default function VentasPage() {
       color: "bg-emerald-50",
     },
     {
+      href: "/ventas/historial-notaventa",
+      icon: "📜",
+      title: "Historial de Notas de Venta",
+      desc: "Consulta las Notas de Venta grabadas, con fecha, cliente, ejecutivo y total.",
+      color: "bg-violet-50",
+    },
+    {
       href: "/ventas/clientesnuevos",
       icon: "👤",
       title: "Ficha de Cliente",
@@ -40,7 +47,6 @@ export default function VentasPage() {
       desc: "Registra reclamos de clientes con detalle del producto, lote y aplicación.",
       color: "bg-sky-50",
     },
-    
   ];
 
   return (
@@ -59,7 +65,9 @@ export default function VentasPage() {
               className={`block rounded-2xl border bg-white shadow-sm hover:shadow-lg transition p-6 ${m.color}`}
             >
               <div className="text-3xl mb-3">{m.icon}</div>
-              <h2 className="text-lg font-semibold text-[#2B6CFF] mb-1">{m.title}</h2>
+              <h2 className="text-lg font-semibold text-[#2B6CFF] mb-1">
+                {m.title}
+              </h2>
               <p className="text-sm text-zinc-600 leading-snug">{m.desc}</p>
             </Link>
           </motion.div>

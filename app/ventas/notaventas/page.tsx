@@ -1251,26 +1251,95 @@ const resMail = await fetch("/api/send-notaventa", {
       </div>
 
       {/* ===== BOTONES (solo pantalla) ===== */}
-      <div className="flex flex-wrap gap-2 print:hidden px-6 pb-8">
-        <button className="bg-zinc-200 px-3 py-1 rounded" onClick={imprimir}>
-          🖨️ Imprimir / PDF
-        </button>
+<div className="flex flex-wrap gap-2 print:hidden px-6 pb-8 items-center justify-between">
+  {/* 🕓 Fecha y hora visible */}
+  <div className="text-xs text-gray-500">
+    <b>Fecha y hora:</b>{" "}
+    {new Date().toLocaleString("es-CL", {
+      dateStyle: "short",
+      timeStyle: "short",
+    })}
+  </div>
 
-        {/* 🔹 Botón único: Guarda + descarga PDF + envía email */}
-        <button
-          className={`px-3 py-1 rounded text-white ${
-            procesando ? "bg-zinc-400" : "bg-emerald-600 hover:bg-emerald-700"
-          }`}
-          onClick={guardarPdfYEnviar}
-          disabled={procesando}
-        >
-          {procesando ? "Procesando..." : "💾 Guardar + 📄 PDF + 📧 Email"}
-        </button>
+  <div className="flex flex-wrap gap-2">
+    {/* 🖨️ Imprimir */}
+    <button
+      className="bg-zinc-200 px-3 py-1 rounded"
+      onClick={imprimir}
+    >
+      🖨️ Imprimir / PDF
+    </button>
 
-        <button className="bg-zinc-200 px-3 py-1 rounded" onClick={limpiarTodo}>
-          🧹 Nueva NV
-        </button>
-      </div>
+    {/* 💾 Nuevo: Botón Grabar Documento */}
+    <button
+      onClick={async () => {
+        if (saving) return; // 🔒 evita doble clic
+        setSaving(true);
+        try {
+          const fechaHora = new Date().toLocaleString("es-CL");
+          const payload = lines.map((item) => ({
+            numeroNV,
+            fechaHora,
+            cliente: clientName,
+            rut: clientRut,
+            codigoCliente: clientCode,
+            ejecutivo,
+            direccionDespacho: direccion,
+            comuna,
+            correoEjecutivo: emailEjecutivo,
+            comentarios,
+            codigo: item.code,
+            descripcion: item.name,
+            cantidad: item.qty,
+            precioVenta: item.precioVenta,
+            totalItem: item.total,
+          }));
+
+          const res = await fetch("/api/save-to-sheets", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          if (!res.ok) throw new Error("Error al grabar documento");
+          alert("✅ Documento grabado correctamente en Sheets.");
+        } catch (e: any) {
+          alert("❌ Error al grabar documento: " + e.message);
+        } finally {
+          setSaving(false);
+        }
+      }}
+      disabled={saving}
+      className={`px-3 py-1 rounded text-white transition ${
+        saving
+          ? "bg-gray-400 cursor-not-allowed"
+          : "bg-blue-600 hover:bg-blue-700"
+      }`}
+    >
+      {saving ? "Grabando..." : "💾 Grabar Documento"}
+    </button>
+
+    {/* 💾 Guardar + PDF + Email */}
+    <button
+      className={`px-3 py-1 rounded text-white ${
+        procesando ? "bg-zinc-400" : "bg-emerald-600 hover:bg-emerald-700"
+      }`}
+      onClick={guardarPdfYEnviar}
+      disabled={procesando}
+    >
+      {procesando ? "Procesando..." : "💾 Guardar + 📄 PDF + 📧 Email"}
+    </button>
+
+    {/* 🧹 Nueva NV */}
+    <button
+      className="bg-zinc-200 px-3 py-1 rounded"
+      onClick={limpiarTodo}
+    >
+      🧹 Nueva NV
+    </button>
+  </div>
+</div>
+
 
       {/* =========================================================================
          [K] ESTILOS DE IMPRESIÓN — PDF profesional
