@@ -28,7 +28,7 @@ function parseCsv(text: string): Record<string, string>[] {
 }
 
 /* ============================================================================
-   🚀 API GET — opcionalmente filtra por ?nv=NV-XXXX
+   🚀 API GET — agrupa por NV + Ejecutivo (para evitar mezclas entre usuarios)
    ============================================================================ */
 export async function GET(req: Request) {
   try {
@@ -50,28 +50,25 @@ export async function GET(req: Request) {
       else f["Número NV"] = ultimoNumero;
     }
 
-    // 🔍 Si se solicita ?nv=..., filtrar antes de agrupar
-    const filtradas = nvParam
-      ? filas.filter((f) => {
-          const nv = (f["Número NV"] || f["Numero NV"] || f["N° NV"] || "").trim();
-          return nv === nvParam;
-        })
-      : filas;
-
-    // 🧱 Agrupar por número de NV
+    // 🧱 Agrupar por N° NV + Ejecutivo
     const agrupadas: Record<string, any> = {};
-    for (const r of filtradas) {
-      const numeroNV = (r["Número NV"] || r["Numero NV"] || r["N° NV"] || "").trim();
-      if (!numeroNV) continue;
 
-      if (!agrupadas[numeroNV]) {
-        agrupadas[numeroNV] = {
+    for (const r of filas) {
+      const numeroNV = (r["Número NV"] || r["Numero NV"] || r["N° NV"] || "").trim();
+      const ejecutivoRaw = (r["Ejecutivo"] || r["Empleado Ventas"] || "").trim();
+      if (!numeroNV || !ejecutivoRaw) continue;
+
+      // 🔑 Clave única combinando número y ejecutivo
+      const clave = `${numeroNV}__${ejecutivoRaw.toLowerCase()}`;
+
+      if (!agrupadas[clave]) {
+        agrupadas[clave] = {
           numeroNV,
           fecha: r["Fecha"] || "",
           cliente: r["Cliente"] || "",
           rut: r["RUT"] || "",
           codigoCliente: r["Codigo Cliente"] || r["Código Cliente"] || "",
-          ejecutivo: r["Ejecutivo"] || r["Empleado Ventas"] || "",
+          ejecutivo: ejecutivoRaw,
           direccion:
             r["Direccion"] ||
             r["Dirección"] ||
@@ -85,13 +82,13 @@ export async function GET(req: Request) {
         };
       }
 
-      // Solo agregar ítems válidos
+      // 🔹 Solo agregar ítems válidos
       const codigo = r["Código"] || r["Codigo Producto"] || r["ItemCode"] || "";
       const descripcion =
         r["Descripción"] || r["Producto"] || r["Dscription"] || "";
       if (!codigo && !descripcion) continue;
 
-      agrupadas[numeroNV].items.push({
+      agrupadas[clave].items.push({
         numeroNV,
         codigo,
         descripcion,
@@ -104,7 +101,9 @@ export async function GET(req: Request) {
             r["Precio Por Linea"] ||
             0
         ),
-        descuento: Number(r["% Desc"] || r["% Descuento"] || r["Descuento"] || 0),
+        descuento: Number(
+          r["% Desc"] || r["% Descuento"] || r["Descuento"] || 0
+        ),
         precioVenta: Number(
           r["Precio venta"] ||
             r["Precio Venta"] ||
@@ -122,10 +121,17 @@ export async function GET(req: Request) {
       });
     }
 
-    // 🧾 Resultado final
-    const data = Object.values(agrupadas);
+    // 🔍 Si hay parámetro ?nv=..., filtrar por número y correo ejecutivo
+    let data = Object.values(agrupadas);
 
-    // Si se pidió una NV específica y no se encontró, devolver vacío controlado
+    if (nvParam) {
+      data = data.filter(
+        (n: any) =>
+          n.numeroNV === nvParam ||
+          n.numeroNV?.trim() === nvParam?.trim()
+      );
+    }
+
     if (nvParam && data.length === 0) {
       return NextResponse.json({
         ok: false,
