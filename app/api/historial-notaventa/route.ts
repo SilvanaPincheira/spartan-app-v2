@@ -32,6 +32,7 @@ export async function GET() {
     const res = await fetch(CSV_URL, { cache: "no-store" });
     if (!res.ok)
       throw new Error("No se pudo acceder al Sheet público (revisa permisos).");
+
     const csv = await res.text();
     const filas = parseCsv(csv);
 
@@ -80,8 +81,9 @@ export async function GET() {
         r["Descripción"] || r["Producto"] || r["Dscription"] || "";
       if (!codigo && !descripcion) continue;
 
+      // ✅ Agregar ítem con el número NV incluido
       agrupadas[numeroNV].items.push({
-        numeroNV,
+        numeroNV, // 👈 importante para filtrar correctamente al abrir/duplicar
         codigo,
         descripcion,
         cantidad: Number(r["Cantidad"] || r["Quantity"] || 0),
