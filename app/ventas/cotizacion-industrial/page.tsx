@@ -1085,14 +1085,43 @@ useEffect(() => {
       </div>
 
       {/* Botones */}
-      <div className="flex flex-wrap gap-2 print:hidden px-6 pb-8">
-        <button
-          className={`px-3 py-1 rounded text-white ${procesando ? "bg-zinc-400" : "bg-emerald-600 hover:bg-emerald-700"}`}
-          onClick={guardarPdfYEnviar}
-          disabled={procesando}
-        >
-          {procesando ? "Procesando..." : "💾 Guardar + 📄 PDF + 📧 Email"}
-        </button>
+<div className="flex flex-wrap gap-2 print:hidden px-6 pb-8">
+  <button
+    onClick={async () => {
+      if (procesando) return; // ⛔ Evita doble clic
+      setProcesando(true);
+
+      try {
+        await guardarPdfYEnviar(); // tu función actual de guardar + pdf + email
+        alert("✅ Cotización guardada y enviada correctamente.");
+        // 🔒 Mantiene bloqueado hasta que se cree una nueva cotización
+        setProcesando(true);
+      } catch (err) {
+        console.error("❌ Error al enviar la Cotización:", err);
+        alert("Ocurrió un error al guardar o enviar la Cotización.");
+        setProcesando(false); // solo se desbloquea si hay error
+      }
+    }}
+    disabled={procesando}
+    className={`px-3 py-1 rounded text-white font-medium flex items-center gap-2 shadow transition ${
+      procesando
+        ? "bg-zinc-400 cursor-not-allowed"
+        : "bg-emerald-600 hover:bg-emerald-700"
+    }`}
+  >
+    {procesando ? (
+      <>
+        <span className="animate-spin">⏳</span>
+        Enviando...
+      </>
+    ) : (
+      <>
+        💾 Guardar + 📄 PDF + 📧 Email
+      </>
+    )}
+  </button>
+
+
         <button className="bg-zinc-200 px-3 py-1 rounded" onClick={limpiar}>🧹 Nueva Cotización</button>
       </div>
 

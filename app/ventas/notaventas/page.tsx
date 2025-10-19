@@ -1445,16 +1445,42 @@ const resMail = await fetch("/api/send-notaventa", {
       {saving ? "Grabando..." : "💾 Grabar Documento"}
     </button>
 
-    {/* 💾 Guardar + PDF + Email */}
-    <button
-      className={`px-3 py-1 rounded text-white ${
-        procesando ? "bg-zinc-400" : "bg-emerald-600 hover:bg-emerald-700"
-      }`}
-      onClick={guardarPdfYEnviar}
-      disabled={procesando}
-    >
-      {procesando ? "Procesando..." : "💾 Guardar + 📄 PDF + 📧 Email"}
-    </button>
+   {/* 💾 Guardar + PDF + Email */}
+<button
+  onClick={async () => {
+    if (procesando) return; // ⛔ Previene doble clic mientras procesa
+    setProcesando(true);
+    try {
+      await guardarPdfYEnviar(); // tu función actual de guardado/envío
+      alert("✅ Nota de Venta guardada y enviada correctamente.");
+      // 🔒 Mantener bloqueado hasta que se genere una nueva NV
+      setProcesando(true);
+    } catch (err) {
+      console.error("❌ Error al enviar la Nota de Venta:", err);
+      alert("Ocurrió un error al guardar o enviar la Nota de Venta.");
+      setProcesando(false); // solo se desbloquea si hubo error
+    }
+  }}
+  disabled={procesando}
+  className={`px-3 py-1 rounded text-white font-medium flex items-center gap-2 shadow transition ${
+    procesando
+      ? "bg-zinc-400 cursor-not-allowed"
+      : "bg-emerald-600 hover:bg-emerald-700"
+  }`}
+>
+  {procesando ? (
+    <>
+      <span className="animate-spin">⏳</span>
+      Enviando...
+    </>
+  ) : (
+    <>
+      💾 Guardar + 📄 PDF + 📧 Email
+    </>
+  )}
+</button>
+
+
 
     {/* 🧹 Nueva NV */}
     <button
