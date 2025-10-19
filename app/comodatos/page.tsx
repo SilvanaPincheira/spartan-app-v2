@@ -127,7 +127,7 @@ export default function ComodatosMenu() {
 </Link>
 {/* Card: Contrato de Comodato (Borrador) */}
 <Link
-  href="/comodatos/contrato-borrador"
+  href="/comodatos/contrato"
   className="group block rounded-2xl border bg-white p-6 shadow-sm ring-1 ring-black/5 transition hover:shadow-md"
 >
   <div className="flex items-center justify-between">
