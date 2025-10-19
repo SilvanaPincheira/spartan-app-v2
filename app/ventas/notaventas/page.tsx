@@ -1218,17 +1218,16 @@ const resMail = await fetch("/api/send-notaventa", {
                         <div className="truncate print:whitespace-normal">{r.name}</div>
                       </td>
 
-                      {/* Kg (solo pantalla) */}
-                      <td className="px-2 py-1 text-right print:hidden">
-                        <input
-                          type="number"
-                          className="w-16 border rounded text-right"
-                          value={r.kilos}
-                          onChange={(e) => updateLine(i, "kilos", num(e.target.value))}
-                          min={0}
-                          step="any"
-                        />
-                      </td>
+                     {/* Kg (solo pantalla, bloqueado) */}
+<td className="px-2 py-1 text-right print:hidden">
+  <input
+    type="number"
+    className="w-16 border rounded text-right bg-gray-100 cursor-not-allowed"
+    value={r.kilos}
+    readOnly
+  />
+</td>
+
 
                       {/* Cantidad */}
                       <td className="px-2 py-1 text-center">
