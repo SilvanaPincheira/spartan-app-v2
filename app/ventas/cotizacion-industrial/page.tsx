@@ -3,6 +3,8 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { generarPdfCotizacion } from "@/lib/utils/pdf-cotizacion";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+
 
 /* ========================= Helpers ========================= */
 function normalize(s: string) {
@@ -237,6 +239,28 @@ export default function CotizacionPage() {
       }
     })();
   }, []);
+
+  // 🧠 Autocompletar Ejecutivo y Email desde Supabase
+useEffect(() => {
+  (async () => {
+    try {
+      const supabase = createClientComponentClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const email = session?.user?.email || "";
+      const fullName = session?.user?.user_metadata?.name || ""; // depende de cómo guardes nombre
+      const fallbackName = fullName || email.split("@")[0].replace(".", " ").toUpperCase();
+
+      if (email) setEmailEjecutivo(email);         // campo "Email"
+      if (fallbackName) setEjecutivoNombre(fallbackName); // campo "Ejecutivo"
+    } catch (err) {
+      console.error("❌ Error obteniendo datos Supabase:", err);
+    }
+  })();
+}, []);
+
 
   /* ---- Eventos cliente (solo en modo activo autocompleta y bloquea) ---- */
   function onClienteNombre(val: string) {
