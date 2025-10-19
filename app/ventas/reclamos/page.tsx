@@ -164,19 +164,23 @@ export default function ReclamosPage() {
       ];
 
       // Si hay adjunto → convertirlo a base64
-      if (form.adjunto) {
-        const fileBase64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () =>
-            resolve((reader.result as string).split(",")[1]);
-          reader.onerror = reject;
-          reader.readAsDataURL(form.adjunto);
-        });
-        attachments.push({
-          filename: form.adjunto.name,
-          content: fileBase64,
-        });
-      }
+  
+        if (form.adjunto) {
+          const fileBase64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () =>
+              resolve((reader.result as string).split(",")[1]);
+            reader.onerror = reject;
+            reader.readAsDataURL(form.adjunto!); // ✅ aseguramos que no sea null
+          });
+        
+          attachments.push({
+            filename: form.adjunto.name,
+            content: fileBase64,
+          });
+        }
+        
+    
 
       const emailRes = await fetch("/api/send-reclamo", {
         method: "POST",
