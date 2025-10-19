@@ -8,7 +8,7 @@ export async function POST(req: Request) {
   try {
     const data = await req.json();
 
-    const to = ["pagos@spartan.cl", "sac@spartan.cl"];
+    const to = ["horacio.pavez@spartan.cl", "sac@spartan.cl"];
     const subject = `🆕 Nuevo Cliente Ingresado: ${data.razonSocial || "Sin nombre"}`;
 
     const bodyHtml = `

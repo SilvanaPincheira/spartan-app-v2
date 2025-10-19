@@ -602,50 +602,59 @@ useEffect(() => {
       });
 
       // 3) Enviar email (cliente + ejecutivo, CC Patricia)
-      const subject = `Cotización ${numeroCTZ} — ${clienteNombre}`;
-      const htmlTotales = mostrarTotales
-        ? `
-          <li><b>Subtotal:</b> ${money(subtotal)}</li>
-          ${mostrarIva ? `<li><b>IVA (19%):</b> ${money(iva)}</li>` : ""}
-          ${mostrarIva ? `<li><b>Total (con IVA):</b> ${money(total)}</li>` : ""}
-        `
-        : "";
+const subject = `Cotización ${numeroCTZ} — ${clienteNombre}`;
+const htmlTotales = mostrarTotales
+  ? `
+    <li><b>Subtotal:</b> ${money(subtotal)}</li>
+    ${mostrarIva ? `<li><b>IVA (19%):</b> ${money(iva)}</li>` : ""}
+    ${mostrarIva ? `<li><b>Total (con IVA):</b> ${money(total)}</li>` : ""}
+  `
+  : "";
 
-      const html = `
-        <p>Estimado(a),</p>
-        <p>Adjuntamos la <b>Cotización ${numeroCTZ}</b> para <b>${clienteNombre}</b>.</p>
-        <ul>
-          <li><b>RUT:</b> ${clienteRut || "-"}</li>
-          <li><b>Validez:</b> ${validez}</li>
-          <li><b>Forma de pago:</b> ${formaPago}</li>
-          <li><b>Plazo de entrega:</b> ${plazoEntrega}</li>
-          ${htmlTotales}
-        </ul>
-        ${observaciones ? `<p><b>Observaciones:</b> ${observaciones}</p>` : ""}
-        <hr />
-        <p style="font-size:12px;color:#666">
-          Atentamente,<br/>
-          <b>${ejecutivoNombre || "Ejecutivo de Ventas"}</b><br/>
-          ${emailEjecutivo ? `${emailEjecutivo}<br/>` : ""}
-          ${celularEjecutivo ? `Cel.: ${celularEjecutivo}<br/>` : ""}
-          Spartan de Chile Ltda.
-        </p>
-      `;
+const html = `
+  <p>Estimado(a),</p>
+  <p>Adjuntamos la <b>Cotización ${numeroCTZ}</b> para <b>${clienteNombre}</b>.</p>
+  <ul>
+    <li><b>RUT:</b> ${clienteRut || "-"}</li>
+    <li><b>Validez:</b> ${validez}</li>
+    <li><b>Forma de pago:</b> ${formaPago}</li>
+    <li><b>Plazo de entrega:</b> ${plazoEntrega}</li>
+    ${htmlTotales}
+  </ul>
+  ${observaciones ? `<p><b>Observaciones:</b> ${observaciones}</p>` : ""}
+  <hr />
+  <p style="font-size:12px;color:#666">
+    Atentamente,<br/>
+    <b>${ejecutivoNombre || "Ejecutivo de Ventas"}</b><br/>
+    ${emailEjecutivo ? `${emailEjecutivo}<br/>` : ""}
+    ${celularEjecutivo ? `Cel.: ${celularEjecutivo}<br/>` : ""}
+    Spartan de Chile Ltda.
+  </p>
+`;
 
-      const resMail = await fetch("/api/send-cotizacion", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject,
-          html,
-          toCliente: emailCliente,
-          toEjecutivo: emailEjecutivo,
-          ccFija: "patricia.acuna@spartan.cl",
-          attachments: [{ filename, content: base64 }],
-          replyTo: emailEjecutivo,
-          fromName: `Spartan App — ${numeroCTZ}`,
-        }),
-      });
+// ✅ adjunto PDF correctamente formateado
+const attachments = [
+  {
+    filename,
+    content: `data:application/pdf;base64,${base64}`,
+  },
+];
+
+const resMail = await fetch("/api/send-cotizacion", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    subject,
+    html,
+    toCliente: emailCliente,
+    toEjecutivo: emailEjecutivo,
+    ccFija: "patricia.acuna@spartan.cl",
+    attachments,
+    replyTo: emailEjecutivo,
+    fromName: `Spartan App — ${numeroCTZ}`,
+  }),
+});
+
       const mailJson = await resMail.json();
       if (!mailJson.ok) throw new Error(mailJson.error || "No se pudo enviar el correo");
 
