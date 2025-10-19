@@ -21,29 +21,37 @@ export default function ReclamosPage() {
     residuo: "",
     temperatura: "",
     descripcion: "",
+    adjunto: null as File | null, // 👈 Nuevo campo adjunto
   });
+
   const [enviando, setEnviando] = useState(false);
   const [ok, setOk] = useState(false);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setForm((f) => ({ ...f, [name]: value }));
+  // Manejador de cambios
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+  ) => {
+    const { name, value, files } = e.target as any;
+    if (name === "adjunto") {
+      setForm((f) => ({ ...f, adjunto: files?.[0] || null }));
+    } else {
+      setForm((f) => ({ ...f, [name]: value }));
+    }
   };
 
+  // Enviar formulario
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setEnviando(true);
     setOk(false);
 
     try {
-      // ========== 1) Generar PDF con jsPDF ==========
+      // ========== 1️⃣ Generar PDF ==========
       const { jsPDF } = await import("jspdf");
       const doc = new jsPDF({ unit: "pt", format: "a4" });
 
-      // Paleta
       const AZUL: [number, number, number] = [31, 78, 216];
       const GRIS: [number, number, number] = [245, 245, 245];
-
       const W = doc.internal.pageSize.getWidth();
       const M = 40;
       let y = 60;
@@ -56,10 +64,9 @@ export default function ReclamosPage() {
       doc.setFontSize(16);
       doc.text("Formulario de Reclamos — Spartan", M, 45);
 
-      // Sección datos
       doc.setTextColor(0, 0, 0);
-      doc.setFont("helvetica", "bold");
       doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
       doc.setFillColor(...GRIS);
       doc.rect(M, y, W - 2 * M, 26, "F");
       doc.text("Datos del Reclamo", M + 10, y + 18);
@@ -68,39 +75,25 @@ export default function ReclamosPage() {
       doc.setFont("helvetica", "normal");
       doc.setFontSize(11);
 
-      // Helper para líneas con salto de página
+      // Helper para texto con salto automático
       const writeLine = (label: string, value: string) => {
         if (!value) return;
-      
-        const maxWidth = W - 2 * M - 140; // más espacio entre columnas
+        const maxWidth = W - 2 * M - 140;
         const lines = doc.splitTextToSize(value, maxWidth);
         const lineHeight = 14 + (lines.length - 1) * 10;
-      
-        // Fondo de línea para mejor lectura
         doc.setFillColor(255, 255, 255);
         doc.rect(M, y - 8, W - 2 * M, lineHeight + 12, "F");
-      
-        // Etiqueta
         doc.setFont("helvetica", "bold");
-        doc.setTextColor(0, 0, 0);
         doc.text(`${label}:`, M + 4, y + 4);
-      
-        // Valor
         doc.setFont("helvetica", "normal");
         doc.text(lines, M + 160, y + 4);
-      
-        // Avanzar
         y += lineHeight + 16;
-      
-        // Saltar de página si se pasa
         if (y > 760) {
           doc.addPage();
           y = 60;
         }
       };
-      
 
-      // Campo a etiqueta legible
       const labelOf: Record<string, string> = {
         ejecutivo: "Ejecutivo de ventas",
         cliente: "Cliente",
@@ -120,7 +113,6 @@ export default function ReclamosPage() {
         descripcion: "Descripción del problema",
       };
 
-      // Bloques
       const bloque1 = [
         "ejecutivo",
         "cliente",
@@ -135,50 +127,65 @@ export default function ReclamosPage() {
       ];
       bloque1.forEach((k) => writeLine(labelOf[k], (form as any)[k]));
 
-      // Subtítulo de condiciones de aplicación
+      // Condiciones
       doc.setFont("helvetica", "bold");
       doc.setFillColor(...GRIS);
       doc.rect(M, y, W - 2 * M, 24, "F");
       doc.text("Condiciones de aplicación", M + 10, y + 16);
       y += 36;
 
-      // Resto de campos
       ["aplicacion", "accionMecanica", "herramienta", "residuo", "temperatura"].forEach((k) =>
         writeLine(labelOf[k], (form as any)[k])
       );
 
-      // Subtítulo de descripción
+      // Descripción
       doc.setFont("helvetica", "bold");
       doc.setFillColor(...GRIS);
       doc.rect(M, y, W - 2 * M, 24, "F");
       doc.text("Descripción", M + 10, y + 16);
       y += 36;
-
       writeLine(labelOf["descripcion"], form.descripcion);
 
-      // Exportar a base64
+      // Exportar PDF base64
       const pdfDataUri = doc.output("datauristring");
       const base64 = pdfDataUri.split(",")[1];
       const filename = `Reclamo_${(form.cliente || "Cliente").replace(/[^A-Za-z0-9_-]+/g, "_")}.pdf`;
 
-      // ========== 2) Guardar en Google Sheets (Apps Script) ==========
+      // ========== 2️⃣ Guardar en Google Sheets ==========
       const saveRes = await fetch("/api/save-reclamo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
 
-      // ========== 3) Enviar correo con PDF adjunto ==========
+      // ========== 3️⃣ Enviar correo con adjuntos ==========
+      const attachments: { filename: string; content: string }[] = [
+        { filename, content: base64 },
+      ];
+
+      // Si hay adjunto → convertirlo a base64
+      if (form.adjunto) {
+        const fileBase64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () =>
+            resolve((reader.result as string).split(",")[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(form.adjunto);
+        });
+        attachments.push({
+          filename: form.adjunto.name,
+          content: fileBase64,
+        });
+      }
+
       const emailRes = await fetch("/api/send-reclamo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           subject: `🧾 Nuevo Reclamo — ${form.cliente}`,
-          body: "Se ha recibido un nuevo reclamo. Se adjunta PDF con el detalle.",
-          to: "alexandra.morales@spartan.cl", // 👈 DESTINATARIO ACTUALIZADO
-          // cc: form.correo, // (opcional) copia al contacto
-          pdfBase64: base64,
-          filename,
+          body: "Se ha recibido un nuevo reclamo. Se adjunta PDF y archivo de respaldo.",
+          to: "alexandra.morales@spartan.cl",
+          attachments,
         }),
       });
 
@@ -202,6 +209,7 @@ export default function ReclamosPage() {
           residuo: "",
           temperatura: "",
           descripcion: "",
+          adjunto: null,
         });
       } else {
         alert("❌ Error al guardar o enviar correo.");
@@ -214,10 +222,13 @@ export default function ReclamosPage() {
     }
   }
 
+  // --- Interfaz ---
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900">
       <div className="mx-auto max-w-4xl p-8 bg-white shadow-sm rounded-2xl mt-8">
-        <h1 className="text-2xl font-bold text-[#2B6CFF] mb-4">🧾 Formulario de Reclamos</h1>
+        <h1 className="text-2xl font-bold text-[#2B6CFF] mb-4">
+          🧾 Formulario de Reclamos
+        </h1>
         <p className="text-sm text-zinc-600 mb-6">
           Complete todos los campos marcados con * para registrar correctamente su reclamo.
         </p>
@@ -279,9 +290,10 @@ export default function ReclamosPage() {
             </label>
           </div>
 
+          {/* Otros campos */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <label>
-              <span className="text-sm font-medium">Herramienta usada para la aplicación</span>
+              <span className="text-sm font-medium">Herramienta usada</span>
               <input
                 type="text"
                 name="herramienta"
@@ -325,6 +337,18 @@ export default function ReclamosPage() {
               value={form.descripcion}
               onChange={handleChange}
               rows={5}
+              className="mt-1 w-full rounded border px-3 py-2 text-sm"
+            />
+          </label>
+
+          {/* 📎 Adjunto */}
+          <label className="block">
+            <span className="text-sm font-medium">📎 Adjuntar archivo (opcional)</span>
+            <input
+              type="file"
+              name="adjunto"
+              accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+              onChange={handleChange}
               className="mt-1 w-full rounded border px-3 py-2 text-sm"
             />
           </label>
