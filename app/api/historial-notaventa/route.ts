@@ -19,16 +19,16 @@ function parseCsv(text: string): Record<string, string>[] {
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
     const row: Record<string, string> = {};
-    headers.forEach((h, j) => {
-      row[h] = (cols[j] || "").replace(/^"|"$/g, "").trim();
-    });
+    headers.forEach(
+      (h, j) => (row[h] = (cols[j] || "").replace(/^"|"$/g, "").trim())
+    );
     rows.push(row);
   }
   return rows;
 }
 
 /* ============================================================================
-   🚀 GET — agrupa por N° NV + correo ejecutivo (login único)
+   🚀 GET — agrupa por N° NV y filtra por EMAIL_COL si se pasa ?email=
    ============================================================================ */
 export async function GET(req: Request) {
   try {
@@ -36,7 +36,7 @@ export async function GET(req: Request) {
     const nvParam = (searchParams.get("nv") || "").trim();
     const emailParam = (searchParams.get("email") || "").toLowerCase().trim();
 
-    // Leer Sheet
+    // Leer sheet público
     const res = await fetch(CSV_URL, { cache: "no-store" });
     if (!res.ok)
       throw new Error("No se pudo acceder al Sheet público (revisa permisos).");
@@ -44,7 +44,7 @@ export async function GET(req: Request) {
     const csv = await res.text();
     const filas = parseCsv(csv);
 
-    // 🧩 Propagar N° NV hacia abajo
+    // 🧩 Rellenar N° NV hacia abajo (para celdas vacías)
     let ultimoNumero = "";
     for (const f of filas) {
       const num = f["Número NV"] || f["Numero NV"] || f["N° NV"] || "";
@@ -52,16 +52,17 @@ export async function GET(req: Request) {
       else f["Número NV"] = ultimoNumero;
     }
 
-    // 🔍 Filtrar si se pasa ?email=
+    // 🔍 Filtrar por EMAIL_COL (login Supabase)
     let filtradas = filas;
     if (emailParam) {
       filtradas = filtradas.filter((f) => {
-        const correo = (f["Correo Ejecutivo"] || "").toLowerCase().trim();
-        return correo === emailParam;
+        const correo =
+          (f["EMAIL_COL"] || f["Correo Ejecutivo"] || "").toLowerCase().trim();
+        return correo === emailParam; // 👈 identificación única
       });
     }
 
-    // 🔍 Filtrar si se pasa ?nv=
+    // 🔍 Si llega ?nv=..., filtrar además por número NV
     if (nvParam) {
       filtradas = filtradas.filter((f) => {
         const nv = (f["Número NV"] || f["Numero NV"] || f["N° NV"] || "").trim();
@@ -69,26 +70,21 @@ export async function GET(req: Request) {
       });
     }
 
-    // 🧱 Agrupar por clave compuesta NV + correo
+    // 🧱 Agrupar por número de NV
     const agrupadas: Record<string, any> = {};
-
     for (const r of filtradas) {
-      const numeroNV =
-        (r["Número NV"] || r["Numero NV"] || r["N° NV"] || "").trim();
-      const correo = (r["Correo Ejecutivo"] || "").toLowerCase().trim();
-      if (!numeroNV || !correo) continue;
+      const numeroNV = (r["Número NV"] || r["Numero NV"] || r["N° NV"] || "").trim();
+      if (!numeroNV) continue;
 
-      const clave = `${numeroNV}__${correo}`; // ← combinación única por usuario
-
-      if (!agrupadas[clave]) {
-        agrupadas[clave] = {
+      if (!agrupadas[numeroNV]) {
+        agrupadas[numeroNV] = {
           numeroNV,
-          correoEjecutivo: correo,
           fecha: r["Fecha"] || "",
           cliente: r["Cliente"] || "",
           rut: r["RUT"] || "",
           codigoCliente: r["Codigo Cliente"] || r["Código Cliente"] || "",
-          ejecutivo: r["Ejecutivo"] || r["Empleado Ventas"] || "",
+          ejecutivo: r["Ejecutivo"] || "",
+          correoEjecutivo: r["EMAIL_COL"] || r["Correo Ejecutivo"] || "",
           direccion: r["Direccion"] || r["Dirección"] || "",
           comentarios: r["Comentarios"] || "",
           subtotal: Number(r["Subtotal"] || 0),
@@ -97,40 +93,26 @@ export async function GET(req: Request) {
         };
       }
 
-      // Agregar ítems válidos
-      const codigo = r["Código"] || r["Codigo Producto"] || r["ItemCode"] || "";
-      const descripcion =
-        r["Descripción"] || r["Producto"] || r["Dscription"] || "";
+      // ⚙️ Agregar ítems válidos
+      const codigo = r["Código"] || "";
+      const descripcion = r["Descripción"] || "";
       if (!codigo && !descripcion) continue;
 
-      agrupadas[clave].items.push({
+      agrupadas[numeroNV].items.push({
         numeroNV,
         codigo,
         descripcion,
         cantidad: Number(r["Cantidad"] || 0),
-        kilos: Number(r["Kg"] || r["Kilos"] || r["Cantidad Kilos"] || 0),
-        precioBase: Number(
-          r["Precio base"] ||
-            r["Precio Unitario"] ||
-            r["Precio Por Linea"] ||
-            0
-        ),
-        descuento: Number(r["% Desc"] || r["Descuento"] || 0),
-        precioVenta: Number(
-          r["Precio venta"] ||
-            r["Precio Por Linea"] ||
-            r["Precio Unitario"] ||
-            0
-        ),
-        totalItem: Number(
-          r["Total Item"] || r["Total Línea"] || r["Total Linea"] || r["Total"] || 0
-        ),
+        kilos: Number(r["Kg"] || r["Kilos"] || 0),
+        precioBase: Number(r["Precio base"] || 0),
+        descuento: Number(r["% Desc"] || 0),
+        precioVenta: Number(r["Precio venta"] || 0),
+        totalItem: Number(r["Total Item"] || r["Total"] || 0),
       });
     }
 
     const data = Object.values(agrupadas);
 
-    // 🧩 Si se pidió una NV específica y no se encontró
     if (nvParam && data.length === 0) {
       return NextResponse.json({
         ok: false,
