@@ -50,14 +50,23 @@ export function generarPdfNotaVenta(
     }
   
 
-  // === Encabezado ===
-  doc.setFontSize(16);
-const pageWidth = doc.internal.pageSize.getWidth(); // ancho de la página
-  doc.text("Nota de Venta", pageWidth / 2, 20, { align: "center" });
-
-  doc.setFontSize(10);
-  doc.text(`N°: ${data.numeroNV}`, 200, 20, { align: "right" });
-  doc.text(`Fecha: ${data.fecha}`, 200, 26, { align: "right" });
+    // === Encabezado ===
+    doc.setFontSize(16);
+    const pageWidth = doc.internal.pageSize.getWidth(); // ancho de la página
+    doc.text("Nota de Venta", pageWidth / 2, 20, { align: "center" });
+  
+    // 🕒 Fecha y hora actuales (Chile)
+    const ahora = new Date();
+    const fechaStr = ahora.toLocaleDateString("es-CL");
+    const horaStr = ahora.toLocaleTimeString("es-CL", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  
+    doc.setFontSize(10);
+    doc.text(`N°: ${data.numeroNV}`, 200, 20, { align: "right" });
+    doc.text(`Emitida: ${fechaStr} ${horaStr}`, 200, 26, { align: "right" });
+  
 
  // === Bloque Cliente ===
 doc.setFontSize(12);
