@@ -27,6 +27,8 @@ import { generarPdfNotaVenta } from "@/lib/utils/pdf-notaventa";
 
 import jsPDF from "jspdf";
 import { useSearchParams } from "next/navigation";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+
 
 
 /* ============================================================================
@@ -332,6 +334,26 @@ const nvToDuplicate = searchParams.get("duplicar");
       setClients(list.filter((c) => c.nombre));
     })().catch((e) => setErrorMsg(String(e)));
   }, []);
+
+  // 🧭 Autocompletar correo del ejecutivo desde Supabase
+useEffect(() => {
+  (async () => {
+    try {
+      const supabase = createClientComponentClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const email = session?.user?.email || "";
+      if (email) {
+        setEmailEjecutivo(email);
+      }
+    } catch (err) {
+      console.error("❌ Error al obtener sesión Supabase:", err);
+    }
+  })();
+}, []);
+
 
  // 🧩 Cargar Nota de Venta (Abrir o Duplicar) desde el historial
 useEffect(() => {
