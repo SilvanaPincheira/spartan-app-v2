@@ -20,23 +20,21 @@ async function fetchCsvFromGoogleSheet(spreadsheetId: string, gid: string) {
 
 export async function GET() {
   try {
-    // 🧾 usa el mismo sheet donde se guardan las NV
-    // (reemplaza el ID y gid por los mismos que usa tu /api/save-to-sheets)
-    const spreadsheetId = "https://script.google.com/macros/s/AKfycbw7j06u3MQAWCMWHrOEuWnzcQZ1W4V3lDARSY7sFy5eqigAUgUsawRgZpEu9-SNVgD7/exec"; // ejemplo
-    const gid = "0"; // cambia si tu hoja de NV está en otro gid
+    // 🔗 Hoja oficial de Notas de Venta (verificada)
+    const spreadsheetId = "1NwDx-X8N4qmKiNAx-cH7YlzLxol98gNlLvaWqlvr5c";
+    const gid = "0";
 
     const rows = await fetchCsvFromGoogleSheet(spreadsheetId, gid);
 
-    // Limpieza y formato
+    // 🧹 Limpieza y formato de salida
     const notas = rows
       .map((r) => ({
-        numeroNV: r["numeroNV"] || r["N° Nota Venta"] || "",
-        fechaHora: r["fechaHora"] || r["Fecha"] || "",
-        cliente: r["cliente"] || r["Cliente"] || "",
-        rut: r["rut"] || r["RUT"] || "",
-        codigoCliente: r["codigoCliente"] || r["Código Cliente"] || "",
-        ejecutivo: r["ejecutivo"] || r["Ejecutivo"] || "",
-        total: Number(r["total"] || r["Total"] || 0),
+        numeroNV: r["Número NV"] || r["Numero NV"] || r["numeroNV"] || "",
+        fecha: r["Fecha"] || "",
+        cliente: r["Cliente"] || r["Nombre Cliente"] || "",
+        rut: r["RUT"] || r["Rut"] || "",
+        ejecutivo: r["Ejecutivo"] || "",
+        total: r["Total"] || "",
       }))
       .filter((n) => n.numeroNV);
 
@@ -49,3 +47,4 @@ export async function GET() {
     );
   }
 }
+
