@@ -338,14 +338,19 @@ useEffect(() => {
   const params = new URLSearchParams(window.location.search);
   const nvToDuplicate = params.get("duplicar");
   const nvToOpen = params.get("nv");
+  const emailFromUrl = (params.get("email") || "").toLowerCase().trim();
 
   const numeroNV = nvToDuplicate || nvToOpen;
   if (!numeroNV) return;
 
   (async () => {
     try {
-      // 🔹 Trae solo la NV solicitada
-      const res = await fetch(`/api/historial-notaventa?nv=${encodeURIComponent(numeroNV)}`);
+      // 🔹 Trae solo la NV solicitada filtrada también por correo
+      const url = `/api/historial-notaventa?nv=${encodeURIComponent(numeroNV)}${
+        emailFromUrl ? `&email=${encodeURIComponent(emailFromUrl)}` : ""
+      }`;
+
+      const res = await fetch(url);
       const json = await res.json();
 
       if (!json.ok || !json.data?.length) {
@@ -410,8 +415,6 @@ useEffect(() => {
     }
   })();
 }, []);
-
-
 
 
   // Productos

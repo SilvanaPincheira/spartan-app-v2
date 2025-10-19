@@ -12,7 +12,7 @@ export default function HistorialNotasVenta() {
   const [busqueda, setBusqueda] = useState("");
   const [error, setError] = useState("");
 
-  // 🧭 Cargar historial filtrado por login
+  // 🧭 Cargar historial filtrado por login (EMAIL_COL)
   useEffect(() => {
     (async () => {
       try {
@@ -33,7 +33,7 @@ export default function HistorialNotasVenta() {
 
         let data = json.data || [];
 
-        // 🔐 Filtro extra por seguridad (correo exacto)
+        // 🔐 Filtro exacto por EMAIL_COL
         if (email) {
           data = data.filter(
             (n: any) =>
@@ -41,7 +41,7 @@ export default function HistorialNotasVenta() {
           );
         }
 
-        // 🟢 Si no hay resultados, modo supervisor
+        // 🟢 Si no hay coincidencias, modo supervisor
         if (data.length === 0) {
           console.warn("⚠️ No se encontraron coincidencias. Modo supervisor activo.");
           const resAll = await fetch("/api/historial-notaventa");

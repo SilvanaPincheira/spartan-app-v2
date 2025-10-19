@@ -9,26 +9,25 @@ const GID = "0";
 const CSV_URL = `https://docs.google.com/spreadsheets/d/e/${SHEET_ID}/pub?gid=${GID}&single=true&output=csv`;
 
 /* ============================================================================
-   🧩 Parser CSV seguro (mantiene comas dentro de comillas)
+   🧩 Parser CSV seguro (respeta comas dentro de comillas)
    ============================================================================ */
 function parseCsv(text: string): Record<string, string>[] {
   const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
   const headers = lines[0].split(",").map((h) => h.trim());
   const rows: Record<string, string>[] = [];
-
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
     const row: Record<string, string> = {};
-    headers.forEach(
-      (h, j) => (row[h] = (cols[j] || "").replace(/^"|"$/g, "").trim())
-    );
+    headers.forEach((h, j) => {
+      row[h] = (cols[j] || "").replace(/^"|"$/g, "").trim();
+    });
     rows.push(row);
   }
   return rows;
 }
 
 /* ============================================================================
-   🚀 GET — agrupa por N° NV y filtra por login (EMAIL_COL) si se pasa ?email=
+   🚀 GET — agrupa por N° NV y filtra también por EMAIL_COL (login Supabase)
    ============================================================================ */
 export async function GET(req: Request) {
   try {
@@ -36,7 +35,7 @@ export async function GET(req: Request) {
     const nvParam = (searchParams.get("nv") || "").trim();
     const emailParam = (searchParams.get("email") || "").toLowerCase().trim();
 
-    // Leer sheet público
+    // Leer hoja pública
     const res = await fetch(CSV_URL, { cache: "no-store" });
     if (!res.ok)
       throw new Error("No se pudo acceder al Sheet público (revisa permisos).");
@@ -52,27 +51,32 @@ export async function GET(req: Request) {
       else f["Número NV"] = ultimoNumero;
     }
 
-    // 🔍 Filtrar por EMAIL_COL (único por ejecutivo/login)
+    // 🔍 Filtrar por email del login (EMAIL_COL)
     let filtradas = filas;
     if (emailParam) {
       filtradas = filtradas.filter((f) => {
-        const emailCol = (f["EMAIL_COL"] || "").toLowerCase().trim();
-        return emailCol === emailParam;
+        const correo = (f["EMAIL_COL"] || "").toLowerCase().trim();
+
+            return correo === emailParam;
       });
     }
 
-    // 🔍 Si llega ?nv=..., filtrar adicionalmente
+    // 🔍 Si llega ?nv=..., aplicar filtro doble NV + email
     if (nvParam) {
       filtradas = filtradas.filter((f) => {
         const nv = (f["Número NV"] || f["Numero NV"] || f["N° NV"] || "").trim();
-        return nv === nvParam;
+        const correo = (f["EMAIL_COL"] || f["Correo Ejecutivo"] || "")
+          .toLowerCase()
+          .trim();
+        return nv === nvParam && (!emailParam || correo === emailParam);
       });
     }
 
-    // 🧱 Agrupar por número de NV
+    // 🧱 Agrupar por número NV
     const agrupadas: Record<string, any> = {};
     for (const r of filtradas) {
-      const numeroNV = (r["Número NV"] || r["Numero NV"] || r["N° NV"] || "").trim();
+      const numeroNV =
+        (r["Número NV"] || r["Numero NV"] || r["N° NV"] || "").trim();
       if (!numeroNV) continue;
 
       if (!agrupadas[numeroNV]) {
@@ -83,9 +87,12 @@ export async function GET(req: Request) {
           rut: r["RUT"] || "",
           codigoCliente: r["Codigo Cliente"] || r["Código Cliente"] || "",
           ejecutivo: r["Ejecutivo"] || r["Empleado Ventas"] || "",
-          correoEjecutivo: r["Correo Ejecutivo"] || "",
-          emailCol: r["EMAIL_COL"] || "",
-          direccion: r["Direccion"] || r["Dirección"] || "",
+          correoEjecutivo: r["EMAIL_COL"] || r["Correo Ejecutivo"] || "",
+          direccion:
+            r["Direccion"] ||
+            r["Dirección"] ||
+            r["Direccion Despacho"] ||
+            "",
           comentarios: r["Comentarios"] || "",
           subtotal: Number(r["Subtotal"] || 0),
           total: Number(r["Total"] || 0),
@@ -134,24 +141,18 @@ export async function GET(req: Request) {
 
     const data = Object.values(agrupadas);
 
-    // 🧩 Si no hay resultados, devolver mensaje claro
+    // 🧩 Si no hay resultados
     if (nvParam && data.length === 0) {
       return NextResponse.json({
         ok: false,
-        error: `No se encontró la Nota de Venta ${nvParam} para el usuario ${emailParam}`,
+        error: `No se encontró la Nota de Venta ${nvParam} para ${emailParam || "usuario"}`,
       });
     }
 
-    return NextResponse.json({
-      ok: true,
-      totalNotas: data.length,
-      data,
-    });
+    // ✅ Respuesta final
+    return NextResponse.json({ ok: true, totalNotas: data.length, data });
   } catch (err: any) {
     console.error("❌ Error en historial-notaventa:", err);
-    return NextResponse.json(
-      { ok: false, error: err.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
   }
 }
