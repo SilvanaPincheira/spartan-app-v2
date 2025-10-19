@@ -25,14 +25,30 @@ export default function HistorialNotasVenta() {
         if (!json.ok) throw new Error(json.error);
         let data = json.data || [];
 
-        // 🔒 Filtra por login
         if (email) {
-          const usuario = email.split("@")[0].toLowerCase();
-          data = data.filter(
-            (n: any) =>
-              n.ejecutivo?.toLowerCase().includes(usuario) ||
-              n.ejecutivo?.toLowerCase().includes(email.toLowerCase())
-          );
+          // 🧩 Login sin dominio y normalizado
+          const usuario = email.split("@")[0].toLowerCase(); // ejemplo: hernan.lopez
+          const partes = usuario.split(".");
+          const nombre = partes[0];
+          const apellido = partes[1] || "";
+
+          // 🔍 Filtro flexible por nombre, apellido o correo parcial
+          data = data.filter((n: any) => {
+            const ejecutivo = (n.ejecutivo || "").toLowerCase().replace(/\./g, " ");
+            return (
+              ejecutivo.includes(usuario) ||
+              ejecutivo.includes(nombre) ||
+              ejecutivo.includes(apellido)
+            );
+          });
+        }
+
+        // 🟢 Si no hay coincidencias, mostrar todo (modo supervisor)
+        if (data.length === 0) {
+          console.warn("⚠️ No se encontraron coincidencias. Modo supervisor activo.");
+          const resAll = await fetch("/api/historial-notaventa");
+          const jsonAll = await resAll.json();
+          if (jsonAll.ok) data = jsonAll.data || [];
         }
 
         setNotas(data);
@@ -43,6 +59,7 @@ export default function HistorialNotasVenta() {
     })();
   }, [supabase]);
 
+  // 🔍 Búsqueda en tabla
   const notasFiltradas = notas.filter(
     (n) =>
       n.numeroNV?.toLowerCase().includes(busqueda.toLowerCase()) ||
@@ -52,10 +69,12 @@ export default function HistorialNotasVenta() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
+      {/* Título */}
       <h1 className="text-2xl font-bold text-blue-600 mb-4 flex items-center gap-2">
         🧾 Historial de Notas de Venta
       </h1>
 
+      {/* Campo búsqueda */}
       <input
         type="text"
         placeholder="Buscar por cliente, ejecutivo o N° NV..."
@@ -64,12 +83,14 @@ export default function HistorialNotasVenta() {
         className="w-full max-w-xl mb-4 border border-gray-300 rounded-md p-2 shadow-sm"
       />
 
+      {/* Mensajes de error */}
       {error && (
         <div className="bg-red-50 text-red-700 border border-red-200 rounded p-3 mb-4">
           {error}
         </div>
       )}
 
+      {/* Tabla de resultados */}
       {notasFiltradas.length === 0 && !error ? (
         <p className="text-gray-500 text-sm">No hay resultados que coincidan.</p>
       ) : (
@@ -88,22 +109,35 @@ export default function HistorialNotasVenta() {
             </thead>
             <tbody>
               {notasFiltradas.map((n, i) => (
-                <tr key={i} className="border-t hover:bg-blue-50 transition-colors">
+                <tr
+                  key={i}
+                  className="border-t hover:bg-blue-50 transition-colors"
+                >
                   <td className="p-2">{n.numeroNV}</td>
                   <td className="p-2">{n.fecha}</td>
                   <td className="p-2">{n.cliente}</td>
                   <td className="p-2">{n.rut}</td>
                   <td className="p-2">{n.ejecutivo}</td>
-                  <td className="p-2 text-right">{n.total}</td>
+                  <td className="p-2 text-right">
+                    {Number(n.total || 0).toLocaleString("es-CL", {
+                      style: "currency",
+                      currency: "CLP",
+                      minimumFractionDigits: 0,
+                    })}
+                  </td>
                   <td className="p-2 text-center">
                     <button
-                      onClick={() => router.push(`/ventas/notaventas?nv=${n.numeroNV}`)}
+                      onClick={() =>
+                        router.push(`/ventas/notaventas?nv=${n.numeroNV}`)
+                      }
                       className="text-blue-600 hover:underline mr-2"
                     >
                       Abrir
                     </button>
                     <button
-                      onClick={() => router.push(`/ventas/notaventas?duplicar=${n.numeroNV}`)}
+                      onClick={() =>
+                        router.push(`/ventas/notaventas?duplicar=${n.numeroNV}`)
+                      }
                       className="text-emerald-600 hover:underline"
                     >
                       Duplicar
