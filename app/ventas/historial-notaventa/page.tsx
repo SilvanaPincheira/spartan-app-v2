@@ -12,56 +12,52 @@ export default function HistorialNotasVenta() {
   const [busqueda, setBusqueda] = useState("");
   const [error, setError] = useState("");
 
+  // 🧭 Cargar historial filtrado por login
   useEffect(() => {
     (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      const email = session?.user?.email?.toLowerCase() || null;
-      setUserEmail(email);
-  
       try {
-        // ✅ Pasamos el email como query param al backend
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const email = session?.user?.email?.toLowerCase().trim() || null;
+        setUserEmail(email);
+
+        // 📡 Construir la URL con el filtro por correo
         const url = email
           ? `/api/historial-notaventa?email=${encodeURIComponent(email)}`
           : `/api/historial-notaventa`;
-  
+
         const res = await fetch(url);
         const json = await res.json();
-  
         if (!json.ok) throw new Error(json.error);
+
         let data = json.data || [];
-  
+
+        // 🔐 Filtro extra por seguridad (correo exacto)
         if (email) {
-          // 🧩 Login sin dominio y normalizado
-          const usuario = email.split("@")[0].toLowerCase(); // ejemplo: hernan.lopez
-          const partes = usuario.split(".");
-          const nombre = partes[0];
-          const apellido = partes[1] || "";
-  
-          // 🔍 Filtro flexible (por nombre o apellido si lo necesitas)
-          data = data.filter((n: any) => {
-            const correo = (n.correoEjecutivo || "").toLowerCase();
-            return correo.includes(email); // 👈 ahora el filtro es directo por login
-          });
+          data = data.filter(
+            (n: any) =>
+              (n.correoEjecutivo || "").toLowerCase().trim() === email
+          );
         }
-  
-        // 🟢 Si no hay coincidencias, mostrar todo (modo supervisor)
+
+        // 🟢 Si no hay resultados, modo supervisor
         if (data.length === 0) {
           console.warn("⚠️ No se encontraron coincidencias. Modo supervisor activo.");
           const resAll = await fetch("/api/historial-notaventa");
           const jsonAll = await resAll.json();
           if (jsonAll.ok) data = jsonAll.data || [];
         }
-  
+
         setNotas(data);
       } catch (e: any) {
-        console.error(e);
-        setError("No se pudo obtener las Notas de Venta");
+        console.error("❌ Error al obtener historial:", e);
+        setError("No se pudo obtener las Notas de Venta.");
       }
     })();
   }, [supabase]);
-  
 
-  // 🔍 Búsqueda en tabla
+  // 🔍 Búsqueda local
   const notasFiltradas = notas.filter(
     (n) =>
       n.numeroNV?.toLowerCase().includes(busqueda.toLowerCase()) ||
@@ -85,14 +81,14 @@ export default function HistorialNotasVenta() {
         className="w-full max-w-xl mb-4 border border-gray-300 rounded-md p-2 shadow-sm"
       />
 
-      {/* Mensajes de error */}
+      {/* Mensaje de error */}
       {error && (
         <div className="bg-red-50 text-red-700 border border-red-200 rounded p-3 mb-4">
           {error}
         </div>
       )}
 
-      {/* Tabla de resultados */}
+      {/* Tabla */}
       {notasFiltradas.length === 0 && !error ? (
         <p className="text-gray-500 text-sm">No hay resultados que coincidan.</p>
       ) : (
@@ -128,9 +124,14 @@ export default function HistorialNotasVenta() {
                     })}
                   </td>
                   <td className="p-2 text-center">
+                    {/* Pasar también el email al abrir o duplicar */}
                     <button
                       onClick={() =>
-                        router.push(`/ventas/notaventas?nv=${n.numeroNV}`)
+                        router.push(
+                          `/ventas/notaventas?nv=${n.numeroNV}&email=${encodeURIComponent(
+                            userEmail || ""
+                          )}`
+                        )
                       }
                       className="text-blue-600 hover:underline mr-2"
                     >
@@ -138,7 +139,11 @@ export default function HistorialNotasVenta() {
                     </button>
                     <button
                       onClick={() =>
-                        router.push(`/ventas/notaventas?duplicar=${n.numeroNV}`)
+                        router.push(
+                          `/ventas/notaventas?duplicar=${n.numeroNV}&email=${encodeURIComponent(
+                            userEmail || ""
+                          )}`
+                        )
                       }
                       className="text-emerald-600 hover:underline"
                     >
