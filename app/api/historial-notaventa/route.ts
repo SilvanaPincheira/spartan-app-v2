@@ -1,40 +1,34 @@
 // app/api/historial-notaventa/route.ts
 import { NextResponse } from "next/server";
 
-async function fetchCsvFromGoogleSheet(spreadsheetId: string, gid: string) {
-  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Error al leer Sheet (${res.status})`);
-  const text = await res.text();
-
-  const rows = text.split("\n").map((r) => r.split(","));
-  const headers = rows[0] || [];
-  const data = rows.slice(1).map((r) => {
-    const obj: Record<string, string> = {};
-    headers.forEach((h, i) => (obj[h.trim()] = (r[i] || "").trim()));
-    return obj;
-  });
-
-  return data;
-}
-
 export async function GET() {
   try {
-    // 🔗 Hoja oficial de Notas de Venta (verificada)
-    const spreadsheetId = "1NwDx-X8N4qmKiNAx-cH7YlzLxol98gNlLvaWqlvr5c";
-    const gid = "0";
+    // ✅ URL publicada como CSV (NO modificar)
+    const url =
+      "https://docs.google.com/spreadsheets/d/e/2PACX-1vR2dwvhSGvvFFPBiRxUgF8Q99HkWJlyoFKLDo6Mmu4HvCH_hJtdyV_7WTrOjkUp6u0pMyAOf543M1UE/pub?output=csv";
 
-    const rows = await fetchCsvFromGoogleSheet(spreadsheetId, gid);
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error(`Error HTTP ${res.status}`);
+    const text = await res.text();
 
-    // 🧹 Limpieza y formato de salida
-    const notas = rows
+    const rows = text.split("\n").map((r) => r.split(","));
+    const headers = rows[0]?.map((h) => h.trim().toLowerCase()) || [];
+
+    const data = rows.slice(1).map((r) => {
+      const obj: Record<string, string> = {};
+      headers.forEach((h, i) => (obj[h] = (r[i] || "").trim()));
+      return obj;
+    });
+
+    const notas = data
       .map((r) => ({
-        numeroNV: r["Número NV"] || r["Numero NV"] || r["numeroNV"] || "",
-        fecha: r["Fecha"] || "",
-        cliente: r["Cliente"] || r["Nombre Cliente"] || "",
-        rut: r["RUT"] || r["Rut"] || "",
-        ejecutivo: r["Ejecutivo"] || "",
-        total: r["Total"] || "",
+        numeroNV:
+          r["número nv"] || r["numero nv"] || r["n° nv"] || r["n° nota de venta"] || "",
+        fecha: r["fecha"] || "",
+        cliente: r["cliente"] || "",
+        rut: r["rut"] || "",
+        ejecutivo: r["ejecutivo"] || "",
+        total: r["total"] || "",
       }))
       .filter((n) => n.numeroNV);
 
@@ -47,4 +41,3 @@ export async function GET() {
     );
   }
 }
-
