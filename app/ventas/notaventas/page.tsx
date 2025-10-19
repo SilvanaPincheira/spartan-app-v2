@@ -345,24 +345,20 @@ useEffect(() => {
       const json = await res.json();
       if (!json.ok) throw new Error(json.error);
 
-      // 🔍 Buscar todas las filas de esa NV (una por producto)
-      const filasNV = (json.data || []).filter(
-        (n: any) => n.numeroNV === duplicar
+      // 🔹 Buscar la cabecera de la NV seleccionada
+      const cabecera = (json.data || []).find(
+        (n: any) => (n.numeroNV || "").trim() === duplicar.trim()
       );
+      if (!cabecera) throw new Error("No se encontró la nota a duplicar");
 
-      if (filasNV.length === 0) throw new Error("No se encontró la nota a duplicar");
-
-      // 🧾 Cabecera (usa la primera fila)
-      const cabecera = filasNV[0];
-
-      // ⚡ Rellenar cabecera del formulario
-      setClientName(cabecera.cliente || "");
-      setClientRut(cabecera.rut || "");
-      setEjecutivo(cabecera.ejecutivo || "");
-      setEmailEjecutivo(cabecera.correoEjecutivo || "");
-      setComentarios(`Copia de ${cabecera.numeroNV}`);
-      setDireccion(cabecera.direccion || "");
-      setComuna("");
+      // ⚙️ Filtrar solo las filas que correspondan a esa NV
+      const filasNV = (cabecera.items || []).filter(
+        (item: any) =>
+          (item.numeroNV ||
+            item["Número NV"] ||
+            item["N° NV"] ||
+            "").trim() === cabecera.numeroNV
+      );
 
       // ⚙️ Convertir productos en líneas
       const nuevasLineas = filasNV.map((item: any) => ({
@@ -381,9 +377,17 @@ useEffect(() => {
         isBloqueado: false,
       }));
 
-      // ✅ Cargar en la tabla
+      // 🧾 Rellenar campos de cabecera
+      setClientName(cabecera.cliente || "");
+      setClientRut(cabecera.rut || "");
+      setEjecutivo(cabecera.ejecutivo || "");
+      setEmailEjecutivo(cabecera.correoEjecutivo || "");
+      setComentarios(`Copia de ${cabecera.numeroNV}`);
+      setDireccion(cabecera.direccion || "");
+      setComuna("");
       setLines(nuevasLineas);
 
+      alert(`✨ Estás duplicando la Nota de Venta ${cabecera.numeroNV}`);
     } catch (err: any) {
       console.error("❌ Error cargando duplicado:", err);
       alert("No se pudo cargar la Nota de Venta a duplicar.");
