@@ -1,114 +1,116 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { useRouter } from "next/navigation";
 
-type NotaVenta = {
-  numeroNV: string;
-  fechaHora?: string;
-  cliente: string;
-  rut: string;
-  codigoCliente: string;
-  ejecutivo: string;
-  total?: number;
-};
-
-export default function HistorialNotaVentaPage() {
-  const [notas, setNotas] = useState<NotaVenta[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+export default function HistorialNotasVenta() {
+  const supabase = createClientComponentClient();
+  const router = useRouter();
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [notas, setNotas] = useState<any[]>([]);
   const [busqueda, setBusqueda] = useState("");
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    async function cargarNotas() {
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const email = session?.user?.email || null;
+      setUserEmail(email);
+
       try {
-        setLoading(true);
-        setError(null);
-
         const res = await fetch("/api/historial-notaventa");
-        
-        if (!res.ok) throw new Error("No se pudo obtener las Notas de Venta");
-        const data = await res.json();
+        const json = await res.json();
 
-        // Ajusta si tu API devuelve data.data o data directamente
-        const filas = data?.data || data;
-        setNotas(filas || []);
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
+        if (!json.ok) throw new Error(json.error);
+        let data = json.data || [];
+
+        // 🔒 Filtra por login
+        if (email) {
+          const usuario = email.split("@")[0].toLowerCase();
+          data = data.filter(
+            (n: any) =>
+              n.ejecutivo?.toLowerCase().includes(usuario) ||
+              n.ejecutivo?.toLowerCase().includes(email.toLowerCase())
+          );
+        }
+
+        setNotas(data);
+      } catch (e: any) {
+        console.error(e);
+        setError("No se pudo obtener las Notas de Venta");
       }
-    }
+    })();
+  }, [supabase]);
 
-    cargarNotas();
-  }, []);
-
-  const notasFiltradas = notas.filter((n) => {
-    const q = busqueda.toLowerCase();
-    return (
-      n.numeroNV?.toLowerCase().includes(q) ||
-      n.cliente?.toLowerCase().includes(q) ||
-      n.ejecutivo?.toLowerCase().includes(q)
-    );
-  });
+  const notasFiltradas = notas.filter(
+    (n) =>
+      n.numeroNV?.toLowerCase().includes(busqueda.toLowerCase()) ||
+      n.cliente?.toLowerCase().includes(busqueda.toLowerCase()) ||
+      n.ejecutivo?.toLowerCase().includes(busqueda.toLowerCase())
+  );
 
   return (
-    <div className="min-h-screen bg-zinc-50 p-6">
-      <h1 className="text-2xl font-bold text-blue-600 mb-4">
-        📜 Historial de Notas de Venta
+    <div className="min-h-screen bg-gray-50 p-6">
+      <h1 className="text-2xl font-bold text-blue-600 mb-4 flex items-center gap-2">
+        🧾 Historial de Notas de Venta
       </h1>
 
-      <div className="mb-4 flex gap-2">
-        <input
-          type="text"
-          placeholder="Buscar por cliente, ejecutivo o NV..."
-          value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)}
-          className="border rounded-md px-3 py-2 w-full"
-        />
-      </div>
+      <input
+        type="text"
+        placeholder="Buscar por cliente, ejecutivo o N° NV..."
+        value={busqueda}
+        onChange={(e) => setBusqueda(e.target.value)}
+        className="w-full max-w-xl mb-4 border border-gray-300 rounded-md p-2 shadow-sm"
+      />
 
-      {loading && <p>Cargando notas...</p>}
       {error && (
-        <p className="text-red-600 bg-red-50 p-2 rounded">{error}</p>
+        <div className="bg-red-50 text-red-700 border border-red-200 rounded p-3 mb-4">
+          {error}
+        </div>
       )}
 
-      {!loading && !error && (
+      {notasFiltradas.length === 0 && !error ? (
+        <p className="text-gray-500 text-sm">No hay resultados que coincidan.</p>
+      ) : (
         <div className="overflow-x-auto">
-          <table className="min-w-full border border-zinc-200 bg-white rounded-lg text-sm">
-            <thead className="bg-zinc-100">
+          <table className="min-w-full border bg-white rounded-lg shadow-sm text-sm">
+            <thead className="bg-gray-100 text-gray-700 font-semibold">
               <tr>
-                <th className="px-3 py-2 text-left">N° Nota Venta</th>
-                <th className="px-3 py-2 text-left">Fecha / Hora</th>
-                <th className="px-3 py-2 text-left">Cliente</th>
-                <th className="px-3 py-2 text-left">Ejecutivo</th>
-                <th className="px-3 py-2 text-right">Total</th>
+                <th className="border p-2 text-left">N° NV</th>
+                <th className="border p-2 text-left">Fecha</th>
+                <th className="border p-2 text-left">Cliente</th>
+                <th className="border p-2 text-left">RUT</th>
+                <th className="border p-2 text-left">Ejecutivo</th>
+                <th className="border p-2 text-right">Total</th>
+                <th className="border p-2 text-center">Acciones</th>
               </tr>
             </thead>
             <tbody>
               {notasFiltradas.map((n, i) => (
-                <tr key={i} className="border-t hover:bg-zinc-50">
-                  <td className="px-3 py-2">{n.numeroNV}</td>
-                  <td className="px-3 py-2">{n.fechaHora || "—"}</td>
-                  <td className="px-3 py-2">{n.cliente}</td>
-                  <td className="px-3 py-2">{n.ejecutivo}</td>
-                  <td className="px-3 py-2 text-right">
-                    {n.total
-                      ? n.total.toLocaleString("es-CL", {
-                          style: "currency",
-                          currency: "CLP",
-                        })
-                      : "—"}
+                <tr key={i} className="border-t hover:bg-blue-50 transition-colors">
+                  <td className="p-2">{n.numeroNV}</td>
+                  <td className="p-2">{n.fecha}</td>
+                  <td className="p-2">{n.cliente}</td>
+                  <td className="p-2">{n.rut}</td>
+                  <td className="p-2">{n.ejecutivo}</td>
+                  <td className="p-2 text-right">{n.total}</td>
+                  <td className="p-2 text-center">
+                    <button
+                      onClick={() => router.push(`/ventas/notaventas?nv=${n.numeroNV}`)}
+                      className="text-blue-600 hover:underline mr-2"
+                    >
+                      Abrir
+                    </button>
+                    <button
+                      onClick={() => router.push(`/ventas/notaventas?duplicar=${n.numeroNV}`)}
+                      className="text-emerald-600 hover:underline"
+                    >
+                      Duplicar
+                    </button>
                   </td>
                 </tr>
               ))}
-
-              {notasFiltradas.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="text-center py-4 text-gray-500">
-                    No hay registros que coincidan con la búsqueda.
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>

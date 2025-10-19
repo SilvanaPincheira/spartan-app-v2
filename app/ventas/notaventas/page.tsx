@@ -26,6 +26,8 @@ import html2canvas from "html2canvas";
 import { generarPdfNotaVenta } from "@/lib/utils/pdf-notaventa";
 
 import jsPDF from "jspdf";
+import { useSearchParams } from "next/navigation";
+
 
 /* ============================================================================
    [A] HELPERS GENERALES
@@ -265,6 +267,11 @@ export default function NotaVentaPage() {
 const [ocName, setOcName] = useState<string>("");
 const [ocMime, setOcMime] = useState<string>("");
 const [ocBase64, setOcBase64] = useState<string>("");
+// 🟢 Detectar si se abrió desde el historial
+const searchParams = useSearchParams();
+const nvToOpen = searchParams.get("nv");
+const nvToDuplicate = searchParams.get("duplicar");
+
 
 
   /* ----- Estado: Productos/Precios ----- */
@@ -325,6 +332,50 @@ const [ocBase64, setOcBase64] = useState<string>("");
       setClients(list.filter((c) => c.nombre));
     })().catch((e) => setErrorMsg(String(e)));
   }, []);
+
+  // 🟢 Cargar datos desde el historial (Abrir o Duplicar)
+useEffect(() => {
+  if (!nvToOpen && !nvToDuplicate) return;
+
+  (async () => {
+    try {
+      const res = await fetch("/api/historial-notaventa");
+      const json = await res.json();
+      if (!json.ok) throw new Error("No se pudieron obtener las Notas de Venta");
+
+      const data = json.data || [];
+      const nv = data.find(
+        (n: any) => n.numeroNV === (nvToOpen || nvToDuplicate)
+      );
+
+      if (!nv) return alert("❌ Nota de Venta no encontrada");
+
+      // 🧩 Completar campos del cliente
+      setClientName(nv.cliente || "");
+      setClientRut(nv.rut || "");
+      setEjecutivo(nv.ejecutivo || "");
+      setClientCode(""); // si no está en la hoja, lo dejas vacío
+      setDireccion("");  // o usa nv.direccion si existe
+      setComentarios(`Copia de ${nv.numeroNV}`);
+
+      // 🧩 Generar nuevo número si es duplicado
+      if (nvToDuplicate) {
+        setNumeroNV(generarNumeroNV());
+      } else {
+        setNumeroNV(nv.numeroNV);
+      }
+
+      // 🧩 Opcional: cargar líneas (si las tienes guardadas por ítem)
+      // Aquí podrías hacer otra llamada a /api/facturas o /api/save-to-sheets
+      // para traer los ítems completos de esa NV.
+
+    } catch (e: any) {
+      console.error("Error al cargar NV:", e);
+      alert("⚠️ No se pudo cargar la Nota de Venta seleccionada");
+    }
+  })();
+}, [nvToOpen, nvToDuplicate]);
+
 
   // Productos
   useEffect(() => {
@@ -922,6 +973,20 @@ const resMail = await fetch("/api/send-notaventa", {
             {saveMsg}
           </div>
         )}
+
+        {/* 🟢 Aviso de contexto: desde Historial NV */}
+{nvToOpen && (
+  <div className="mb-3 text-blue-700 bg-blue-50 border border-blue-200 p-2 rounded text-sm">
+    🔍 Estás visualizando la Nota de Venta <b>{nvToOpen}</b>
+  </div>
+)}
+
+{nvToDuplicate && (
+  <div className="mb-3 text-emerald-700 bg-emerald-50 border border-emerald-200 p-2 rounded text-sm">
+    ✨ Estás duplicando la Nota de Venta <b>{nvToDuplicate}</b>
+  </div>
+)}
+
 
         {/* ===== CLIENTE ===== */}
         <section className="bg-white shadow p-4 rounded mb-4">

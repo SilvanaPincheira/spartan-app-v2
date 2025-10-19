@@ -1,16 +1,15 @@
-// app/api/historial-notaventa/route.ts
 import { NextResponse } from "next/server";
 
 export async function GET() {
   try {
-    // ✅ URL publicada como CSV (NO modificar)
+    // ✅ Tu hoja pública en formato CSV
     const url =
       "https://docs.google.com/spreadsheets/d/e/2PACX-1vR2dwvhSGvvFFPBiRxUgF8Q99HkWJlyoFKLDo6Mmu4HvCH_hJtdyV_7WTrOjkUp6u0pMyAOf543M1UE/pub?output=csv";
 
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw new Error(`Error HTTP ${res.status}`);
-    const text = await res.text();
 
+    const text = await res.text();
     const rows = text.split("\n").map((r) => r.split(","));
     const headers = rows[0]?.map((h) => h.trim().toLowerCase()) || [];
 
@@ -27,14 +26,14 @@ export async function GET() {
         fecha: r["fecha"] || "",
         cliente: r["cliente"] || "",
         rut: r["rut"] || "",
-        ejecutivo: r["ejecutivo"] || "",
+        ejecutivo: r["empleado ventas"] || r["ejecutivo"] || "",
         total: r["total"] || "",
       }))
       .filter((n) => n.numeroNV);
 
     return NextResponse.json({ ok: true, data: notas });
   } catch (e: any) {
-    console.error("❌ Error historial-notaventa:", e);
+    console.error("❌ Error en historial-notaventa:", e);
     return NextResponse.json(
       { ok: false, error: e?.message || "Error inesperado" },
       { status: 500 }
