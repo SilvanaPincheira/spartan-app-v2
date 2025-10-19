@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 
+/* ============================================================================
+   ⚙️ CONFIGURACIÓN GOOGLE SHEET
+   ============================================================================ */
 const SHEET_ID =
   "2PACX-1vR2dwvhSGvvFFPBiRxUgF8Q99HkWJlyoFKLDo6Mmu4HvCH_hJtdyV_7WTrOjkUp6u0pMyAOf543M1UE";
 const GID = "0";
 const CSV_URL = `https://docs.google.com/spreadsheets/d/e/${SHEET_ID}/pub?gid=${GID}&single=true&output=csv`;
 
 /* ============================================================================
-   🧩 Parser CSV seguro (mantiene comas dentro de comillas)
+   🧩 Función parseCsv — respeta comas dentro de comillas
    ============================================================================ */
 function parseCsv(text: string): Record<string, string>[] {
   const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
@@ -25,18 +28,21 @@ function parseCsv(text: string): Record<string, string>[] {
 }
 
 /* ============================================================================
-   🧩 API GET — agrupa por N° NV y devuelve estructura limpia
+   🚀 API GET — opcionalmente filtra por ?nv=NV-XXXX
    ============================================================================ */
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const { searchParams } = new URL(req.url);
+    const nvParam = (searchParams.get("nv") || "").trim();
+
+    // 🔹 Leer Sheet
     const res = await fetch(CSV_URL, { cache: "no-store" });
-    if (!res.ok)
-      throw new Error("No se pudo acceder al Sheet público (revisa permisos).");
+    if (!res.ok) throw new Error("No se pudo acceder al Sheet público.");
 
     const csv = await res.text();
     const filas = parseCsv(csv);
 
-    // 🧩 Rellenar N° NV hacia abajo (en caso de celdas vacías)
+    // 🧩 Propagar N° NV hacia abajo (para celdas vacías)
     let ultimoNumero = "";
     for (const f of filas) {
       const num = f["Número NV"] || f["Numero NV"] || f["N° NV"] || "";
@@ -44,16 +50,20 @@ export async function GET() {
       else f["Número NV"] = ultimoNumero;
     }
 
-    /* ------------------------------------------------------------------------
-       Agrupar por número de NV
-    ------------------------------------------------------------------------ */
-    const agrupadas: Record<string, any> = {};
+    // 🔍 Si se solicita ?nv=..., filtrar antes de agrupar
+    const filtradas = nvParam
+      ? filas.filter((f) => {
+          const nv = (f["Número NV"] || f["Numero NV"] || f["N° NV"] || "").trim();
+          return nv === nvParam;
+        })
+      : filas;
 
-    for (const r of filas) {
+    // 🧱 Agrupar por número de NV
+    const agrupadas: Record<string, any> = {};
+    for (const r of filtradas) {
       const numeroNV = (r["Número NV"] || r["Numero NV"] || r["N° NV"] || "").trim();
       if (!numeroNV) continue;
 
-      // Si aún no existe, crear la cabecera
       if (!agrupadas[numeroNV]) {
         agrupadas[numeroNV] = {
           numeroNV,
@@ -75,15 +85,14 @@ export async function GET() {
         };
       }
 
-      // ⚡ Solo agregar si hay código o descripción
+      // Solo agregar ítems válidos
       const codigo = r["Código"] || r["Codigo Producto"] || r["ItemCode"] || "";
       const descripcion =
         r["Descripción"] || r["Producto"] || r["Dscription"] || "";
       if (!codigo && !descripcion) continue;
 
-      // ✅ Agregar ítem con el número NV incluido
       agrupadas[numeroNV].items.push({
-        numeroNV, // 👈 importante para filtrar correctamente al abrir/duplicar
+        numeroNV,
         codigo,
         descripcion,
         cantidad: Number(r["Cantidad"] || r["Quantity"] || 0),
@@ -113,10 +122,16 @@ export async function GET() {
       });
     }
 
-    /* ------------------------------------------------------------------------
-       Crear lista final
-    ------------------------------------------------------------------------ */
+    // 🧾 Resultado final
     const data = Object.values(agrupadas);
+
+    // Si se pidió una NV específica y no se encontró, devolver vacío controlado
+    if (nvParam && data.length === 0) {
+      return NextResponse.json({
+        ok: false,
+        error: `No se encontró la Nota de Venta ${nvParam}`,
+      });
+    }
 
     return NextResponse.json({
       ok: true,
@@ -125,9 +140,6 @@ export async function GET() {
     });
   } catch (err: any) {
     console.error("❌ Error en historial-notaventa:", err);
-    return NextResponse.json(
-      { ok: false, error: err.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
   }
 }

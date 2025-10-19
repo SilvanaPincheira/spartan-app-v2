@@ -333,139 +333,84 @@ const nvToDuplicate = searchParams.get("duplicar");
     })().catch((e) => setErrorMsg(String(e)));
   }, []);
 
-  // 🧩 Si llega ?duplicar=NV-xxxx, cargar esa Nota de Venta desde historial
+ // 🧩 Cargar Nota de Venta (Abrir o Duplicar) desde el historial
 useEffect(() => {
   const params = new URLSearchParams(window.location.search);
-  const duplicar = params.get("duplicar");
-  if (!duplicar) return;
+  const nvToDuplicate = params.get("duplicar");
+  const nvToOpen = params.get("nv");
+
+  const numeroNV = nvToDuplicate || nvToOpen;
+  if (!numeroNV) return;
 
   (async () => {
     try {
-      const res = await fetch(`/api/historial-notaventa`);
+      // 🔹 Trae solo la NV solicitada
+      const res = await fetch(`/api/historial-notaventa?nv=${encodeURIComponent(numeroNV)}`);
       const json = await res.json();
-      if (!json.ok) throw new Error(json.error);
 
-      // 🔹 Buscar la cabecera de la NV seleccionada
-      const cabecera = (json.data || []).find(
-        (n: any) => (n.numeroNV || "").trim() === duplicar.trim()
-      );
-      if (!cabecera) throw new Error("No se encontró la nota a duplicar");
+      if (!json.ok || !json.data?.length) {
+        throw new Error("No se encontró la Nota de Venta solicitada");
+      }
 
-      // ⚙️ Filtrar solo las filas que correspondan a esa NV
-      const filasNV = (cabecera.items || []).filter(
-        (item: any) =>
-          (item.numeroNV ||
-            item["Número NV"] ||
-            item["N° NV"] ||
-            "").trim() === cabecera.numeroNV
-      );
+      const cabecera = json.data[0];
 
-      // ⚙️ Convertir productos en líneas
-      const nuevasLineas = filasNV.map((item: any) => ({
-        code: item.codigo || item.Código || "",
-        name: item.descripcion || item.Descripción || "",
-        kilos: Number(item.kilos || item.Kg || 1),
-        qty: Number(item.cantidad || item.Cantidad || 0),
-        priceBase: Number(item.precioBase || item["Precio base"] || 0),
-        especialPrice: 0,
-        descuento: Number(item["% Desc"] || item.Descuento || 0),
-        precioVenta: Number(item.precioVenta || item["Precio venta"] || 0),
-        total:
-          Number(item.totalItem || item["Total Item"] || item.Total || 0) ||
-          Number(item.cantidad || 0) * Number(item.precioVenta || 0),
-        isEspecial: false,
-        isBloqueado: false,
-      }));
-
-      // 🧾 Rellenar campos de cabecera
+      // 🧾 Completar cabecera
       setClientName(cabecera.cliente || "");
       setClientRut(cabecera.rut || "");
       setEjecutivo(cabecera.ejecutivo || "");
       setEmailEjecutivo(cabecera.correoEjecutivo || "");
-      setComentarios(`Copia de ${cabecera.numeroNV}`);
       setDireccion(cabecera.direccion || "");
+      setComentarios(
+        nvToDuplicate
+          ? `Copia de ${cabecera.numeroNV}`
+          : cabecera.comentarios || ""
+      );
       setComuna("");
-      setLines(nuevasLineas);
 
-      alert(`✨ Estás duplicando la Nota de Venta ${cabecera.numeroNV}`);
-    } catch (err: any) {
-      console.error("❌ Error cargando duplicado:", err);
-      alert("No se pudo cargar la Nota de Venta a duplicar.");
-    }
-  })();
-}, []);
-
-  // 🟢 Cargar datos desde el historial (Abrir o Duplicar)
-useEffect(() => {
-  if (!nvToOpen && !nvToDuplicate) return;
-
-  (async () => {
-    try {
-      const res = await fetch("/api/historial-notaventa");
-      const json = await res.json();
-      if (!json.ok) throw new Error("No se pudieron obtener las Notas de Venta");
-
-      const data = json.data || [];
-      const filasNV = data.filter(
-        (n: any) =>
-          (n.numeroNV || "").trim() === (nvToOpen || nvToDuplicate)?.trim() &&
-          n.items?.length > 0
-      );
-      
-      if (filasNV.length === 0)
-        return alert("❌ Nota de Venta no encontrada");
-
-      const cabecera = filasNV[0];
-
-      // 🧾 Completar campos de cliente
-      setClientName(cabecera.cliente || "");
-      setClientRut(cabecera.rut || "");
-      setEjecutivo(cabecera.ejecutivo || "");
-      setEmailEjecutivo(cabecera.correoEjecutivo || "");
-      setDireccion(cabecera.direccion || "");
-      setComentarios(cabecera.comentarios || "");
-
-      // 🧩 Si es duplicado => nuevo número
+      // 🧩 Si es duplicado, generar nuevo número; si es abrir, mantener
       if (nvToDuplicate) {
         setNumeroNV(generarNumeroNV());
       } else {
         setNumeroNV(cabecera.numeroNV);
       }
 
-      // 🧩 Cargar líneas de productos
+      // ⚙️ Cargar líneas de productos
       const nuevasLineas = (cabecera.items || []).map((item: any) => ({
         code: item.codigo || "",
         name: item.descripcion || "",
         kilos: Number(item.kilos || 1),
         qty: Number(item.cantidad || 0),
-        priceBase: Number(item.precioUnitario || item.precioBase || 0),
+        priceBase: Number(item.precioBase || 0),
         especialPrice: 0,
         descuento: Number(item.descuento || 0),
-        precioVenta: Number(item.precioUnitario || item.precioVenta || 0),
-        total: Number(item.totalItem || item.total || 0),
+        precioVenta: Number(item.precioVenta || 0),
+        total:
+          Number(item.totalItem || 0) ||
+          Number(item.cantidad || 0) * Number(item.precioVenta || 0),
         isEspecial: false,
         isBloqueado: false,
       }));
 
       setLines(nuevasLineas);
+
+      // 🔔 Mensajes visuales
+      if (nvToDuplicate) {
+        alert(`✨ Estás duplicando la Nota de Venta ${cabecera.numeroNV}`);
+      } else {
+        alert(`👀 Estás visualizando la Nota de Venta ${cabecera.numeroNV}`);
+      }
+
       if (nuevasLineas.length === 0) {
         console.warn("⚠️ Nota de Venta sin ítems asociados:", cabecera.numeroNV);
         alert("Esta Nota no tiene ítems guardados en el sheet.");
       }
-      
-
-      // 🧩 Si solo se abrió (no duplicado) => modo lectura
-      if (nvToOpen) {
-        alert(`👀 Estás visualizando la Nota de Venta ${cabecera.numeroNV}`);
-      } else {
-        alert(`✨ Estás duplicando la Nota de Venta ${cabecera.numeroNV}`);
-      }
-    } catch (e: any) {
-      console.error("Error al cargar NV:", e);
-      alert("⚠️ No se pudo cargar la Nota de Venta seleccionada");
+    } catch (err) {
+      console.error("❌ Error cargando Nota de Venta:", err);
+      alert("No se pudo cargar la Nota de Venta solicitada.");
     }
   })();
-}, [nvToOpen, nvToDuplicate]);
+}, []);
+
 
 
 
