@@ -1084,15 +1084,27 @@ useEffect(() => {
         </section>
       </div>
 
-      {/* Botones */}
-<div className="flex flex-wrap gap-2 print:hidden px-6 pb-8">
+     {/* Botones */}
+<div className="flex flex-wrap gap-4 print:hidden px-6 pb-8 items-center">
+  {/* 📎 Adjunto opcional */}
+  <label className="flex flex-col text-sm text-zinc-700">
+    📎 Adjuntar archivo (opcional)
+    <input
+      id="adjunto"
+      type="file"
+      className="mt-1 text-xs text-zinc-600"
+      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
+    />
+  </label>
+
+  {/* 💾 Guardar + PDF + Email */}
   <button
     onClick={async () => {
       if (procesando) return; // ⛔ Evita doble clic
       setProcesando(true);
 
       try {
-        await guardarPdfYEnviar(); // tu función actual de guardar + pdf + email
+        await guardarPdfYEnviar(); // tu función actual con adjunto
         alert("✅ Cotización guardada y enviada correctamente.");
         // 🔒 Mantiene bloqueado hasta que se cree una nueva cotización
         setProcesando(true);
@@ -1121,9 +1133,16 @@ useEffect(() => {
     )}
   </button>
 
+  {/* 🧹 Nueva Cotización */}
+  <button
+    className="bg-zinc-200 px-3 py-1 rounded hover:bg-zinc-300"
+    onClick={limpiar}
+    disabled={procesando}
+  >
+    🧹 Nueva Cotización
+  </button>
+</div>
 
-        <button className="bg-zinc-200 px-3 py-1 rounded" onClick={limpiar}>🧹 Nueva Cotización</button>
-      </div>
 
       {/* Estilos de impresión */}
       <style jsx>{`
