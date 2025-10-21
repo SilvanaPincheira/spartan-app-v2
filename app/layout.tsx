@@ -16,6 +16,8 @@ const menuItems = [
   { name: "Metas", href: "/metas", icon: "🎯" },
   { name: "Facturas y NC", href: "/facturas-nc", icon: "🧾" },
   { name: "Comisiones", href: "/comisiones", icon: "💰" }, // ✅ nuevo módulo
+  { name: "Panel Gerencial", href: "/gerencial", icon: "🏢" },
+
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
