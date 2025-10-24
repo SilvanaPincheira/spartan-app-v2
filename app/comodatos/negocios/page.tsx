@@ -700,7 +700,77 @@ const drawSimpleTable = (
     }
   }
   
-  
+  /* ===================== GUARDAR EN HISTORIAL ===================== */
+async function guardarEnHistorial() {
+  try {
+    const SCRIPT_URL =
+      "https://script.google.com/macros/s/AKfycbzMsSXb8Bg8zCNTWt1IZppXw5_cO2K1GNwM4YHWpZFB87iSpqYUqSoB-EXpL6GQEN438Q/exec";
+
+    // 1️⃣ Cabecera principal
+    const header = {
+      "Fecha Evaluación": fechaEval,
+      "Cliente": clienteNombre,
+      "RUT": rut,
+      "Dirección": direccion,
+      "Ejecutivo": ejecutivo,
+      "Meses Contrato": months,
+      "% Comisión Base": commissionPct,
+      "Venta Mensual ($)": calc.ventaTotal,
+      "Comodato Mensual ($)": calc.comodatoMensual,
+      "Relación Comodato/Venta": calc.rel,
+      "% Comisión Final": calc.comFinalPct,
+      "Margen Final %": calc.mgnFinalPct,
+      "Estado": isViable ? "Viable" : "No viable",
+      "Fuente": "Evaluación Negocio",
+      "Timestamp": new Date().toLocaleString("es-CL"),
+    };
+
+    // 2️⃣ Detalle productos
+    const productos = calc.lines.map((p) => ({
+      "Tipo": "Producto",
+      "Código": p.code,
+      "Descripción": p.name,
+      "Kg / Unidad Base": p.kilos,
+      "Cantidad Mensual": p.qty,
+      "Precio Base $/Kg": p.priceListaKg,
+      "Precio Venta $/Kg": p.priceKg,
+      "Total Mensual": p.venta,
+      "Mgn Final %": p.mgn3Pct,
+    }));
+
+    // 3️⃣ Detalle comodatos
+    const equipos = comodatos.map((c) => ({
+      "Tipo": "Comodato",
+      "Código": c.code,
+      "Descripción": c.name,
+      "Cantidad Mensual": c.qty,
+      "Precio $/contrato": c.priceContract,
+      "Total Contrato": c.priceContract * c.qty,
+    }));
+
+    // 4️⃣ Combinar todo
+    const rows = [header, ...productos, ...equipos];
+
+    // 5️⃣ Enviar al Apps Script
+    const res = await fetch(SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "append", data: rows }),
+    });
+
+    const result = await res.json();
+    if (result.success) {
+      alert("✅ Evaluación guardada en el Historial correctamente.");
+    } else {
+      console.error(result);
+      alert("⚠️ No se pudo guardar en el historial (ver consola).");
+    }
+  } catch (err) {
+    console.error("❌ Error al guardar:", err);
+    alert("Error al guardar en el historial.");
+  }
+}
+
 
   function limpiarTodo() {
     setClienteNombre("");
@@ -927,24 +997,33 @@ const drawSimpleTable = (
             </div>
           </div>
 
-          {/* Acciones PDF */}
           <div className="mt-4 flex gap-2">
-            <button
-              onClick={descargarPdf}
-              className="rounded bg-zinc-200 px-3 py-2 text-xs hover:bg-zinc-300"
-            >
-              Descargar PDF
-            </button>
-            <button
-              onClick={descargarYEnviar}
-              className={`rounded px-3 py-2 text-xs text-white ${
-                isViable ? "bg-emerald-600 hover:bg-emerald-700" : "bg-zinc-400 cursor-not-allowed"
-              }`}
-            >
-              Descargar y enviar (si Viable)
-            </button>
-          </div>
-        </section>
+  <button
+    onClick={descargarPdf}
+    className="rounded bg-zinc-200 px-3 py-2 text-xs hover:bg-zinc-300"
+  >
+    📄 Descargar PDF
+  </button>
+
+  <button
+    onClick={descargarYEnviar}
+    className={`rounded px-3 py-2 text-xs text-white ${
+      isViable ? "bg-emerald-600 hover:bg-emerald-700" : "bg-zinc-400 cursor-not-allowed"
+    }`}
+  >
+    ✉️ Enviar por correo (si Viable)
+  </button>
+
+  <button
+    onClick={guardarEnHistorial}
+    className="rounded bg-blue-600 px-3 py-2 text-xs text-white hover:bg-blue-700"
+  >
+    💾 Guardar en Historial
+  </button>
+</div>
+</section>
+
+
 
         {/* Productos */}
         <section className="mt-6 rounded-2xl border bg-white p-6 shadow-sm">
