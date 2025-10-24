@@ -2,6 +2,8 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+
 
 /* ===================== CONFIG ===================== */
 const DEFAULT_CATALOG_URL =
@@ -282,6 +284,31 @@ useEffect(() => {
     for (const o of options) m.set(o.code.toUpperCase(), o);
     return m;
   }, [options]);
+
+  // === Usuario logueado (ejecutivo actual) ===
+const supabase = createClientComponentClient();
+const [userEmail, setUserEmail] = useState("");
+const [userName, setUserName] = useState("");
+
+useEffect(() => {
+  async function getUser() {
+    const { data, error } = await supabase.auth.getUser();
+    if (data?.user) {
+      const email = data.user.email || "";
+      const name =
+        data.user.user_metadata?.nombre ||
+        data.user.user_metadata?.full_name ||
+        email.split("@")[0];
+
+      setUserEmail(email);
+      setUserName(name);
+      setEjecutivo(name); // ✅ llena automáticamente el campo “Ejecutivo”
+      localStorage.setItem("EMAIL_COL", email);
+    }
+  }
+  getUser();
+}, []);
+
 
   useEffect(() => {
     (async () => {
@@ -708,7 +735,7 @@ async function guardarEnHistorial() {
       rut,
       direccion,
       ejecutivo,
-      correoEjecutivo: "ejemplo@spartan.cl", // puedes reemplazar por real
+      "Correo Ejecutivo": userEmail,
       zona: "",
       comentarios: "",
       meses: months,
@@ -909,13 +936,14 @@ async function guardarEnHistorial() {
             </label>
 
             <label className="flex items-center gap-2">
-              <span>Ejecutivo</span>
-              <input
-                className="w-60 rounded border px-2 py-1"
-                value={ejecutivo}
-                onChange={(e) => setEjecutivo(e.target.value)}
-              />
-            </label>
+  <span>Ejecutivo</span>
+  <input
+    className="w-60 rounded border px-2 py-1 bg-zinc-50"
+    value={ejecutivo}
+    readOnly
+  />
+</label>
+
 
             <label className="flex items-center gap-2">
               <span>Meses contrato</span>
