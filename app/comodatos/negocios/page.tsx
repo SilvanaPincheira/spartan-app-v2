@@ -703,73 +703,71 @@ const drawSimpleTable = (
   /* ===================== GUARDAR EN HISTORIAL ===================== */
 async function guardarEnHistorial() {
   try {
-    const SCRIPT_URL =
-      "https://script.google.com/macros/s/AKfycbzMsSXb8Bg8zCNTWt1IZppXw5_cO2K1GNwM4YHWpZFB87iSpqYUqSoB-EXpL6GQEN438Q/exec";
-
-    // 1️⃣ Cabecera principal
-    const header = {
-      "Fecha Evaluación": fechaEval,
-      "Cliente": clienteNombre,
-      "RUT": rut,
-      "Dirección": direccion,
-      "Ejecutivo": ejecutivo,
-      "Meses Contrato": months,
-      "% Comisión Base": commissionPct,
-      "Venta Mensual ($)": calc.ventaTotal,
-      "Comodato Mensual ($)": calc.comodatoMensual,
-      "Relación Comodato/Venta": calc.rel,
-      "% Comisión Final": calc.comFinalPct,
-      "Margen Final %": calc.mgnFinalPct,
-      "Estado": isViable ? "Viable" : "No viable",
-      "Fuente": "Evaluación Negocio",
-      "Timestamp": new Date().toLocaleString("es-CL"),
+    const payload = {
+      cliente: clienteNombre,
+      rut,
+      direccion,
+      ejecutivo,
+      correoEjecutivo: "ejemplo@spartan.cl", // puedes reemplazar por real
+      zona: "",
+      comentarios: "",
+      meses: months,
+      comisionBase: commissionPct,
+      comisionFinal: calc.comFinalPct,
+      relacionCdtoVenta: calc.rel,
+      margenFinalPct: calc.mgnFinalPct,
+      estado: isViable ? "Viable" : "No viable",
+      ventaMensual: calc.ventaTotal,
+      comodatoTotal: calc.totalComodato,
+      comodatoMensual: calc.comodatoMensual,
+      montoComision: calc.comFinalPct * calc.ventaTotal,
+      margenFinal: calc.mgnFinalPct * calc.ventaTotal,
+      productos: sales.map((p) => ({
+        code: p.code,
+        name: p.name,
+        kilos: p.kilos,
+        qty: p.qty,
+        priceListaKg: p.priceListaKg,
+        priceKg: p.priceKg,
+        descuento:
+          p.priceListaKg && p.priceListaKg > 0
+            ? ((1 - p.priceKg / p.priceListaKg) * 100).toFixed(1)
+            : 0,
+        subtotal: (p.priceKg || 0) * (p.qty || 0) * (p.kilos || 1),
+        fuente: "Evaluación",
+      })),
+      equipos: comodatos.map((c) => ({
+        code: c.code,
+        name: c.name,
+        qty: c.qty,
+        priceContract: c.priceContract,
+        total: (c.priceContract || 0) * (c.qty || 0),
+        fuente: "Evaluación",
+      })),
     };
 
-    // 2️⃣ Detalle productos
-    const productos = calc.lines.map((p) => ({
-      "Tipo": "Producto",
-      "Código": p.code,
-      "Descripción": p.name,
-      "Kg / Unidad Base": p.kilos,
-      "Cantidad Mensual": p.qty,
-      "Precio Base $/Kg": p.priceListaKg,
-      "Precio Venta $/Kg": p.priceKg,
-      "Total Mensual": p.venta,
-      "Mgn Final %": p.mgn3Pct,
-    }));
+    console.log("📦 Enviando payload:", payload);
 
-    // 3️⃣ Detalle comodatos
-    const equipos = comodatos.map((c) => ({
-      "Tipo": "Comodato",
-      "Código": c.code,
-      "Descripción": c.name,
-      "Cantidad Mensual": c.qty,
-      "Precio $/contrato": c.priceContract,
-      "Total Contrato": c.priceContract * c.qty,
-    }));
-
-    // 4️⃣ Combinar todo
-    const rows = [header, ...productos, ...equipos];
-
-    // 5️⃣ Enviar al Apps Script
-    const res = await fetch(SCRIPT_URL, {
+    const res = await fetch("/api/historial-evaluaciones", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "append", data: rows }),
+      body: JSON.stringify(payload),
     });
 
-    const result = await res.json();
-    if (result.success) {
-      alert("✅ Evaluación guardada en el Historial correctamente.");
+    const data = await res.json();
+    console.log("📩 Respuesta servidor:", data);
+
+    if (data.success) {
+      alert(`✅ Evaluación guardada correctamente. ID: ${data.idEvaluacion}`);
     } else {
-      console.error(result);
-      alert("⚠️ No se pudo guardar en el historial (ver consola).");
+      alert("⚠️ Error al guardar en el historial.");
     }
   } catch (err) {
     console.error("❌ Error al guardar:", err);
     alert("Error al guardar en el historial.");
   }
 }
+
 
 
   function limpiarTodo() {
