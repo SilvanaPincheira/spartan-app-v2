@@ -96,7 +96,7 @@ export default function HistorialEvaluaciones() {
       return;
     }
     localStorage.setItem("eval.duplicado", JSON.stringify(evalItem.filas));
-    window.location.href = "/comodatos/evaluaciones"; // ruta del formulario principal
+    window.location.href = "/comodatos/negocios"; // ruta del formulario principal
   }
 
   return (
