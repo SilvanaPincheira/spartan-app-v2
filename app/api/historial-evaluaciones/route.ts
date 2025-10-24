@@ -4,7 +4,7 @@ export async function POST(req: Request) {
 
     // URL de tu Apps Script (debe estar publicado como web app con permisos "cualquiera con el enlace")
     const SCRIPT_URL =
-      "https://script.google.com/macros/s/AKfycbygetzFiGrhcXDhvWTzuiKUrYU9zQkjngg62hCJ57qMMn5PF80zAM6jDKBy2HnK0uo/exec";
+      "https://script.google.com/macros/s/AKfycbyVxMfOG8pygsQn86LrFvtN_yyRep7-_bbiCiHDSAD4_CiEpMzAFZVl_onEjseSb2BIOA/exec";
 
     console.log("📤 Enviando datos al Apps Script...");
     console.log(JSON.stringify(data, null, 2));

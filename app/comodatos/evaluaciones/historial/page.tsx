@@ -3,150 +3,158 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 
-/* === Helper para leer CSV === */
-function parseCsv(text: string) {
-  const rows = text.trim().split("\n").map((r) => r.split(","));
-  const headers = rows.shift() || [];
-  return rows.map((r) => {
-    const obj: Record<string, string> = {};
-    headers.forEach((h, i) => (obj[h.trim()] = (r[i] || "").trim()));
-    return obj;
-  });
-}
+type Row = {
+  ["ID Evaluación"]: string;
+  ["Fecha Evaluación"]: string;
+  ["Cliente"]: string;
+  ["Ejecutivo"]: string;
+  ["Venta Mensual ($)"]: string;
+  ["Comodato Mensual ($)"]: string;
+  ["Estado"]: string;
+  [key: string]: any;
+};
 
-async function loadSheetCsv(spreadsheetId: string, gid = "0") {
-  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error("No se pudo cargar el Sheet.");
-  const text = await res.text();
-  return parseCsv(text);
-}
-
-export default function Page() {
-  const [data, setData] = useState<any[]>([]);
+export default function HistorialEvaluaciones() {
+  const [evaluaciones, setEvaluaciones] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const sheetUrl =
-    "https://docs.google.com/spreadsheets/d/1UXVAxwzg-Kh7AWCPnPbxbEpzXnRPR2pDBKrRUFNZKZo/edit?gid=0";
 
   useEffect(() => {
-    (async () => {
+    async function cargarDatos() {
       try {
-        const match = sheetUrl.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-        const id = match ? match[1] : "";
-        const gidMatch = sheetUrl.match(/[?&#]gid=([0-9]+)/);
-        const gid = gidMatch ? gidMatch[1] : "0";
+        const SHEET_ID = "1Te8xrWiWSvLl_YwqgK55rHw6eBGHeVeMGi0Z1G2ft4E";
+        const GID = "1798666527";
+        const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${GID}`;
+        const res = await fetch(url);
+        const text = await res.text();
 
-        const rows = await loadSheetCsv(id, gid);
-        setData(rows);
+        const [headerLine, ...rows] = text.trim().split("\n");
+        const headers = headerLine.split(",").map((h) => h.trim());
+        const data: Row[] = rows.map((line) => {
+          const cols = line.split(",");
+          const obj: any = {};
+          headers.forEach((h, i) => (obj[h] = cols[i] ?? ""));
+          return obj;
+        });
+
+        // agrupar por ID Evaluación
+        const agrupado = Object.values(
+          data.reduce((acc: any, row: Row) => {
+            const id = row["ID Evaluación"];
+            if (!id || id === "ID Evaluación") return acc;
+            if (!acc[id]) {
+              acc[id] = {
+                id,
+                fecha: row["Fecha Evaluación"] || "",
+                cliente: row["Cliente"] || "",
+                ejecutivo: row["Ejecutivo"] || "",
+                venta: Number(row["Venta Mensual ($)"] || 0),
+                comodato: Number(row["Comodato Mensual ($)"] || 0),
+                estado: row["Estado"] || "",
+                filas: [],
+              };
+            }
+            acc[id].filas.push(row);
+            return acc;
+          }, {})
+        );
+
+        setEvaluaciones(agrupado);
       } catch (err) {
-        console.error(err);
-        setError("Error al cargar el historial.");
+        console.error("❌ Error cargando hoja:", err);
       } finally {
         setLoading(false);
       }
-    })();
+    }
+
+    cargarDatos();
   }, []);
 
-  function handleDuplicar(idEval: string) {
-    const seleccion = data.filter((r) => r["ID Evaluación"] === idEval);
-    if (!seleccion.length) return alert("No se encontró la evaluación seleccionada.");
-
-    localStorage.setItem("eval.duplicado", JSON.stringify(seleccion));
-    alert(`✅ Evaluación ${idEval} cargada. Serás redirigido al formulario.`);
-    window.location.href = "/comodatos/negocios";
+  function money(n: number) {
+    return n.toLocaleString("es-CL", {
+      style: "currency",
+      currency: "CLP",
+      maximumFractionDigits: 0,
+    });
   }
 
-  if (loading) return <div className="p-6 text-sm text-zinc-600">Cargando historial...</div>;
-  if (error) return <div className="p-6 text-sm text-red-600">{error}</div>;
-
-  // Mostrar sólo la cabecera de cada evaluación (una por ID)
-  const unicos = Array.from(
-    new Map(data.map((r) => [r["ID Evaluación"], r])).values()
-  );
+  function duplicarEvaluacion(evalItem: any) {
+    if (!evalItem?.filas?.length) {
+      alert("No hay datos para duplicar esta evaluación.");
+      return;
+    }
+    localStorage.setItem("eval.duplicado", JSON.stringify(evalItem.filas));
+    window.location.href = "/comodatos/evaluaciones"; // 🔁 vuelve al formulario principal
+  }
 
   return (
-    <div className="p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-[#1f4ed8]">
-          📋 Historial de Evaluaciones
+    <div className="min-h-screen bg-zinc-50 p-6">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold text-[#1f4ed8] flex items-center gap-2">
+          <span>🗂️</span> Historial de Evaluaciones
         </h1>
         <Link
-          href="/comodatos/negocios"
-          className="rounded bg-zinc-200 px-3 py-1 text-sm hover:bg-zinc-300"
+          href="/comodatos/evaluaciones"
+          className="rounded bg-zinc-200 px-3 py-2 text-sm hover:bg-zinc-300"
         >
           ⟵ Volver a Evaluación
         </Link>
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border bg-white shadow-sm">
-        <table className="min-w-full text-sm">
-          <thead className="bg-zinc-100 text-zinc-700">
-            <tr>
-              <th className="px-3 py-2 text-left">ID Evaluación</th>
-              <th className="px-3 py-2 text-left">Fecha</th>
-              <th className="px-3 py-2 text-left">Cliente</th>
-              <th className="px-3 py-2 text-left">Ejecutivo</th>
-              <th className="px-3 py-2 text-right">Venta Mensual</th>
-              <th className="px-3 py-2 text-right">Comodato Mensual</th>
-              <th className="px-3 py-2 text-center">Estado</th>
-              <th className="px-3 py-2 text-center">Acción</th>
-            </tr>
-          </thead>
-          <tbody>
-            {unicos.length === 0 ? (
+      {loading ? (
+        <div className="text-center text-zinc-500 py-10">Cargando historial...</div>
+      ) : evaluaciones.length === 0 ? (
+        <div className="text-center text-zinc-500 py-10">
+          No hay evaluaciones registradas aún.
+        </div>
+      ) : (
+        <div className="rounded-2xl border bg-white shadow-sm overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-zinc-100">
               <tr>
-                <td colSpan={8} className="px-3 py-4 text-center text-zinc-500">
-                  No hay evaluaciones guardadas.
-                </td>
+                <th className="px-3 py-2 text-left">ID Evaluación</th>
+                <th className="px-3 py-2 text-left">Fecha</th>
+                <th className="px-3 py-2 text-left">Cliente</th>
+                <th className="px-3 py-2 text-left">Ejecutivo</th>
+                <th className="px-3 py-2 text-right">Venta Mensual</th>
+                <th className="px-3 py-2 text-right">Comodato Mensual</th>
+                <th className="px-3 py-2 text-center">Estado</th>
+                <th className="px-3 py-2 text-center">Acción</th>
               </tr>
-            ) : (
-              unicos.map((r, i) => (
-                <tr key={i} className="border-b hover:bg-zinc-50">
-                  <td className="px-3 py-2">{r["ID Evaluación"] || "-"}</td>
-                  <td className="px-3 py-2">{r["Fecha Evaluación"] || "-"}</td>
-                  <td className="px-3 py-2">{r["Cliente"] || "-"}</td>
-                  <td className="px-3 py-2">{r["Ejecutivo"] || "-"}</td>
-                  <td className="px-3 py-2 text-right">
-                    {Number(r["Venta Mensual ($)"] || 0).toLocaleString("es-CL", {
-                      style: "currency",
-                      currency: "CLP",
-                      maximumFractionDigits: 0,
-                    })}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    {Number(r["Comodato Mensual ($)"] || 0).toLocaleString("es-CL", {
-                      style: "currency",
-                      currency: "CLP",
-                      maximumFractionDigits: 0,
-                    })}
-                  </td>
+            </thead>
+            <tbody>
+              {evaluaciones.map((r: any) => (
+                <tr key={r.id} className="border-t">
+                  <td className="px-3 py-2">{r.id}</td>
+                  <td className="px-3 py-2">{r.fecha}</td>
+                  <td className="px-3 py-2">{r.cliente}</td>
+                  <td className="px-3 py-2">{r.ejecutivo}</td>
+                  <td className="px-3 py-2 text-right">{money(r.venta)}</td>
+                  <td className="px-3 py-2 text-right">{money(r.comodato)}</td>
                   <td className="px-3 py-2 text-center">
                     <span
-                      className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                        r["Estado"] === "Viable"
-                          ? "bg-green-100 text-green-700"
-                          : "bg-red-100 text-red-700"
+                      className={`inline-flex items-center justify-center w-6 h-6 rounded-full ${
+                        r.estado === "Viable"
+                          ? "bg-green-200 text-green-700"
+                          : "bg-red-200 text-red-700"
                       }`}
                     >
-                      {r["Estado"] || "-"}
+                      {r.estado === "Viable" ? "✓" : "✗"}
                     </span>
                   </td>
                   <td className="px-3 py-2 text-center">
                     <button
-                      onClick={() => handleDuplicar(r["ID Evaluación"])}
-                      className="rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
+                      onClick={() => duplicarEvaluacion(r)}
+                      className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700"
                     >
                       Duplicar
                     </button>
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
