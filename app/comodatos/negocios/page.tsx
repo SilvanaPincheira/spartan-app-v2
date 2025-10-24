@@ -205,6 +205,61 @@ export default function Page() {
   // Parámetros
   const [months, setMonths] = useLocalStorage<number>("eval.meses", 24);
   const [commissionPct, setCommissionPct] = useLocalStorage<number>("eval.com.base", 0.105); // base
+  /* ========== DUPLICAR EVALUACIÓN DESDE HISTORIAL ========== */
+useEffect(() => {
+  if (typeof window === "undefined") return;
+  const dupRaw = localStorage.getItem("eval.duplicado");
+  if (!dupRaw) return;
+
+  try {
+    const data = JSON.parse(dupRaw);
+    if (!Array.isArray(data) || data.length === 0) return;
+
+    // Tomar los datos de la primera fila (cabecera)
+    const head = data[0];
+
+    // Setear campos principales
+    setFechaEval(head["Fecha Evaluación"] || "");
+    setClienteNombre(head["Cliente"] || "");
+    setRut(head["RUT"] || "");
+    setDireccion(head["Dirección"] || "");
+    setEjecutivo(head["Ejecutivo"] || "");
+    setMonths(Number(head["Meses Contrato"] || 24));
+    setCommissionPct(Number(head["% Comisión Base"] || 0.105));
+
+    // Extraer los productos y comodatos
+    const productos = data.filter((r) => r["Tipo"] === "Producto");
+    const equipos = data.filter((r) => r["Tipo"] === "Comodato");
+
+    // Cargar productos
+    const salesData = productos.map((p: any) => ({
+      code: p["Código"] || "",
+      name: p["Descripción"] || "",
+      kilos: Number(p["Kg / Unidad Base"] || 1),
+      qty: Number(p["Cantidad Mensual"] || 1),
+      priceKg: Number(p["Precio Venta $/Kg"] || 0),
+      priceListaKg: Number(p["Precio Base $/Kg"] || 0),
+    }));
+    setSales(salesData);
+
+    // Cargar comodatos
+    const comData = equipos.map((c: any) => ({
+      code: c["Código"] || "",
+      name: c["Descripción"] || "",
+      qty: Number(c["Cantidad Mensual"] || 1),
+      priceContract: Number(c["Precio Venta $/Kg"] || c["Precio $/contrato"] || 0),
+    }));
+    setComodatos(comData);
+
+    console.log("✅ Evaluación duplicada cargada:", head["ID Evaluación"]);
+
+    // Limpiar localStorage para no duplicar en futuras cargas
+    localStorage.removeItem("eval.duplicado");
+  } catch (err) {
+    console.error("Error al cargar duplicado:", err);
+  }
+}, []);
+
 
   // Catálogo y sugerencias
   const [catalog, setCatalog] = useState<Record<string, CatalogItem>>({});

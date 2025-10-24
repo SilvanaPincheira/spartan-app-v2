@@ -102,7 +102,7 @@ export async function POST(req: Request) {
     const data = await resend.emails.send({
       from: "silvana.pincheira@spartan.cl",
       to,
-      cc: cc || ["silvana.pincheira@spartan.cl"],
+      cc: cc || ["sac@spartan.cl"],
       subject,
       html,
       attachments,
