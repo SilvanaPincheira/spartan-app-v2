@@ -8,11 +8,43 @@ type Row = {
   ["Fecha Evaluación"]: string;
   ["Cliente"]: string;
   ["Ejecutivo"]: string;
-  ["Venta Mensual ($)"]: string;
-  ["Comodato Mensual ($)"]: string;
+  ["Venta Mensual ($)"]: number;
+  ["Comodato Mensual ($)"]: number;
   ["Estado"]: string;
   [key: string]: any;
 };
+
+/* === UTILIDADES === */
+function money(n: number) {
+  if (!Number.isFinite(n)) n = 0;
+  return n.toLocaleString("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    maximumFractionDigits: 0,
+  });
+}
+
+/* === OBTENER DATOS CON GViz === */
+async function fetchGVizRows(sheetUrl: string) {
+  const m = sheetUrl.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  const id = m ? m[1] : "";
+  const g = sheetUrl.match(/[?&#]gid=([0-9]+)/);
+  const gid = g ? g[1] : "0";
+  const url = `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:json&gid=${gid}`;
+  const res = await fetch(url, { cache: "no-store" });
+  const text = await res.text();
+
+  const json = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
+  const headers: string[] = json.table.cols.map((c: any) => (c.label || c.id || "").trim());
+
+  const rows = json.table.rows.map((r: any) => {
+    const obj: Record<string, any> = {};
+    headers.forEach((h, i) => (obj[h] = r.c[i]?.v ?? r.c[i]?.f ?? ""));
+    return obj;
+  });
+
+  return rows as Row[];
+}
 
 export default function HistorialEvaluaciones() {
   const [evaluaciones, setEvaluaciones] = useState<any[]>([]);
@@ -21,22 +53,11 @@ export default function HistorialEvaluaciones() {
   useEffect(() => {
     async function cargarDatos() {
       try {
-        const SHEET_ID = "1Te8xrWiWSvLl_YwqgK55rHw6eBGHeVeMGi0Z1G2ft4E";
-        const GID = "1798666527";
-        const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${GID}`;
-        const res = await fetch(url);
-        const text = await res.text();
+        const SHEET_URL =
+          "https://docs.google.com/spreadsheets/d/1Te8xrWiWSvLl_YwqgK55rHw6eBGHeVeMGi0Z1G2ft4E/edit?gid=1798666527#gid=1798666527";
+        const data = await fetchGVizRows(SHEET_URL);
 
-        const [headerLine, ...rows] = text.trim().split("\n");
-        const headers = headerLine.split(",").map((h) => h.trim());
-        const data: Row[] = rows.map((line) => {
-          const cols = line.split(",");
-          const obj: any = {};
-          headers.forEach((h, i) => (obj[h] = cols[i] ?? ""));
-          return obj;
-        });
-
-        // agrupar por ID Evaluación
+        // agrupar por ID Evaluación (cabecera)
         const agrupado = Object.values(
           data.reduce((acc: any, row: Row) => {
             const id = row["ID Evaluación"];
@@ -44,7 +65,7 @@ export default function HistorialEvaluaciones() {
             if (!acc[id]) {
               acc[id] = {
                 id,
-                fecha: row["Fecha Evaluación"] || "",
+                fecha: String(row["Fecha Evaluación"] || "").replace(/^"|"$/g, ""),
                 cliente: row["Cliente"] || "",
                 ejecutivo: row["Ejecutivo"] || "",
                 venta: Number(row["Venta Mensual ($)"] || 0),
@@ -69,21 +90,13 @@ export default function HistorialEvaluaciones() {
     cargarDatos();
   }, []);
 
-  function money(n: number) {
-    return n.toLocaleString("es-CL", {
-      style: "currency",
-      currency: "CLP",
-      maximumFractionDigits: 0,
-    });
-  }
-
   function duplicarEvaluacion(evalItem: any) {
     if (!evalItem?.filas?.length) {
       alert("No hay datos para duplicar esta evaluación.");
       return;
     }
     localStorage.setItem("eval.duplicado", JSON.stringify(evalItem.filas));
-    window.location.href = "/comodatos/evaluaciones"; // 🔁 vuelve al formulario principal
+    window.location.href = "/comodatos/evaluaciones"; // ruta del formulario principal
   }
 
   return (
