@@ -94,12 +94,15 @@ export async function POST(req: Request) {
 
     const html = buildComodatoHTML(body);
 
-    const attachments = pdfBase64 ? [{ filename, content: pdfBase64 }] : undefined;
+    const attachments = pdfBase64
+  ? [{ filename, content: Buffer.from(pdfBase64, "base64") }]
+  : undefined;
+
 
     const data = await resend.emails.send({
       from: "silvana.pincheira@spartan.cl",
       to,
-      cc: cc || ["sac@spartan.cl"],
+      cc: cc || ["silvana.pincheira@spartan.cl"],
       subject,
       html,
       attachments,
