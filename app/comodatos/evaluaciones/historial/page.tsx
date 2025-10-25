@@ -2,19 +2,22 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
+/* === TIPOS === */
 type Row = {
   ["ID Evaluación"]: string;
   ["Fecha Evaluación"]: string;
   ["Cliente"]: string;
   ["Ejecutivo"]: string;
+  ["Correo Ejecutivo"]: string;
   ["Venta Mensual ($)"]: number;
   ["Comodato Mensual ($)"]: number;
   ["Estado"]: string;
   [key: string]: any;
 };
 
-/* === UTILIDADES === */
+/* === FORMATEADORES === */
 function money(n: number) {
   if (!Number.isFinite(n)) n = 0;
   return n.toLocaleString("es-CL", {
@@ -24,7 +27,7 @@ function money(n: number) {
   });
 }
 
-/* === OBTENER DATOS CON GViz === */
+/* === LECTOR DE GViz === */
 async function fetchGVizRows(sheetUrl: string) {
   const m = sheetUrl.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
   const id = m ? m[1] : "";
@@ -46,20 +49,56 @@ async function fetchGVizRows(sheetUrl: string) {
   return rows as Row[];
 }
 
+/* === COMPONENTE PRINCIPAL === */
 export default function HistorialEvaluaciones() {
   const [evaluaciones, setEvaluaciones] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [userEmail, setUserEmail] = useState("");
+  const [userName, setUserName] = useState("");
 
+  const supabase = createClientComponentClient();
+
+  // ✅ Obtener usuario logueado
   useEffect(() => {
+    async function getUser() {
+      const { data } = await supabase.auth.getUser();
+      if (data?.user) {
+        const email = data.user.email || "";
+        const name =
+          data.user.user_metadata?.nombre ||
+          data.user.user_metadata?.full_name ||
+          email.split("@")[0];
+
+        setUserEmail(email);
+        setUserName(name);
+      }
+    }
+    getUser();
+  }, []);
+
+  // ✅ Cargar hoja de Google filtrando por correo
+  useEffect(() => {
+    if (!userEmail) return; // esperar login
+
     async function cargarDatos() {
       try {
         const SHEET_URL =
           "https://docs.google.com/spreadsheets/d/1Te8xrWiWSvLl_YwqgK55rHw6eBGHeVeMGi0Z1G2ft4E/edit?gid=1798666527#gid=1798666527";
         const data = await fetchGVizRows(SHEET_URL);
 
-        // agrupar por ID Evaluación (cabecera)
+        // 🔍 Filtro por correo del usuario actual
+        const esAdmin = userEmail.toLowerCase().includes("@spartan.cl"); // o dominio que uses
+        const dataFiltrada = esAdmin
+          ? data
+          : data.filter(
+              (r) =>
+                (r["Correo Ejecutivo"] || "").trim().toLowerCase() ===
+                userEmail.trim().toLowerCase()
+            );
+
+        // Agrupar por ID Evaluación (una por cabecera)
         const agrupado = Object.values(
-          data.reduce((acc: any, row: Row) => {
+          dataFiltrada.reduce((acc: any, row: Row) => {
             const id = row["ID Evaluación"];
             if (!id || id === "ID Evaluación") return acc;
             if (!acc[id]) {
@@ -68,6 +107,7 @@ export default function HistorialEvaluaciones() {
                 fecha: String(row["Fecha Evaluación"] || "").replace(/^"|"$/g, ""),
                 cliente: row["Cliente"] || "",
                 ejecutivo: row["Ejecutivo"] || "",
+                correo: row["Correo Ejecutivo"] || "",
                 venta: Number(row["Venta Mensual ($)"] || 0),
                 comodato: Number(row["Comodato Mensual ($)"] || 0),
                 estado: row["Estado"] || "",
@@ -88,7 +128,7 @@ export default function HistorialEvaluaciones() {
     }
 
     cargarDatos();
-  }, []);
+  }, [userEmail]);
 
   function duplicarEvaluacion(evalItem: any) {
     if (!evalItem?.filas?.length) {
@@ -96,7 +136,7 @@ export default function HistorialEvaluaciones() {
       return;
     }
     localStorage.setItem("eval.duplicado", JSON.stringify(evalItem.filas));
-    window.location.href = "/comodatos/negocios"; // ruta del formulario principal
+    window.location.href = "/comodatos/negocios";
   }
 
   return (
@@ -114,7 +154,9 @@ export default function HistorialEvaluaciones() {
       </div>
 
       {loading ? (
-        <div className="text-center text-zinc-500 py-10">Cargando historial...</div>
+        <div className="text-center text-zinc-500 py-10">
+          Cargando historial...
+        </div>
       ) : evaluaciones.length === 0 ? (
         <div className="text-center text-zinc-500 py-10">
           No hay evaluaciones registradas aún.
@@ -128,6 +170,7 @@ export default function HistorialEvaluaciones() {
                 <th className="px-3 py-2 text-left">Fecha</th>
                 <th className="px-3 py-2 text-left">Cliente</th>
                 <th className="px-3 py-2 text-left">Ejecutivo</th>
+                <th className="px-3 py-2 text-left">Correo Ejecutivo</th>
                 <th className="px-3 py-2 text-right">Venta Mensual</th>
                 <th className="px-3 py-2 text-right">Comodato Mensual</th>
                 <th className="px-3 py-2 text-center">Estado</th>
@@ -141,6 +184,7 @@ export default function HistorialEvaluaciones() {
                   <td className="px-3 py-2">{r.fecha}</td>
                   <td className="px-3 py-2">{r.cliente}</td>
                   <td className="px-3 py-2">{r.ejecutivo}</td>
+                  <td className="px-3 py-2">{r.correo}</td>
                   <td className="px-3 py-2 text-right">{money(r.venta)}</td>
                   <td className="px-3 py-2 text-right">{money(r.comodato)}</td>
                   <td className="px-3 py-2 text-center">

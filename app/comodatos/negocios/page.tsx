@@ -735,7 +735,7 @@ async function guardarEnHistorial() {
       rut,
       direccion,
       ejecutivo,
-      "Correo Ejecutivo": userEmail,
+      "correoEjecutivo": userEmail,
       zona: "",
       comentarios: "",
       meses: months,
