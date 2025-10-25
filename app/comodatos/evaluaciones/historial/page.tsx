@@ -58,7 +58,7 @@ export default function HistorialEvaluaciones() {
 
   const supabase = createClientComponentClient();
 
-  // ✅ Obtener usuario logueado
+  /* === OBTENER USUARIO LOGUEADO === */
   useEffect(() => {
     async function getUser() {
       const { data } = await supabase.auth.getUser();
@@ -76,9 +76,9 @@ export default function HistorialEvaluaciones() {
     getUser();
   }, []);
 
-  // ✅ Cargar hoja de Google filtrando por correo
+  /* === CARGAR HOJA Y FILTRAR POR CORREO === */
   useEffect(() => {
-    if (!userEmail) return; // esperar login
+    if (!userEmail) return; // Esperar a tener login activo
 
     async function cargarDatos() {
       try {
@@ -86,8 +86,11 @@ export default function HistorialEvaluaciones() {
           "https://docs.google.com/spreadsheets/d/1Te8xrWiWSvLl_YwqgK55rHw6eBGHeVeMGi0Z1G2ft4E/edit?gid=1798666527#gid=1798666527";
         const data = await fetchGVizRows(SHEET_URL);
 
-        // 🔍 Filtro por correo del usuario actual
-        const esAdmin = userEmail.toLowerCase().includes("@spartan.cl"); // o dominio que uses
+        // ✅ Filtro por correo
+        const esAdmin =
+          userEmail.toLowerCase().includes("@spartan.cl") &&
+          (userEmail.includes("admin") || userEmail.includes("gerencia"));
+
         const dataFiltrada = esAdmin
           ? data
           : data.filter(
@@ -96,7 +99,7 @@ export default function HistorialEvaluaciones() {
                 userEmail.trim().toLowerCase()
             );
 
-        // Agrupar por ID Evaluación (una por cabecera)
+        // 🧩 Agrupar por ID Evaluación
         const agrupado = Object.values(
           dataFiltrada.reduce((acc: any, row: Row) => {
             const id = row["ID Evaluación"];
@@ -130,6 +133,7 @@ export default function HistorialEvaluaciones() {
     cargarDatos();
   }, [userEmail]);
 
+  /* === DUPLICAR === */
   function duplicarEvaluacion(evalItem: any) {
     if (!evalItem?.filas?.length) {
       alert("No hay datos para duplicar esta evaluación.");
@@ -139,6 +143,7 @@ export default function HistorialEvaluaciones() {
     window.location.href = "/comodatos/negocios";
   }
 
+  /* === RENDER === */
   return (
     <div className="min-h-screen bg-zinc-50 p-6">
       <div className="flex justify-between items-center mb-6">
