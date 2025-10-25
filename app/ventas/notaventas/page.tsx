@@ -289,7 +289,8 @@ const nvToDuplicate = searchParams.get("duplicar");
   const [saveMsg, setSaveMsg] = useState("");
   const [saving, setSaving] = useState(false);
   const [procesando, setProcesando] = useState(false);
-  const [numeroNV, setNumeroNV] = useState("");
+  const [procesado, setProcesado] = useState(false);
+    const [numeroNV, setNumeroNV] = useState("");
 
   /* ----- Helpers internos ----- */
   function generarNumeroNV(): string {
@@ -1448,30 +1449,35 @@ const resMail = await fetch("/api/send-notaventa", {
    {/* 💾 Guardar + PDF + Email */}
 <button
   onClick={async () => {
-    if (procesando) return; // ⛔ Previene doble clic mientras procesa
+    if (procesando || procesado) return; // ⛔ Evita doble envío
     setProcesando(true);
     try {
-      await guardarPdfYEnviar(); // tu función actual de guardado/envío
+      await guardarPdfYEnviar(); // función actual
+      setProcesado(true); // ✅ marcar como procesado
       alert("✅ Nota de Venta guardada y enviada correctamente.");
-      // 🔒 Mantener bloqueado hasta que se genere una nueva NV
-      setProcesando(true);
     } catch (err) {
       console.error("❌ Error al enviar la Nota de Venta:", err);
       alert("Ocurrió un error al guardar o enviar la Nota de Venta.");
-      setProcesando(false); // solo se desbloquea si hubo error
+    } finally {
+      setProcesando(false);
     }
   }}
-  disabled={procesando}
+  disabled={procesando || procesado}
   className={`px-3 py-1 rounded text-white font-medium flex items-center gap-2 shadow transition ${
-    procesando
+    procesado
+      ? "bg-green-700 cursor-not-allowed"
+      : procesando
       ? "bg-zinc-400 cursor-not-allowed"
       : "bg-emerald-600 hover:bg-emerald-700"
   }`}
 >
-  {procesando ? (
+  {procesado ? (
     <>
-      <span className="animate-spin">⏳</span>
-      Enviando...
+      ✅ Procesado
+    </>
+  ) : procesando ? (
+    <>
+      <span className="animate-spin">⏳</span> Enviando...
     </>
   ) : (
     <>
@@ -1479,6 +1485,7 @@ const resMail = await fetch("/api/send-notaventa", {
     </>
   )}
 </button>
+
 
 
 
