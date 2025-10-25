@@ -68,7 +68,7 @@ export default function ComodatosMenu() {
           </div>
         </Link>
 
-        {/* Card: Clientes Activos */}
+        {/* Card: Clientes Comodatos Activos */}
         <Link
           href="/comodatos/clientes-activos"
           className="group block rounded-2xl border bg-white p-6 shadow-sm ring-1 ring-black/5 transition hover:shadow-md"

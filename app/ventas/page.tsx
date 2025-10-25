@@ -8,14 +8,14 @@ export default function VentasPage() {
     {
       href: "/ventas/cotizacion",
       icon: "📄",
-      title: "Cotización F&B",
+      title: "Cotización Tipo Formulario",
       desc: "Genera y gestiona cotizaciones estándar para tus clientes.",
       color: "bg-blue-50",
     },
     {
       href: "/ventas/cotizacion-industrial",
       icon: "⚙️",
-      title: "Cotización Industrial",
+      title: "Cotización Dinamica",
       desc: "Crea cotizaciones industriales con formato corporativo Spartan.",
       color: "bg-indigo-50",
     },
@@ -36,14 +36,14 @@ export default function VentasPage() {
     {
       href: "/ventas/clientesnuevos",
       icon: "👤",
-      title: "Ficha de Cliente",
+      title: "Ficha de Cliente Nuevo",
       desc: "Solicita la creación de nuevos clientes y envíalos a SAP/Cobranzas.",
       color: "bg-amber-50",
     },
     {
       href: "/ventas/reclamos",
       icon: "🧾",
-      title: "Formulario de Reclamos",
+      title: "Formulario Reclamos de Calidad",
       desc: "Registra reclamos de clientes con detalle del producto, lote y aplicación.",
       color: "bg-sky-50",
     },
