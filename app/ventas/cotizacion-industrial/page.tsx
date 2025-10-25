@@ -177,6 +177,8 @@ export default function CotizacionPage() {
   const [procesando, setProcesando] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [infoMsg, setInfoMsg] = useState("");
+  const [procesado, setProcesado] = useState(false); // ✅ nuevo estado
+
 
   /* ---- Numeración CTZ local ---- */
   useEffect(() => {
@@ -1135,49 +1137,53 @@ const resMail = await fetch("/api/send-cotizacion", {
 
 
   {/* 💾 Guardar + PDF + Email */}
-  <button
-    onClick={async () => {
-      if (procesando) return; // ⛔ Evita doble clic
-      setProcesando(true);
+<button
+  onClick={async () => {
+    if (procesando || procesado) return; // ⛔ evita doble o reenvío
+    setProcesando(true);
 
-      try {
-        await guardarPdfYEnviar(); // tu función actual con adjunto
-        alert("✅ Cotización guardada y enviada correctamente.");
-        // 🔒 Mantiene bloqueado hasta que se cree una nueva cotización
-        setProcesando(true);
-      } catch (err) {
-        console.error("❌ Error al enviar la Cotización:", err);
-        alert("Ocurrió un error al guardar o enviar la Cotización.");
-        setProcesando(false); // solo se desbloquea si hay error
-      }
-    }}
-    disabled={procesando}
-    className={`px-3 py-1 rounded text-white font-medium flex items-center gap-2 shadow transition ${
-      procesando
-        ? "bg-zinc-400 cursor-not-allowed"
-        : "bg-emerald-600 hover:bg-emerald-700"
-    }`}
-  >
-    {procesando ? (
-      <>
-        <span className="animate-spin">⏳</span>
-        Enviando...
-      </>
-    ) : (
-      <>
-        💾 Guardar + 📄 PDF + 📧 Email
-      </>
-    )}
-  </button>
+    try {
+      await guardarPdfYEnviar();
+      alert("✅ Cotización guardada y enviada correctamente.");
+      setProcesado(true); // ✅ marca como finalizado
+    } catch (err) {
+      console.error("❌ Error al enviar la Cotización:", err);
+      alert("Ocurrió un error al guardar o enviar la Cotización.");
+      setProcesando(false);
+    }
+  }}
+  disabled={procesando || procesado}
+  className={`px-3 py-1 rounded text-white font-medium flex items-center gap-2 shadow transition ${
+    procesado
+      ? "bg-emerald-700 cursor-not-allowed"
+      : procesando
+      ? "bg-zinc-400 cursor-wait"
+      : "bg-emerald-600 hover:bg-emerald-700"
+  }`}
+>
+  {procesado ? (
+    <>✅ Procesado</>
+  ) : procesando ? (
+    <>
+      <span className="animate-spin">⏳</span> Enviando...
+    </>
+  ) : (
+    <>💾 Guardar + 📄 PDF + 📧 Email</>
+  )}
+</button>
 
-  {/* 🧹 Nueva Cotización */}
-  <button
-    className="bg-zinc-200 px-3 py-1 rounded hover:bg-zinc-300"
-    onClick={limpiar}
-    disabled={procesando}
-  >
-    🧹 Nueva Cotización
-  </button>
+
+<button
+  className="bg-zinc-200 px-3 py-1 rounded hover:bg-zinc-300"
+  onClick={() => {
+    limpiar();
+    setProcesado(false); // 🔓 desbloquear botón principal
+  }}
+  disabled={procesando}
+>
+  🧹 Nueva Cotización
+</button>
+
 </div>
 
 

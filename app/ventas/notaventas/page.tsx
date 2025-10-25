@@ -794,6 +794,7 @@ useEffect(() => {
     setNumeroNV(generarNumeroNV());
     setListaSeleccionada(1);
     setSaveMsg("");
+    setProcesado(false);
   }
   function imprimir() {
     window.print();
