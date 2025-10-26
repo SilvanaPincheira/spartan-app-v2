@@ -622,6 +622,7 @@ useEffect(() => {
         precioUnitarioPresentacion: Math.round(item.precioVenta || 0),
         descuento: item.descuento,
         totalItem: Math.round(item.total || 0),
+        region, // ✅ nueva línea
         modoPrecio,
         mostrarTotales: mostrarTotales ? "Sí" : "No",
         mostrarIva: mostrarIva ? "Sí" : "No",
@@ -665,6 +666,7 @@ useEffect(() => {
         validez,
         formaPago,
         entrega: plazoEntrega,
+        region, // ✅ nueva línea
         observaciones,
         subtotal,
         iva,
@@ -1280,6 +1282,72 @@ const resMail = await fetch("/api/send-cotizacion", {
     <>💾 Guardar + 📄 PDF + 📧 Email</>
   )}
 </button>
+
+{/* 👁️ Visualizar PDF antes de enviar */}
+<button
+  onClick={async () => {
+    try {
+      const { filename, base64 } = await generarPdfCotizacion({
+        numero: numeroCTZ,
+        fecha: `Santiago, ${new Date().toLocaleDateString("es-CL", {
+          day: "2-digit",
+          month: "long",
+          year: "numeric",
+        })}`,
+        cliente: {
+          nombre: clienteNombre,
+          rut: clienteRut,
+          direccion: clienteDireccion,
+          comuna: clienteComuna,
+          email: emailCliente,
+        },
+        productos: lines.map((r) => ({
+          codigo: r.code,
+          descripcion: r.name,
+          cantidad: r.qty,
+          kilos: r.kilos,
+          precioUnitario: r.precioVenta,
+          descuento: r.descuento,
+          total: r.total,
+        })),
+        validez,
+        formaPago,
+        entrega: plazoEntrega,
+        region, // ✅ se muestra en encabezado
+        observaciones,
+        subtotal,
+        iva,
+        total,
+        opciones: {
+          modoPrecio,
+          mostrarTotales,
+          mostrarIva,
+          mostrarTotalColumna: mostrarTotales,
+        },
+        ejecutivo: {
+          nombre: ejecutivoNombre,
+          correo: emailEjecutivo,
+          celular: celularEjecutivo,
+          cargo: "",
+        },
+      });
+
+      // 🧾 Abrir en nueva pestaña
+      const pdfWindow = window.open("");
+      pdfWindow?.document.write(
+        `<iframe width="100%" height="100%" src="data:application/pdf;base64,${base64}"></iframe>`
+      );
+    } catch (err) {
+      console.error("❌ Error al generar PDF de vista previa:", err);
+      alert("Ocurrió un error al generar la vista previa del PDF.");
+    }
+  }}
+  disabled={procesando}
+  className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-3 py-1 rounded shadow transition"
+>
+  👁️ Visualizar PDF
+</button>
+
 
 
 <button

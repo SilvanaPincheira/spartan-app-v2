@@ -47,6 +47,7 @@ type DatosPDF = {
   validez?: string;
   formaPago?: string;
   entrega?: string;
+  region?: string;
   observaciones?: string;
   subtotal?: number;
   iva?: number;
@@ -138,7 +139,7 @@ function ensureSpace(doc: jsPDF, y: number, needed: number) {
 /* ============================ FUNCIÓN PRINCIPAL ============================ */
 export function generarPdfCotizacion(data: DatosPDF) {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
-  const { numero, fecha, cliente, productos, ejecutivo, opciones: optsIn } = data;
+  const { numero, fecha, cliente, productos, ejecutivo, region, opciones: optsIn } = data;
 
   const opts: Required<OpcionesPDF> = {
     modoPrecio: optsIn?.modoPrecio ?? "auto",
@@ -205,6 +206,10 @@ try {
     const dir = `Dirección: ${cliente.direccion}${cliente.comuna ? `, ${cliente.comuna}` : ""}`;
     doc.text(dir, marginX + mm(20), y);
     y += mm(6);
+  }
+  if (region) {
+    doc.text(`Región: ${region}`, marginX + mm(20), y);
+    y += mm(5);
   }
   y += mm(2);
 
