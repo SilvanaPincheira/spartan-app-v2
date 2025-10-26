@@ -242,7 +242,6 @@ useEffect(() => {
     })();
   }, []);
 
-  /* ---- Carga de productos (misma fuente que NV) ---- */
   useEffect(() => {
     (async () => {
       try {
@@ -250,20 +249,28 @@ useEffect(() => {
           "https://docs.google.com/spreadsheets/d/1UXVAxwzg-Kh7AWCPnPbxbEpzXnRPR2pDBKrRUFNZKZo/edit?gid=0#gid=0"
         );
         if (!id) return;
+  
         const rows = await fetchCsv(id, gid);
-        const list: Product[] = rows.map((r) => ({
-          code: String((r as any).code ?? (r as any).Codigo ?? "").trim(),
-          name: String((r as any).name ?? (r as any).Producto ?? "").trim(),
-          price_list: num((r as any).price_list ?? (r as any)["Precio Lista"] ?? (r as any).Precio ?? 0),
-          kilos: num((r as any).kilos ?? 1),
-        }));
+  
+        const list: Product[] = rows.map((r) => {
+          const basePrice = num(r["price_list"] ?? 0);
+          const regionalPrice = num(r[region] ?? 0); // 👈 Usa la región seleccionada
+  
+          return {
+            code: String(r["code"] ?? "").trim(),
+            name: String(r["name"] ?? "").trim(),
+            price_list: regionalPrice > 0 ? regionalPrice : basePrice, // 👈 Prioriza el precio regional
+            kilos: num(r["kilos"] ?? 1),
+          };
+        });
+  
         setProductos(list.filter((p) => p.code));
       } catch (e: any) {
         setErrorMsg(`Productos: ${e.message}`);
       }
     })();
-  }, []);
-
+  }, [region]); // 👈 importante: vuelve a cargar si cambia la región
+  
   // 🧠 Autocompletar Ejecutivo y Email desde Supabase
 useEffect(() => {
   (async () => {
