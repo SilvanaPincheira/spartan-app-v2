@@ -130,6 +130,9 @@ export default function CotizacionPage() {
   const [mostrarTotales, setMostrarTotales] = useState<boolean>(true);
   const [mostrarIva, setMostrarIva] = useState<boolean>(true);
 
+  
+
+
   useEffect(() => {
     try {
       const mp = window.localStorage.getItem("ctz.pref.modoPrecio") as "kilo" | "presentacion" | null;
@@ -178,6 +181,25 @@ export default function CotizacionPage() {
   const [errorMsg, setErrorMsg] = useState("");
   const [infoMsg, setInfoMsg] = useState("");
   const [procesado, setProcesado] = useState(false); // ✅ nuevo estado
+  
+// 🌎 Región seleccionada (por defecto RM)
+const [region, setRegion] = useState<string>("RM");
+
+// Cargar región guardada desde localStorage
+useEffect(() => {
+  if (typeof window !== "undefined") {
+    const saved = localStorage.getItem("ctz.region");
+    if (saved) setRegion(saved);
+  }
+}, []);
+
+// Guardar la región cuando cambie
+useEffect(() => {
+  if (typeof window !== "undefined") {
+    localStorage.setItem("ctz.region", region);
+  }
+}, [region]);
+
 
 
   /* ---- Numeración CTZ local ---- */
@@ -765,6 +787,36 @@ const resMail = await fetch("/api/send-cotizacion", {
             </label>
           </div>
         </section>
+
+        {/* 🌎 Selección de Región */}
+<section className="bg-white shadow p-4 rounded mb-4">
+  <h2 className="font-semibold text-[#2B6CFF] mb-2">Región de Cotización</h2>
+  <div className="flex items-center gap-3">
+    <span className="font-medium text-sm">Seleccionar región:</span>
+    <select
+      value={region}
+      onChange={(e) => setRegion(e.target.value)}
+      className="border rounded px-2 py-1 text-sm"
+    >
+      <option value="RM">Región Metropolitana</option>
+      <option value="I">Tarapacá</option>
+      <option value="II">Antofagasta</option>
+      <option value="III">Atacama</option>
+      <option value="IV">Coquimbo</option>
+      <option value="V">Valparaíso</option>
+      <option value="VI">O’Higgins</option>
+      <option value="VII">Maule</option>
+      <option value="VIII">Biobío</option>
+      <option value="IX">Araucanía</option>
+      <option value="X">Los Lagos</option>
+      <option value="XI">Aysén</option>
+      <option value="XII">Magallanes</option>
+      <option value="XIV">Los Ríos</option>
+      <option value="XV">Arica y Parinacota</option>
+    </select>
+  </div>
+</section>
+
 
         {/* Selector tipo cliente */}
         <section className="bg-white shadow p-4 rounded mb-4">
