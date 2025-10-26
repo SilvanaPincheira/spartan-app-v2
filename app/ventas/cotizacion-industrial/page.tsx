@@ -799,7 +799,7 @@ const resMail = await fetch("/api/send-cotizacion", {
       className="border rounded px-2 py-1 text-sm"
     >
       <option value="RM">Región Metropolitana</option>
-      <option value="I">Tarapacá</option>
+      <option value="I">Iquique</option>
       <option value="II">Antofagasta</option>
       <option value="III">Atacama</option>
       <option value="IV">Coquimbo</option>
@@ -809,8 +809,7 @@ const resMail = await fetch("/api/send-cotizacion", {
       <option value="VIII">Biobío</option>
       <option value="IX">Araucanía</option>
       <option value="X">Los Lagos</option>
-      <option value="XI">Aysén</option>
-      <option value="XII">Magallanes</option>
+      <option value="XI">Chiloe</option>
       <option value="XIV">Los Ríos</option>
       <option value="XV">Arica y Parinacota</option>
     </select>
