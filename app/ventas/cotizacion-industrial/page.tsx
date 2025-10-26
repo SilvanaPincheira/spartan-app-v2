@@ -242,34 +242,85 @@ useEffect(() => {
     })();
   }, []);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const { id, gid } = normalizeGoogleSheetUrl(
-          "https://docs.google.com/spreadsheets/d/1UXVAxwzg-Kh7AWCPnPbxbEpzXnRPR2pDBKrRUFNZKZo/edit?gid=0#gid=0"
-        );
-        if (!id) return;
-  
-        const rows = await fetchCsv(id, gid);
-  
-        const list: Product[] = rows.map((r) => {
-          const basePrice = num(r["price_list"] ?? 0);
-          const regionalPrice = num(r[region] ?? 0); // 👈 Usa la región seleccionada
-  
-          return {
-            code: String(r["code"] ?? "").trim(),
-            name: String(r["name"] ?? "").trim(),
-            price_list: regionalPrice > 0 ? regionalPrice : basePrice, // 👈 Prioriza el precio regional
-            kilos: num(r["kilos"] ?? 1),
-          };
-        });
-  
-        setProductos(list.filter((p) => p.code));
-      } catch (e: any) {
-        setErrorMsg(`Productos: ${e.message}`);
+  /* ---- Carga de productos según región seleccionada ---- */
+useEffect(() => {
+  (async () => {
+    try {
+      const { id, gid } = normalizeGoogleSheetUrl(
+        "https://docs.google.com/spreadsheets/d/1UXVAxwzg-Kh7AWCPnPbxbEpzXnRPR2pDBKrRUFNZKZo/edit?gid=0#gid=0"
+      );
+      if (!id) return;
+
+      const rows = await fetchCsv(id, gid);
+      if (!rows.length) throw new Error("No se encontraron filas en la hoja Catalog.");
+
+      // 🧠 Normalizador para comparar nombres de región (ignora tildes, mayúsculas, comillas, espacios)
+      const normalizeText = (txt: string) =>
+        (txt || "")
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9]/g, "")
+          .trim();
+
+      const regionMap: Record<string, string> = {
+        RM: "Región Metropolitana",
+        I: "Iquique",
+        II: "Antofagasta",
+        III: "Atacama",
+        IV: "Coquimbo",
+        V: "Valparaíso",
+        VI: "O'Higgins",
+        VII: "Maule",
+        VIII: "Biobío",
+        IX: "Araucanía",
+        X: "Los Lagos",
+        XI: "Chiloe",
+        XIV: "Los Ríos",
+        XV: "Arica y Parinacota",
+      };
+
+      const selectedName = regionMap[region] || "Región Metropolitana";
+      const normalizedRegion = normalizeText(selectedName);
+
+      const headers = Object.keys(rows[0] || {});
+      let matchHeader = "";
+
+      // 🔍 Buscar coincidencia flexible
+      for (const h of headers) {
+        if (normalizeText(h).includes(normalizedRegion)) {
+          matchHeader = h;
+          break;
+        }
       }
-    })();
-  }, [region]); // 👈 importante: vuelve a cargar si cambia la región
+
+      console.log("🗺️ Región seleccionada:", region, "→ columna detectada:", matchHeader || "(no encontrada)");
+
+      const list: Product[] = rows.map((r) => {
+        const basePrice = num(r["price_list"] ?? 0);
+        const regionalPrice = matchHeader ? num(r[matchHeader] ?? 0) : 0;
+        return {
+          code: String(r["code"] ?? "").trim(),
+          name: String(r["name"] ?? "").trim(),
+          price_list: regionalPrice > 0 ? regionalPrice : basePrice,
+          kilos: num(r["kilos"] ?? 1),
+        };
+      });
+
+      setProductos(list.filter((p) => p.code));
+
+      if (matchHeader) {
+        console.log(`💰 Lista de precios cargada para región: ${selectedName}`);
+      } else {
+        console.warn(`⚠️ No se encontró columna para región "${selectedName}", usando lista base.`);
+      }
+    } catch (e: any) {
+      console.error("❌ Error cargando productos:", e);
+      setErrorMsg(`Productos: ${e.message}`);
+    }
+  })();
+}, [region]);
+
   
   // 🧠 Autocompletar Ejecutivo y Email desde Supabase
 useEffect(() => {
