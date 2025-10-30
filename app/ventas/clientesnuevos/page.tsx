@@ -197,10 +197,7 @@ export default function ClientesNuevosPage() {
         <input name="emailRecepcion" value={form.emailRecepcion} onChange={handleChange} placeholder="Email Recepción" className="border p-2 rounded" />
         <input name="telefonoRecepcion" value={form.telefonoRecepcion} onChange={handleChange} placeholder="Teléfono Recepción" className="border p-2 rounded" />
 
-        <input name="contactoFinanzas" value={form.contactoFinanzas} onChange={handleChange} placeholder="Contacto Finanzas" className="border p-2 rounded" />
-        <input name="emailFinanzas" value={form.emailFinanzas} onChange={handleChange} placeholder="Email Finanzas" className="border p-2 rounded" />
-        <input name="telefonoFinanzas" value={form.telefonoFinanzas} onChange={handleChange} placeholder="Teléfono Finanzas" className="border p-2 rounded" />
-
+        
         <input name="contactoPagos" value={form.contactoPagos} onChange={handleChange} placeholder="Contacto Pagos" className="border p-2 rounded" />
         <input name="emailPagos" value={form.emailPagos} onChange={handleChange} placeholder="Email Pagos" className="border p-2 rounded" />
         <input name="telefonoPagos" value={form.telefonoPagos} onChange={handleChange} placeholder="Teléfono Pagos" className="border p-2 rounded" />
@@ -214,19 +211,10 @@ export default function ClientesNuevosPage() {
           <option value="Guía">Guía</option>
         </select>
 
-        {/* Financieros */}
-        <input name="banco" value={form.banco} onChange={handleChange} placeholder="Banco" className="border p-2 rounded" />
-        <input name="cuentaCorriente" value={form.cuentaCorriente} onChange={handleChange} placeholder="Cuenta Corriente" className="border p-2 rounded" />
-        <input name="representanteLegal" value={form.representanteLegal} onChange={handleChange} placeholder="Representante Legal" className="border p-2 rounded" />
-        <select name="contribuyenteElectronico" value={form.contribuyenteElectronico} onChange={handleChange} className="border p-2 rounded">
-          <option value="">Contribuyente Electrónico</option>
-          <option value="Sí">Sí</option>
-          <option value="No">No</option>
-        </select>
-
+       
         {/* Internos */}
         <input name="rubro" value={form.rubro} onChange={handleChange} placeholder="Rubro" className="border p-2 rounded" />
-        <input name="condicionPago" value={form.condicionPago} onChange={handleChange} placeholder="Condición de Pago" className="border p-2 rounded" />
+        <input name="condicionPago" value={form.condicionPago} onChange={handleChange} placeholder="Condición de Pago Solicitada" className="border p-2 rounded" />
         <input name="cobrador" value={form.cobrador} onChange={handleChange} placeholder="Cobrador Asignado" className="border p-2 rounded" />
         <input name="analisisCredito" value={form.analisisCredito} onChange={handleChange} placeholder="Análisis Crédito" className="border p-2 rounded" />
 
