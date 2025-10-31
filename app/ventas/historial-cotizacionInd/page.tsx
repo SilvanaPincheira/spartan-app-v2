@@ -21,6 +21,7 @@ export default function HistorialCotizacionesPage() {
     })();
   }, []);
 
+  // 🔍 Filtro de búsqueda
   const filtradas = data.filter((c) =>
     [c.numero_ctz, c.cliente, c.rut]
       .some((v) => v?.toLowerCase().includes(busqueda.toLowerCase()))
@@ -71,26 +72,64 @@ export default function HistorialCotizacionesPage() {
                 <th className="border px-3 py-2 text-right">Total (con IVA)</th>
                 <th className="border px-3 py-2 text-left">Validez</th>
                 <th className="border px-3 py-2 text-left">Forma de Pago</th>
+                <th className="border px-3 py-2 text-center">Acciones</th>
               </tr>
             </thead>
+
             <tbody>
-              {filtradas.map((c, i) => (
-                <tr
-                  key={i}
-                  className="hover:bg-blue-50 transition cursor-pointer"
-                  onClick={() => alert(`Abrir detalle de ${c.numero_ctz}`)}
-                >
-                  <td className="border px-3 py-2">{c.numero_ctz}</td>
-                  <td className="border px-3 py-2">{c.fecha}</td>
-                  <td className="border px-3 py-2">{c.cliente}</td>
-                  <td className="border px-3 py-2">{c.rut}</td>
-                  <td className="border px-3 py-2 text-right">
-                    {Number(c["total_(con_iva)"] || 0).toLocaleString("es-CL")}
-                  </td>
-                  <td className="border px-3 py-2">{c.validez}</td>
-                  <td className="border px-3 py-2">{c.forma_de_pago}</td>
-                </tr>
-              ))}
+              {filtradas.map((c, i) => {
+                const total = Number(
+                  c.total ||
+                  c["total_(con_iva)"] ||
+                  c["total_item"] ||
+                  c["monto_total"] ||
+                  0
+                );
+
+                return (
+                  <tr
+                    key={i}
+                    className="hover:bg-blue-50 transition"
+                  >
+                    <td className="border px-3 py-2">{c.numero_ctz}</td>
+                    <td className="border px-3 py-2">{c.fecha}</td>
+                    <td className="border px-3 py-2">{c.cliente}</td>
+                    <td className="border px-3 py-2">{c.rut}</td>
+                    <td className="border px-3 py-2 text-right">
+                      {total.toLocaleString("es-CL", {
+                        style: "currency",
+                        currency: "CLP",
+                        maximumFractionDigits: 0,
+                      })}
+                    </td>
+                    <td className="border px-3 py-2">{c.validez}</td>
+                    <td className="border px-3 py-2">{c.forma_pago || c.forma_de_pago}</td>
+                    <td className="border px-3 py-2 text-center">
+                      <div className="flex justify-center gap-2">
+                        {/* 🔍 Ver Detalle */}
+                        <Link
+                          href={`/ventas/cotizacion-industrial?ver=${encodeURIComponent(
+                            c.numero_ctz
+                          )}`}
+                          className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                        >
+                          Ver
+                        </Link>
+
+                        {/* 📄 Duplicar */}
+                        <Link
+                          href={`/ventas/cotizacion-industrial?duplicar=${encodeURIComponent(
+                            c.numero_ctz
+                          )}`}
+                          className="px-2 py-1 text-xs bg-emerald-100 text-emerald-700 rounded hover:bg-emerald-200"
+                        >
+                          Duplicar
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -98,3 +137,4 @@ export default function HistorialCotizacionesPage() {
     </div>
   );
 }
+
