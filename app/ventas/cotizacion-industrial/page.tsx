@@ -244,58 +244,29 @@ useEffect(() => {
       setMostrarTotales(ctz.mostrar_totales === "Sí");
       setMostrarIva(ctz.mostrar_iva === "Sí");
 
-      // ✅ Cargar ítems de la hoja (versión ultrarobusta)
-const productosEncontrados = json.data.filter((r: any) => {
-  const normalize = (s: string) =>
-    (s || "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .trim();
-
-  const n = normalize(r["Numero CTZ"] || r["numero_ctz"] || "");
-  const codigo = r["Código Producto"] || r["Codigo Producto"] || r["codigo_producto"] || r["código_producto"];
-  return n === normalize(numero) && codigo;
-});
+     // ✅ Cargar ítems si existen en la hoja (versión unificada)
+const productosEncontrados = json.data.filter(
+  (r: any) =>
+    r["Numero CTZ"]?.trim() === numero.trim() &&
+    r["Código Producto"] &&
+    r["Código Producto"].trim() !== ""
+);
 
 if (productosEncontrados.length > 0) {
   const items = productosEncontrados.map((r: any) => ({
-    code:
-      r["Código Producto"] ||
-      r["Codigo Producto"] ||
-      r["codigo_producto"] ||
-      "",
-    name:
-      r["Descripción"] ||
-      r["Descripcion"] ||
-      r["descripcion"] ||
-      "",
-    kilos: num(r["Kg"] || r["kg"] || 1),
-    qty: num(r["Cantidad"] || r["cantidad"] || 1),
-    priceBase: num(
-      r["Precio Unitario/Presentación"] ||
-      r["Precio Unitario/Presentacion"] ||
-      r["precio_unitario/presentacion"] ||
-      0
-    ),
-    precioVenta: num(
-      r["Precio Unitario/Presentación"] ||
-      r["Precio Unitario/Presentacion"] ||
-      r["precio_unitario/presentacion"] ||
-      0
-    ),
-    descuento: num(r["Descuento"] || r["descuento"] || 0),
-    total: num(r["Total Ítem"] || r["Total Item"] || r["total_item"] || 0),
+    code: r["Código Producto"] || "",
+    name: r["Descripción"] || "",
+    kilos: num(r["Kg"] || 1),
+    qty: num(r["Cantidad"] || 1),
+    priceBase: num(r["Precio Unitario/Presentación"] || 0),
+    precioVenta: num(r["Precio Unitario/Presentación"] || 0),
+    descuento: num(r["Descuento"] || 0),
+    total: num(r["Total Ítem"] || 0),
   }));
-
-  console.log("✅ Ítems encontrados:", items);
   setLines(items);
-} else {
-  console.warn("⚠️ No se encontraron productos para:", numero);
 }
 
 
-      
 
       // 👉 Si es duplicar, limpiar el número
       if (duplicar) setNumeroCTZ("");
