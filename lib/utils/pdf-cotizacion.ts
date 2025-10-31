@@ -297,6 +297,32 @@ try {
       y += mm(4);
     });
   });
+  /* ---------- DATOS DE TRANSFERENCIA ---------- */
+y += mm(8);
+doc.setFont("helvetica", "bold");
+doc.setFontSize(11);
+doc.setTextColor(30, 64, 175); // Azul BCI
+doc.text("Datos de Transferencia", marginX, y);
+y += mm(5);
+
+doc.setFont("helvetica", "normal");
+doc.setFontSize(9);
+doc.setTextColor(0, 0, 0);
+
+const transferencia = [
+  "Banco: Crédito e Inversiones (BCI)",
+  "Titular: Spartan de Chile Ltda.",
+  "RUT: 76.333.980-7",
+  "N° Cuenta: 25013084",
+  "Tipo de cuenta: Cuenta Corriente",
+  "Email comprobantes: pagos@spartan.cl",
+];
+
+transferencia.forEach((linea) => {
+  doc.text(linea, marginX + mm(4), y);
+  y += mm(5);
+});
+
 
   /* ---------- FIRMA ---------- */
   y += mm(10);
