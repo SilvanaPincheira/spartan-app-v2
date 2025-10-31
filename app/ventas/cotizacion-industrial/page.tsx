@@ -251,17 +251,18 @@ useEffect(() => {
 
       if (productosEncontrados.length > 0) {
         const items = productosEncontrados.map((r: any) => ({
-          code: r.codigo_producto || "",
-          name: r.descripcion || "",
-          kilos: Number(r.kg || 1),
-          qty: Number(r.cantidad || 1),
-          priceBase: Number(r.precio_unitario_presentacion || 0),
-          precioVenta: Number(r.precio_unitario_presentacion || 0),
-          descuento: Number(r.descuento || 0),
-          total: Number(r.total_item || 0),
+          code: r["código_producto"] || r["codigo_producto"] || r["Código Producto"] || "",
+          name: r["descripción"] || r["descripcion"] || r["Descripción"] || "",
+          kilos: Number(r["kg"] || r["Kg"] || 1),
+          qty: Number(r["cantidad"] || r["Cantidad"] || 1),
+          priceBase: Number(r["precio_unitario/presentación"] || r["Precio Unitario/Presentación"] || 0),
+          precioVenta: Number(r["precio_unitario/presentación"] || r["Precio Unitario/Presentación"] || 0),
+          descuento: Number(r["descuento"] || r["Descuento"] || 0),
+          total: Number(r["total_ítem"] || r["Total Ítem"] || 0),
         }));
         setLines(items);
       }
+      
 
       // 👉 Si es duplicar, limpiar el número
       if (duplicar) setNumeroCTZ("");
