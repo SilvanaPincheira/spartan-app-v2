@@ -244,24 +244,46 @@ useEffect(() => {
       setMostrarTotales(ctz.mostrar_totales === "Sí");
       setMostrarIva(ctz.mostrar_iva === "Sí");
 
-      // ✅ Cargar ítems si existen en la hoja
-      const productosEncontrados = json.data.filter(
-        (r: any) => r.numero_ctz?.trim() === numero.trim() && r.codigo_producto
-      );
+      // ✅ Cargar ítems si existen en la hoja (versión robusta)
+const productosEncontrados = json.data.filter((r: any) => {
+  const n = r.numero_ctz?.trim();
+  const codigo =
+    r["Código Producto"] ||
+    r["codigo_producto"] ||
+    r["código_producto"];
+  return n === numero.trim() && codigo;
+});
 
-      if (productosEncontrados.length > 0) {
-        const items = productosEncontrados.map((r: any) => ({
-          code: r["código_producto"] || r["codigo_producto"] || r["Código Producto"] || "",
-          name: r["descripción"] || r["descripcion"] || r["Descripción"] || "",
-          kilos: Number(r["kg"] || r["Kg"] || 1),
-          qty: Number(r["cantidad"] || r["Cantidad"] || 1),
-          priceBase: Number(r["precio_unitario/presentación"] || r["Precio Unitario/Presentación"] || 0),
-          precioVenta: Number(r["precio_unitario/presentación"] || r["Precio Unitario/Presentación"] || 0),
-          descuento: Number(r["descuento"] || r["Descuento"] || 0),
-          total: Number(r["total_ítem"] || r["Total Ítem"] || 0),
-        }));
-        setLines(items);
-      }
+if (productosEncontrados.length > 0) {
+  const items = productosEncontrados.map((r: any) => ({
+    code:
+      r["Código Producto"] ||
+      r["codigo_producto"] ||
+      r["código_producto"] ||
+      "",
+    name:
+      r["Descripción"] ||
+      r["descripcion"] ||
+      r["descripción"] ||
+      "",
+    kilos: num(r["Kg"] || r["kg"] || 1),
+    qty: num(r["Cantidad"] || r["cantidad"] || 1),
+    priceBase: num(
+      r["Precio Unitario/Presentación"] ||
+      r["precio_unitario/presentación"] ||
+      0
+    ),
+    precioVenta: num(
+      r["Precio Unitario/Presentación"] ||
+      r["precio_unitario/presentación"] ||
+      0
+    ),
+    descuento: num(r["Descuento"] || r["descuento"] || 0),
+    total: num(r["Total Ítem"] || r["total_ítem"] || 0),
+  }));
+  setLines(items);
+}
+
       
 
       // 👉 Si es duplicar, limpiar el número
