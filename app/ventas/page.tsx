@@ -20,6 +20,14 @@ export default function VentasPage() {
       color: "bg-indigo-50",
     },
     {
+      href: "/ventas/historial-cotizaciones",
+      icon: "📂",
+      title: "Historial de Cotizaciones",
+      desc: "Revisa las cotizaciones emitidas con su fecha, cliente, ejecutivo y total.",
+      color: "bg-cyan-50",
+    },
+    
+        {
       href: "/ventas/notaventas",
       icon: "📝",
       title: "Nota de Venta",
