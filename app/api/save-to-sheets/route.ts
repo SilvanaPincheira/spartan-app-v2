@@ -1,50 +1,48 @@
 // app/api/save-to-sheets/route.ts
 import { NextResponse } from "next/server";
 
-// 👉 tu URL de Apps Script publicada como web app (con permisos "Cualquiera con el enlace")
+// ⚙️ URL de tu Apps Script publicado como Web App
+// (asegúrate que tenga permisos "Cualquiera, incluso anónimo")
 const APPS_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycbxgTyjJavJdg30Z_EYOkcSVhWhgFdLYwWIVt-d9SEcwrCK5NbtjW4Aqa5cAlI2Ocmk0/exec";
 
 export async function POST(req: Request) {
   try {
-    // 1. Leer payload que viene desde page.tsx
-    const payload = await req.json();
+    // 1️⃣ Leer el cuerpo que envía la página de cotización
+    const body = await req.json();
 
-    // 2. Mandar al Apps Script
+    // 2️⃣ Extraer el campo 'datos' (array con las filas)
+    const datos = body.datos || [];
+
+    // 3️⃣ Enviar al Apps Script en el formato correcto { datos: [...] }
     const res = await fetch(APPS_SCRIPT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ datos }),
     });
 
-    // 3. Capturar respuesta cruda
+    // 4️⃣ Leer respuesta
     const text = await res.text();
 
-    // 4. Intentar parsear como JSON
+    // 5️⃣ Intentar parsear como JSON
     let json: any;
     try {
       json = JSON.parse(text);
     } catch {
-      // Si no es JSON (ej: error HTML de Google)
       return NextResponse.json(
-        {
-          error: "Respuesta de Apps Script no es JSON",
-          raw: text,
-        },
+        { error: "Respuesta de Apps Script no es JSON", raw: text },
         { status: 500 }
       );
     }
 
-    // 5. Devolver JSON válido al frontend
+    // 6️⃣ Devolver respuesta válida al frontend
     return NextResponse.json(json);
   } catch (err: any) {
-    console.error("Error en save-to-sheets:", err);
+    console.error("❌ Error en save-to-sheets:", err);
     return NextResponse.json(
-      {
-        error: "Excepción en route.ts",
-        message: String(err),
-      },
+      { error: "Error interno", message: String(err) },
       { status: 500 }
     );
   }
 }
+
