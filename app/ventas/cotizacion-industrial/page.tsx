@@ -4,6 +4,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { generarPdfCotizacion } from "@/lib/utils/pdf-cotizacion";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { useSearchParams } from "next/navigation";
 
 
 /* ========================= Helpers ========================= */
@@ -199,6 +200,78 @@ useEffect(() => {
     localStorage.setItem("ctz.region", region);
   }
 }, [region]);
+
+// 🔍 Detectar si hay parámetros ?ver= o ?duplicar= en la URL
+const params = useSearchParams();
+const ver = params.get("ver");
+const duplicar = params.get("duplicar");
+
+useEffect(() => {
+  const numero = ver || duplicar;
+  if (!numero) return;
+
+  (async () => {
+    try {
+      const res = await fetch("/api/cotizaciones");
+      const json = await res.json();
+      if (!json.data) return;
+
+      const ctz = json.data.find(
+        (r: any) => r.numero_ctz?.trim() === numero.trim()
+      );
+      if (!ctz) {
+        console.warn("❌ No se encontró la cotización:", numero);
+        return;
+      }
+
+      // ✅ Rellenar datos generales
+      setClienteNombre(ctz.cliente || "");
+      setClienteRut(ctz.rut || "");
+      setClienteCodigo(ctz.codigo_cliente || "");
+      setClienteDireccion(ctz.direccion || "");
+      setClienteComuna(ctz.comuna || "");
+      setClienteContacto(ctz.contacto || "");
+      setEmailCliente(ctz.email_cliente || "");
+      setEjecutivoNombre(ctz.ejecutivo || "");
+      setEmailEjecutivo(ctz.email_ejecutivo || "");
+      setCelularEjecutivo(ctz.celular_ejecutivo || "");
+      setValidez(ctz.validez || "");
+      setFormaPago(ctz.forma_de_pago || "");
+      setPlazoEntrega(ctz.plazo_entrega || "");
+      setObservaciones(ctz.observaciones || "");
+      setRegion(ctz.region || "RM");
+      setModoPrecio(ctz.modo_precio || "kilo");
+      setMostrarTotales(ctz.mostrar_totales === "Sí");
+      setMostrarIva(ctz.mostrar_iva === "Sí");
+
+      // ✅ Cargar ítems si existen en la hoja
+      const productosEncontrados = json.data.filter(
+        (r: any) => r.numero_ctz?.trim() === numero.trim() && r.codigo_producto
+      );
+
+      if (productosEncontrados.length > 0) {
+        const items = productosEncontrados.map((r: any) => ({
+          code: r.codigo_producto || "",
+          name: r.descripcion || "",
+          kilos: Number(r.kg || 1),
+          qty: Number(r.cantidad || 1),
+          priceBase: Number(r.precio_unitario_presentacion || 0),
+          precioVenta: Number(r.precio_unitario_presentacion || 0),
+          descuento: Number(r.descuento || 0),
+          total: Number(r.total_item || 0),
+        }));
+        setLines(items);
+      }
+
+      // 👉 Si es duplicar, limpiar el número
+      if (duplicar) setNumeroCTZ("");
+      else setNumeroCTZ(ctz.numero_ctz);
+    } catch (err) {
+      console.error("Error cargando cotización:", err);
+    }
+  })();
+}, [ver, duplicar]);
+
 
 
 
