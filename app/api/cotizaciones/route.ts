@@ -5,7 +5,9 @@ import { cookies } from "next/headers";
 
 // URL pública de la hoja "Cotizaciones"
 const URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTHJGESD71DkWv2kZWuYhuVMOPVKMp5S4eclXT7J7Yy9OUOIvh8mpdpGUNXCM5_XuPrThaoCefkPvzm/pub?gid=1191931814&single=true&output=csv";
+ 
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vS_TD9sDzySN_-lkYQ159iIIQzU4ruzRuDJhLFfIgGDTc7NZm1w-Km8-BNwc_mS9-ZAq7oYyeTGuhhS/pub?gid=<YOUR_GID>&single=true&output=csv";
+
 
 // Función para normalizar cabeceras
 function normalize(val: string) {
