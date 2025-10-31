@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 // ⚙️ URL de tu Apps Script publicado como Web App
 // (asegúrate que tenga permisos "Cualquiera, incluso anónimo")
 const APPS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbz5LTK8DvU0YoAxGgR2WOWvULKZquibb6peTBKjZbFVAIkcb6J12nDrAJS5TPXglxXa/exec";
+  "https://script.google.com/macros/s/AKfycbw-LgKnlCpMxW0El7LXw1pD8y0MtUaKIyWyQ9NbZEVXqspfIdazWqTOUt7SXr31TzRb/exec";
 
 export async function POST(req: Request) {
   try {
