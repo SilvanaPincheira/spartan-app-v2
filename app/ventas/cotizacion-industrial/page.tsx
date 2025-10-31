@@ -632,7 +632,7 @@ useEffect(() => {
       const resSave = await fetch("/api/save-to-sheets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tipo: "Cotizacion", datos }),
+        body: JSON.stringify({ datos }), // ✅ solo enviamos "datos"
       });
       if (!resSave.ok) throw new Error("Error al guardar en Google Sheets.");
       const saved = await resSave.json();
