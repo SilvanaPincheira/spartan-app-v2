@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 // 👉 tu URL de Apps Script publicada como web app (con permisos "Cualquiera con el enlace")
 const APPS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbzDt9nLm36odGJ8-tJfWp5jVjKT1k1wQwg7Pr_VmEs8dIYFjOp_tiiaDM17zUWoGcvi/exec";
+  "https://script.google.com/macros/s/AKfycbxgTyjJavJdg30Z_EYOkcSVhWhgFdLYwWIVt-d9SEcwrCK5NbtjW4Aqa5cAlI2Ocmk0/exec";
 
 export async function POST(req: Request) {
   try {
