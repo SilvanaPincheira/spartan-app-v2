@@ -300,14 +300,14 @@ try {
   /* ---------- DATOS DE TRANSFERENCIA ---------- */
 y += mm(8);
 doc.setFont("helvetica", "bold");
-doc.setFontSize(11);
+doc.setFontSize(9);
 doc.setTextColor(30, 64, 175); // Azul BCI
 doc.text("Datos de Transferencia", marginX, y);
-y += mm(5);
+y += mm(4);
 
 doc.setFont("helvetica", "normal");
-doc.setFontSize(9);
-doc.setTextColor(0, 0, 0);
+doc.setFontSize(8);
+doc.setTextColor(80, 80, 80);
 
 const transferencia = [
   "Banco: Crédito e Inversiones (BCI)",
@@ -320,7 +320,7 @@ const transferencia = [
 
 transferencia.forEach((linea) => {
   doc.text(linea, marginX + mm(4), y);
-  y += mm(5);
+  y += mm(4);
 });
 
 
