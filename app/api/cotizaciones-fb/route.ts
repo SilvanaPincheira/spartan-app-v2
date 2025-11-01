@@ -1,28 +1,25 @@
 import { NextResponse } from "next/server";
 
 /**
- * Lee el CSV publicado desde Google Sheets y devuelve los registros como JSON
- * URL pública actual:
- * https://docs.google.com/spreadsheets/d/e/2PACX-1vRt6VEmY8btSUyZLz1sYGBJHFtOL5msJrzGNWmLIKZWgx8EpMMUjJPZRXsZvqwHoe6J9-h1jsTXPA03/pub?gid=1811944760&single=true&output=csv
+ * API para leer el CSV publicado desde Google Sheets y devolver las cotizaciones F&B
+ * Hoja pública: Historial Cotizaciones FB
  */
 
 const SHEET_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRt6VEmY8btSUyZLz1sYGBJHFtOL5msJrzGNWmLIKZWgx8EpMMUjJPZRXsZvqwHoe6J9-h1jsTXPA03/pub?gid=1811944760&single=true&output=csv";
 
-/* ===================== UTILIDAD: NORMALIZAR CABECERAS ===================== */
-function normalizeHeader(header: string): string {
-  return header
+/* ===================== PARSER DE CSV ===================== */
+function normalizeHeader(str: string): string {
+  return str
     .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "") // quita acentos
+    .replace(/\p{Diacritic}/gu, "")
     .toLowerCase()
     .trim()
-    .replace(/\s+/g, "_") // espacios -> guión bajo
-    .replace(/[()]/g, "")
-    .replace(/%/g, "pct")
-    .replace(/[^a-z0-9_]/g, ""); // elimina símbolos
+    .replace(/\s+/g, "_")
+    .replace(/[()%]/g, "")
+    .replace(/[^a-z0-9_]/g, "");
 }
 
-/* ===================== PARSER DE CSV ROBUSTO ===================== */
 function parseCSV(csvText: string): Record<string, string>[] {
   const rows: string[][] = [];
   let cur = "";
@@ -53,6 +50,7 @@ function parseCSV(csvText: string): Record<string, string>[] {
       cur += c;
     }
   }
+
   if (cur.length || row.length) {
     row.push(cur);
     rows.push(row);
@@ -66,7 +64,6 @@ function parseCSV(csvText: string): Record<string, string>[] {
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
     if (!r || r.every((x) => x.trim() === "")) continue;
-
     const obj: Record<string, string> = {};
     headers.forEach((h, idx) => (obj[h] = (r[idx] ?? "").trim()));
     data.push(obj);
@@ -79,6 +76,7 @@ function parseCSV(csvText: string): Record<string, string>[] {
 export async function GET() {
   try {
     const res = await fetch(`${SHEET_CSV_URL}&t=${Date.now()}`, {
+      cache: "no-store",
       headers: {
         "Cache-Control": "no-cache, no-store, must-revalidate",
         Pragma: "no-cache",
@@ -86,12 +84,18 @@ export async function GET() {
       },
     });
 
-    if (!res.ok) throw new Error(`Error ${res.status} al obtener el CSV`);
+    if (!res.ok) {
+      throw new Error(`Error ${res.status} al obtener el CSV`);
+    }
 
     const text = await res.text();
-    const data = parseCSV(text);
+    const rows = parseCSV(text);
 
-    return NextResponse.json({ ok: true, count: data.length, data });
+    return NextResponse.json({
+      ok: true,
+      count: rows.length,
+      data: rows,
+    });
   } catch (error: any) {
     console.error("❌ Error leyendo Cotizaciones F&B:", error);
     return NextResponse.json(
@@ -100,3 +104,4 @@ export async function GET() {
     );
   }
 }
+
