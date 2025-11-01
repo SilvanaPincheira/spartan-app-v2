@@ -3,23 +3,25 @@ import { NextResponse } from "next/server";
 /**
  * Lee el CSV publicado desde Google Sheets y devuelve los registros como JSON
  * URL pública actual:
- * https://docs.google.com/spreadsheets/d/e/2PACX-1vRt6VEmY8btSUyZLz1sYGBJHFtOL5msJrzGNWmLIKZWgx8EpMMUjJPZRXsZvqwHoe6J9-h1jsTXPA03/pub?gid=0&single=true&output=csv
+ * https://docs.google.com/spreadsheets/d/e/2PACX-1vRt6VEmY8btSUyZLz1sYGBJHFtOL5msJrzGNWmLIKZWgx8EpMMUjJPZRXsZvqwHoe6J9-h1jsTXPA03/pub?gid=1811944760&single=true&output=csv
  */
 
-// URL de tu hoja publicada
 const SHEET_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRt6VEmY8btSUyZLz1sYGBJHFtOL5msJrzGNWmLIKZWgx8EpMMUjJPZRXsZvqwHoe6J9-h1jsTXPA03/pub?gid=1811944760&single=true&output=csv";
-  
-  function normalizeHeader(str: string): string {
-    return str
-      .normalize("NFD")
-      .replace(/\p{Diacritic}/gu, "")
-      .toLowerCase()
-      .trim()
-      .replace(/\s+/g, "_")
-      .replace(/[^\w_]/g, "");
-  }
-  
+
+/* ===================== UTILIDAD: NORMALIZAR CABECERAS ===================== */
+function normalizeHeader(header: string): string {
+  return header
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "") // quita acentos
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "_") // espacios -> guión bajo
+    .replace(/[()]/g, "")
+    .replace(/%/g, "pct")
+    .replace(/[^a-z0-9_]/g, ""); // elimina símbolos
+}
+
 /* ===================== PARSER DE CSV ROBUSTO ===================== */
 function parseCSV(csvText: string): Record<string, string>[] {
   const rows: string[][] = [];
@@ -77,21 +79,19 @@ function parseCSV(csvText: string): Record<string, string>[] {
 export async function GET() {
   try {
     const res = await fetch(`${SHEET_CSV_URL}&t=${Date.now()}`, {
-        headers: {
-          "Cache-Control": "no-cache, no-store, must-revalidate",
-          Pragma: "no-cache",
-          Expires: "0",
-        },
-      });
-      
-    if (!res.ok) {
-      throw new Error(`Error ${res.status} al obtener el CSV`);
-    }
+      headers: {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        Pragma: "no-cache",
+        Expires: "0",
+      },
+    });
+
+    if (!res.ok) throw new Error(`Error ${res.status} al obtener el CSV`);
 
     const text = await res.text();
-    const rows = parseCSV(text);
+    const data = parseCSV(text);
 
-    return NextResponse.json({ ok: true, count: rows.length, data: rows });
+    return NextResponse.json({ ok: true, count: data.length, data });
   } catch (error: any) {
     console.error("❌ Error leyendo Cotizaciones F&B:", error);
     return NextResponse.json(
