@@ -4,23 +4,38 @@ import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 /* ===================== Tipos ===================== */
-type Row = Record<string, string>;
-
-type Grupo = {
-  id: string;          // Número CTZ o Código Cliente
-  fecha: string;
-  cliente: string;
-  ejecutivo: string;
-  filas: Row[];        // todas las filas (ítems) de esa cotización
-  totalConIva?: string;
+type Cotizacion = {
+  numero_ctz?: string;
+  fecha?: string;
+  cliente?: string;
+  rut?: string;
+  codigo_cliente?: string;
+  direccion?: string;
+  condicion_pago?: string;
+  giro?: string;
+  ejecutivo?: string;
+  email_ejecutivo?: string;
+  celular_ejecutivo?: string;
+  forma_de_pago?: string;
+  validez?: string;
+  codigo_producto?: string;
+  descripcion?: string;
+  kg?: string;
+  cantidad?: string;
+  precio_unitariopresentacion?: string;
+  descuento?: string;
+  total_item?: string;
+  subtotal?: string;
+  iva_19?: string;
+  total_con_iva?: string;
 };
 
 /* ===================== Helpers ===================== */
+const normalize = (s: string = "") =>
+  s.normalize("NFD").replace(/\p{Diacritic}+/gu, "").toLowerCase();
+
 const money = (n?: string | number) => {
-  const num =
-    typeof n === "string"
-      ? Number(String(n).replace(/[^\d.-]/g, ""))
-      : Number(n || 0);
+  const num = typeof n === "string" ? Number(n.replace(/[^\d.-]/g, "")) : n || 0;
   return num.toLocaleString("es-CL", {
     style: "currency",
     currency: "CLP",
@@ -28,42 +43,9 @@ const money = (n?: string | number) => {
   });
 };
 
-const norm = (s: string = "") =>
-  s.normalize("NFD").replace(/\p{Diacritic}+/gu, "").toLowerCase();
-
-function get<T extends Row>(r: T, keys: string[], def = ""): string {
-  for (const k of keys) {
-    const v = r[k];
-    if (v !== undefined && String(v).trim() !== "") return String(v);
-  }
-  return def;
-}
-
-/* Preferencias de claves (API vieja con acentos vs API nueva snake_case) */
-const K = {
-  numero: ["Número CTZ", "numero_ctz", "n_ctz", "numero"],
-  fecha: ["Fecha", "fecha"],
-  cliente: ["Cliente", "cliente"],
-  ejecutivo: ["Ejecutivo", "ejecutivo"],
-  totalConIva: ["Total (con IVA)", "total_con_iva", "total"],
-  codigoCliente: ["Código Cliente", "codigo_cliente", "cod_cliente"],
-
-  cod: ["Código Producto", "codigo_producto", "codigo"],
-  desc: ["Descripción", "descripcion", "producto"],
-  kg: ["Kg", "kg"],
-  cantidad: ["Cantidad", "cantidad"],
-  precio: [
-    "Precio Unitario/Presentación",
-    "precio_unitario_presentacion",
-    "precio_unitario",
-    "precio",
-  ],
-  descuento: ["Descuento", "descuento", "desc_pct"],
-  totalItem: ["Total Ítem", "total_item", "total_linea"],
-};
-
+/* ===================== Componente principal ===================== */
 export default function HistorialCotizacionesFB() {
-  const [rows, setRows] = useState<Row[]>([]);
+  const [data, setData] = useState<Cotizacion[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -73,201 +55,136 @@ export default function HistorialCotizacionesFB() {
       setLoading(true);
       setError("");
       try {
-        const res = await fetch("/api/cotizaciones-fb", { cache: "no-store" });
+        const res = await fetch("/api/cotizaciones-fb");
         const json = await res.json();
-        if (!json?.ok) throw new Error(json?.error || "Error de API");
-        setRows(json.data || []);
+        if (!json.ok) throw new Error(json.error || "Error en respuesta API");
+        setData(json.data);
       } catch (e: any) {
-        setError(e?.message || "No se pudo cargar el historial");
+        setError(e.message || "Error cargando cotizaciones");
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
-  /* ---------- Filtro por texto ---------- */
-  const filtradas = useMemo(() => {
-    if (!search.trim()) return rows;
-    const q = norm(search);
-    return rows.filter((r) => {
-      const cliente = get(r, K.cliente);
-      const rut = get(r, ["RUT", "rut"]);
-      const ejecutivo = get(r, K.ejecutivo);
-      const codigo = get(r, K.cod);
-      const desc = get(r, K.desc);
-      return (
-        norm(cliente).includes(q) ||
-        norm(rut).includes(q) ||
-        norm(ejecutivo).includes(q) ||
-        norm(codigo).includes(q) ||
-        norm(desc).includes(q)
-      );
-    });
-  }, [rows, search]);
+  /* ==== Filtrar ==== */
+  const filtered = useMemo(() => {
+    if (!search.trim()) return data;
+    const q = normalize(search);
+    return data.filter(
+      (r) =>
+        normalize(r.cliente || "").includes(q) ||
+        normalize(r.rut || "").includes(q) ||
+        normalize(r.ejecutivo || "").includes(q) ||
+        normalize(r.codigo_producto || "").includes(q)
+    );
+  }, [data, search]);
 
-  /* ---------- Agrupar por Número CTZ (o Código Cliente si no hay) ---------- */
-  const grupos: Grupo[] = useMemo(() => {
-    const byKey = new Map<string, Grupo>();
-
-    for (const r of filtradas) {
-      const numero = get(r, K.numero);
-      const fallback = get(r, K.codigoCliente);
-      const id = numero || fallback || "SIN_ID";
-
-      const fecha = get(r, K.fecha);
-      const cliente = get(r, K.cliente);
-      const ejecutivo = get(r, K.ejecutivo);
-      const totalConIva = get(r, K.totalConIva);
-
-      if (!byKey.has(id)) {
-        byKey.set(id, {
-          id,
-          fecha,
-          cliente,
-          ejecutivo,
-          filas: [],
-          totalConIva,
-        });
-      }
-      byKey.get(id)!.filas.push(r);
+  /* ==== Agrupar por número de cotización ==== */
+  const grouped = useMemo(() => {
+    const map = new Map<string, Cotizacion[]>();
+    for (const r of filtered) {
+      const key = r.numero_ctz || r.codigo_cliente || "SIN_NUMERO";
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(r);
     }
+    return Array.from(map.entries()).map(([key, rows]) => {
+      const primera = rows[0];
+      return {
+        numero: primera.numero_ctz || key,
+        fecha: primera.fecha,
+        cliente: primera.cliente,
+        rut: primera.rut,
+        ejecutivo: primera.ejecutivo,
+        total: primera.total_con_iva,
+        items: rows,
+      };
+    });
+  }, [filtered]);
 
-    return Array.from(byKey.values());
-  }, [filtradas]);
-
+  /* ===================== RENDER ===================== */
   return (
     <div className="p-6 bg-white min-h-screen">
-      <header className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold text-blue-700">
-          📜 Historial de Cotizaciones F&B
+      <header className="flex items-center justify-between mb-6">
+        <h1 className="text-xl font-bold text-blue-700 flex items-center gap-2">
+          📑 Historial de Cotizaciones F&B
         </h1>
         <Link
           href="/ventas/cotizacion"
-          className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm shadow"
+          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm shadow"
         >
           + Nueva Cotización
         </Link>
       </header>
 
       {/* Buscador */}
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-2 mb-5">
         <input
           type="text"
-          placeholder="Buscar por cliente, RUT, ejecutivo, código o producto…"
+          placeholder="Buscar por cliente, RUT, ejecutivo, código o producto..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="border rounded px-3 py-1 w-[520px]"
+          className="border rounded px-3 py-1 w-96"
         />
-        {loading && <span className="text-sm text-zinc-500">Cargando…</span>}
+        {loading && <span className="text-sm text-zinc-500">Cargando...</span>}
         {error && <span className="text-sm text-red-600">{error}</span>}
       </div>
 
-      {grupos.length === 0 ? (
-        <p className="text-zinc-600 text-sm mt-6">
-          No se encontraron cotizaciones.
-        </p>
-      ) : (
-        <div className="space-y-6">
-          {grupos.map((g, i) => {
-            const verId = g.id; // Número CTZ o Código Cliente
-            const total = g.totalConIva || get(g.filas[0], K.totalConIva, "0");
-
-            return (
-              <div
-                key={i}
-                className="border rounded shadow-sm bg-zinc-50 hover:bg-zinc-100 transition"
-              >
-                <div className="flex justify-between items-center px-4 py-2 border-b bg-white">
-                  <div>
-                    {/* Título: Número CTZ o Código Cliente */}
-                    <div className="font-semibold text-blue-700">
-                      {g.id}
-                    </div>
-                    <div className="text-xs text-zinc-500">
-                      Fecha: {g.fecha || "—"} · Ejecutivo: {g.ejecutivo || "—"}
-                    </div>
-                    <div className="text-xs text-zinc-500">{g.cliente}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-semibold text-zinc-700">
-                      {money(total)}
-                    </div>
-                    <div className="flex gap-2 justify-end mt-1">
-                      <Link
-                        href={`/ventas/cotizacion?ver=${encodeURIComponent(
-                          verId
-                        )}`}
-                        className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700"
-                      >
-                        Ver
-                      </Link>
-                      <Link
-                        href={`/ventas/cotizacion?duplicar=${encodeURIComponent(
-                          verId
-                        )}`}
-                        className="text-xs bg-emerald-600 text-white px-2 py-1 rounded hover:bg-emerald-700"
-                      >
-                        Duplicar
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-
-                <table className="w-full text-xs border-t border-zinc-300">
-                  <thead className="bg-blue-700 text-white">
-                    <tr>
-                      <th className="p-1 text-left">Código</th>
-                      <th className="p-1 text-left">Descripción</th>
-                      <th className="p-1 text-right">Kg</th>
-                      <th className="p-1 text-right">Cantidad</th>
-                      <th className="p-1 text-right">Precio</th>
-                      <th className="p-1 text-right">Desc %</th>
-                      <th className="p-1 text-right">Total Ítem</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {g.filas.map((r, j) => {
-                      const codigo = get(r, K.cod);
-                      const desc = get(r, K.desc);
-                      const kg = get(r, K.kg);
-                      const cantidad = get(r, K.cantidad);
-                      const precio = get(r, K.precio);
-                      const descPct = get(r, K.descuento);
-                      const totalItem = get(r, K.totalItem);
-
-                      return (
-                        <tr key={j} className="border-t hover:bg-white">
-                          <td className="px-2 py-1">{codigo}</td>
-                          <td className="px-2 py-1">{desc}</td>
-                          <td className="px-2 py-1 text-right">{kg}</td>
-                          <td className="px-2 py-1 text-right">{cantidad}</td>
-                          <td className="px-2 py-1 text-right">
-                            {money(precio)}
-                          </td>
-                          <td className="px-2 py-1 text-right">{descPct}</td>
-                          <td className="px-2 py-1 text-right">
-                            {money(totalItem)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <style jsx>{`
-        th {
-          font-weight: 600;
-        }
-        table {
-          border-collapse: collapse;
-        }
-      `}</style>
+      {/* Tabla general */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border border-zinc-300 border-collapse">
+          <thead className="bg-blue-700 text-white">
+            <tr>
+              <th className="px-2 py-1 text-left">N° Cotización</th>
+              <th className="px-2 py-1 text-left">Fecha</th>
+              <th className="px-2 py-1 text-left">Cliente</th>
+              <th className="px-2 py-1 text-left">RUT</th>
+              <th className="px-2 py-1 text-left">Ejecutivo</th>
+              <th className="px-2 py-1 text-right">Total</th>
+              <th className="px-2 py-1 text-center">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {grouped.map((g, i) => (
+              <tr key={i} className="border-b hover:bg-blue-50 transition">
+                <td className="px-2 py-1 font-semibold text-blue-700">
+                  {g.numero || "—"}
+                </td>
+                <td className="px-2 py-1">{g.fecha}</td>
+                <td className="px-2 py-1">{g.cliente}</td>
+                <td className="px-2 py-1">{g.rut}</td>
+                <td className="px-2 py-1">{g.ejecutivo}</td>
+                <td className="px-2 py-1 text-right">{money(g.total)}</td>
+                <td className="px-2 py-1 text-center">
+                  <Link
+                    href={`/ventas/cotizacion?ver=${encodeURIComponent(
+                      g.numero || ""
+                    )}`}
+                    className="text-blue-600 hover:underline mr-2"
+                  >
+                    Ver
+                  </Link>
+                  <Link
+                    href={`/ventas/cotizacion?duplicar=${encodeURIComponent(
+                      g.numero || ""
+                    )}`}
+                    className="text-emerald-600 hover:underline"
+                  >
+                    Duplicar
+                  </Link>
+                </td>
+              </tr>
+            ))}
+            {grouped.length === 0 && !loading && (
+              <tr>
+                <td colSpan={7} className="text-center py-4 text-zinc-500">
+                  No se encontraron cotizaciones.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
-
