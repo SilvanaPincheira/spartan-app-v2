@@ -13,25 +13,30 @@ import {
   Legend,
 } from "recharts";
 
+// ✅ Parser robusto
+function parseCSV(text: string) {
+  const rows = text.trim().split(/\r?\n/);
+  return rows.map((row) => {
+    const matches = row.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g);
+    return matches ? matches.map((v) => v.replace(/^"|"$/g, "")) : [];
+  });
+}
+
 export default function MetasPage() {
   const supabase = createClientComponentClient();
-
   const [perfil, setPerfil] = useState<any>(null);
-  const [metas, setMetas] = useState<any[]>([]);
-  const [ventas, setVentas] = useState<any[]>([]);
   const [mensual, setMensual] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const SHEET_METAS =
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6eHEKLPnnwmtrSFaNvShM3zjdoJ7kr7gmaq6qK1giAXgBm4xulZ1ChS460ejlFUCfabxTect725wf/pub?gid=0&single=true&output=csv";
+
   const SHEET_VENTAS =
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vQXztj-EM_OgRPoKxjRiMleVhH0QVWzG7RSpGIwqMXjUwc_9ENeOYeV9VIcoTpN45vAF3HGZlWl7f4Q/pub?gid=0&single=true&output=csv";
 
   useEffect(() => {
     async function cargarDatos() {
       setLoading(true);
-
-      // 1️⃣ Obtener perfil del usuario logueado
       const { data } = await supabase.auth.getSession();
       const user = data.session?.user;
       let departamento = "";
@@ -46,18 +51,18 @@ export default function MetasPage() {
         departamento = perfilData?.department || "";
       }
 
-      // 2️⃣ Traducir el departamento a gerencia (para filtrar)
       let filtroGerencia = "";
       if (departamento === "gerencia_food") filtroGerencia = "F&B";
       else if (departamento === "gerencia_hc") filtroGerencia = "HC";
       else if (departamento === "gerencia_ind") filtroGerencia = "IND";
-      else filtroGerencia = ""; // Gerencia general o admin ve todo
+      else filtroGerencia = ""; // general o admin
 
-      // 3️⃣ Cargar hoja de Metas
+      // === Cargar METAS ===
       const metasRes = await fetch(SHEET_METAS);
       const metasText = await metasRes.text();
-      const metasRows = metasText.split("\n").map((r) => r.split(","));
+      const metasRows = parseCSV(metasText);
       const metasHeaders = metasRows[0].map((h) => h.trim());
+      const mesesMetas = metasHeaders.slice(2); // desde Enero
       const metasBody = metasRows.slice(1);
 
       const dataMetas = metasBody
@@ -69,18 +74,23 @@ export default function MetasPage() {
         )
         .map((r) => {
           const obj: any = { gerencia: r[0], ejecutivo: r[1] };
-          metasHeaders.slice(2).forEach((mes, i) => {
-            obj[mes] = parseFloat(r[i + 2]) || 0;
+          mesesMetas.forEach((mes, i) => {
+            obj[mes] = parseFloat(
+              r[i + 2].replace(/\./g, "").replace(",", ".")
+            ) || 0;
           });
           return obj;
         });
-      setMetas(dataMetas);
 
-      // 4️⃣ Cargar hoja de Ventas
+      // === Cargar VENTAS ===
       const ventasRes = await fetch(SHEET_VENTAS);
       const ventasText = await ventasRes.text();
-      const ventasRows = ventasText.split("\n").map((r) => r.split(","));
+      const ventasRows = parseCSV(ventasText);
       const ventasHeaders = ventasRows[0].map((h) => h.trim());
+      // quitamos "Total general" si existe
+      const mesesVentas = ventasHeaders
+        .slice(2)
+        .filter((h) => h.toLowerCase() !== "total general");
       const ventasBody = ventasRows.slice(1);
 
       const dataVentas = ventasBody
@@ -92,15 +102,16 @@ export default function MetasPage() {
         )
         .map((r) => {
           const obj: any = { gerencia: r[0], ejecutivo: r[1] };
-          ventasHeaders.slice(2).forEach((mes, i) => {
-            obj[mes] = parseFloat(r[i + 2]) || 0;
+          mesesVentas.forEach((mes, i) => {
+            obj[mes] = parseFloat(
+              r[i + 2].replace(/\./g, "").replace(",", ".")
+            ) || 0;
           });
           return obj;
         });
-      setVentas(dataVentas);
 
-      // 5️⃣ Calcular promedios mensuales
-      const meses = metasHeaders.slice(2);
+      // === Calcular promedios mensuales ===
+      const meses = mesesMetas; // usamos los de metas como base
       const promedioMensual = meses.map((mes) => {
         const metasMes = dataMetas.map((r) => r[mes] || 0);
         const ventasMes = dataVentas.map((r) => r[mes] || 0);
@@ -124,13 +135,8 @@ export default function MetasPage() {
   }, []);
 
   if (loading)
-    return (
-      <div className="p-8">
-        <p className="text-gray-500">Cargando metas y ventas reales...</p>
-      </div>
-    );
+    return <p className="p-8 text-gray-500">Cargando datos de metas...</p>;
 
-  // 6️⃣ Totales
   const totalMeta = mensual.reduce((sum, m) => sum + m.meta, 0);
   const totalVenta = mensual.reduce((sum, m) => sum + m.venta, 0);
   const totalCumplimiento =
@@ -196,14 +202,14 @@ export default function MetasPage() {
               dataKey="meta"
               stroke="#1f4ed8"
               strokeWidth={3}
-              name="Meta Promedio"
+              name="Meta"
             />
             <Line
               type="monotone"
               dataKey="venta"
               stroke="#16a34a"
               strokeWidth={3}
-              name="Venta Promedio"
+              name="Venta"
             />
           </LineChart>
         </ResponsiveContainer>
@@ -254,3 +260,4 @@ export default function MetasPage() {
     </div>
   );
 }
+
