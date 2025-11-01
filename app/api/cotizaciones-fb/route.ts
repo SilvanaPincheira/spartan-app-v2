@@ -9,7 +9,17 @@ import { NextResponse } from "next/server";
 // URL de tu hoja publicada
 const SHEET_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRt6VEmY8btSUyZLz1sYGBJHFtOL5msJrzGNWmLIKZWgx8EpMMUjJPZRXsZvqwHoe6J9-h1jsTXPA03/pub?gid=1811944760&single=true&output=csv";
-
+  
+  function normalizeHeader(str: string): string {
+    return str
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, "_")
+      .replace(/[^\w_]/g, "");
+  }
+  
 /* ===================== PARSER DE CSV ROBUSTO ===================== */
 function parseCSV(csvText: string): Record<string, string>[] {
   const rows: string[][] = [];
@@ -48,7 +58,7 @@ function parseCSV(csvText: string): Record<string, string>[] {
 
   if (!rows.length) return [];
 
-  const headers = rows[0].map((h) => h.trim());
+  const headers = rows[0].map((h) => normalizeHeader(h));
   const data: Record<string, string>[] = [];
 
   for (let i = 1; i < rows.length; i++) {
@@ -66,7 +76,14 @@ function parseCSV(csvText: string): Record<string, string>[] {
 /* ===================== HANDLER PRINCIPAL ===================== */
 export async function GET() {
   try {
-    const res = await fetch(SHEET_CSV_URL, { cache: "no-store" });
+    const res = await fetch(`${SHEET_CSV_URL}&t=${Date.now()}`, {
+        headers: {
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          Pragma: "no-cache",
+          Expires: "0",
+        },
+      });
+      
     if (!res.ok) {
       throw new Error(`Error ${res.status} al obtener el CSV`);
     }
