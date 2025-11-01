@@ -13,6 +13,14 @@ export default function VentasPage() {
       color: "bg-blue-50",
     },
     {
+      href: "/ventas/historial-cotizacion",
+      icon: "📜",
+      title: "Historial de Cotización T. Formulario",
+      desc: "Consulta las cotizaciones tipo formulario grabadas por ejecutivo y cliente.",
+      color: "bg-blue-100",
+    },
+    
+    {
       href: "/ventas/cotizacion-industrial",
       icon: "⚙️",
       title: "Cotización Dinamica",
@@ -22,7 +30,7 @@ export default function VentasPage() {
     {
       href: "/ventas/historial-cotizacionInd",
       icon: "📂",
-      title: "Historial de Cotizaciones",
+      title: "Historial de Cotización Dinamica",
       desc: "Revisa las cotizaciones emitidas con su fecha, cliente, ejecutivo y total.",
       color: "bg-cyan-50",
     },

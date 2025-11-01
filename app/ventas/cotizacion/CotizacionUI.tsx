@@ -2,6 +2,8 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+
 
 /* =================== CONFIG =================== */
 const SHEETS = {
@@ -209,6 +211,70 @@ export default function CotizacionEjecutivaSheets() {
   const [catalogo, setCatalogo] = useState<SheetRow[]>([]);
   const [rutToken, setRutToken] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
+
+    // 🔍 Leer parámetros de URL (?ver= o ?duplicar=)
+    const searchParams = useSearchParams();
+    const verId = searchParams.get("ver");
+    const duplicarId = searchParams.get("duplicar");
+  
+    useEffect(() => {
+      if (!verId && !duplicarId) return;
+  
+      (async () => {
+        try {
+          const res = await fetch("/api/cotizaciones-fb"); // Ruta de tu API
+          const json = await res.json();
+          if (!json?.data) return;
+  
+          const filas = json.data;
+          const coincidencias = filas.filter(
+            (r: any) => r.numero_ctz === verId || r.numero_ctz === duplicarId
+          );
+          if (coincidencias.length === 0) return;
+  
+          const primera = coincidencias[0];
+          const productos = coincidencias.map((r: any) => ({
+            code: r["codigo_producto"] || "",
+            description: r["descripcion"] || "",
+            kilos: Number(r["kg"] || 0),
+            qty: Number(r["cantidad"] || 1),
+            unitPrice: Number(r["precio_unitario_presentacion"] || 0),
+            discountPct: Number(r["descuento"] || 0),
+          }));
+  
+          const nuevaData: QuoteData = {
+            ...data,
+            number: duplicarId
+              ? `CTZ-${new Date().getTime()}`
+              : primera.numero_ctz || data.number,
+            dateISO: primera.fecha || todayISO(),
+            validity: primera.validez || "10 días",
+            client: {
+              name: primera.cliente || "",
+              rut: primera.rut || "",
+              address: primera.direccion || "",
+              clientCode: primera.codigo_cliente || "",
+              condicionPago: primera.condicion_pago || "",
+              giro: primera.giro || "",
+            },
+            issuer: {
+              ...data.issuer,
+              contact: primera.ejecutivo || "",
+              email: primera.email_ejecutivo || "",
+              phone: primera.celular_ejecutivo || "",
+              paymentTerms: primera.forma_de_pago || "",
+            },
+            items: productos,
+            taxPct: 19,
+          };
+  
+          setData(nuevaData);
+        } catch (err) {
+          console.error("❌ Error cargando cotización:", err);
+        }
+      })();
+    }, [verId, duplicarId]);
+  
 
   // Modo cliente
   const [clientMode, setClientMode] = useState<ClientMode>("existing");
