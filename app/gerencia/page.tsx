@@ -1,184 +1,170 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import Link from "next/link";
+import {
+  FiTarget,
+  FiUsers,
+  FiBarChart2,
+  FiShoppingBag,
+  FiTrendingUp,
+} from "react-icons/fi";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 export default function GerenciaPage() {
+  const router = useRouter();
   const supabase = createClientComponentClient();
 
   const [perfil, setPerfil] = useState<any>(null);
-  const [ejecutivos, setEjecutivos] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [filtroGerencia, setFiltroGerencia] = useState<string>("");
+  const [fechaActual, setFechaActual] = useState<string>("");
+
+  // Datos de ejemplo (se conectarán a hojas o tablas reales)
+  const [metaAvance, setMetaAvance] = useState(25);
+  const [ventaEquipo, setVentaEquipo] = useState(45200000);
+  const [clientesNuevos, setClientesNuevos] = useState(8);
+  const [productoTop, setProductoTop] = useState("Desengrasante F12");
+  const [rendimientoPromedio, setRendimientoPromedio] = useState(82);
 
   useEffect(() => {
-    async function cargarDatos() {
-      setLoading(true);
+    // 🔹 Obtener la fecha actual en formato local
+    const hoy = new Date();
+    const opcionesFecha = {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    } as const;
+    setFechaActual(hoy.toLocaleDateString("es-CL", opcionesFecha));
 
+    // 🔹 Cargar perfil desde Supabase
+    async function cargarPerfil() {
       const { data } = await supabase.auth.getSession();
       const user = data.session?.user;
+      if (!user) return;
 
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-
-      // 🔹 Buscar perfil del usuario logueado
-      const { data: perfilData, error: perfilError } = await supabase
+      const { data: perfilData } = await supabase
         .from("profiles")
-        .select("display_name, role, department, email")
+        .select("display_name, department, role, email")
         .eq("id", user.id)
         .single();
 
-      if (perfilError || !perfilData) {
-        setLoading(false);
-        return;
-      }
+      if (perfilData) {
+        setPerfil(perfilData);
 
-      setPerfil(perfilData);
-
-      // 🔹 Si es gerente, obtener su equipo
-      if (perfilData.role === "gerencia") {
-        // Convertir department -> nombre de gerencia (según tu estructura)
+        // Determinar gerencia
         const deptToGerencia: Record<string, string> = {
           gerencia_food: "F&B",
           gerencia_hc: "HC",
           gerencia_ind: "IND",
           gerencia_general: "GENERAL",
         };
-
-        const gerencia = deptToGerencia[perfilData.department] || null;
-
-        if (gerencia) {
-          const { data: ejecutivosData } = await supabase
-            .from("ejecutivos")
-            .select("id, nombre, zona, cargo, activo, supervisor")
-            .eq("gerencia", gerencia)
-            .eq("activo", true);
-
-          setEjecutivos(ejecutivosData || []);
-        }
+        setFiltroGerencia(deptToGerencia[perfilData.department] || "");
       }
-
-      setLoading(false);
     }
 
-    cargarDatos();
+    cargarPerfil();
   }, []);
 
-  if (loading)
-    return (
-      <div className="p-8">
-        <p className="text-gray-500">Cargando datos de gerencia...</p>
-      </div>
-    );
-
-  if (!perfil)
-    return (
-      <div className="p-8">
-        <p className="text-gray-600">
-          No se encontró información de perfil. Inicia sesión nuevamente.
-        </p>
-      </div>
-    );
+  const cards = [
+    {
+      title: "Metas",
+      value: `${metaAvance}% de avance`,
+      description: "Cumplimiento de meta mensual",
+      icon: <FiTarget className="text-blue-600" size={28} />,
+      link: "/gerencia/metas",
+    },
+    {
+      title: "Equipo",
+      value: `$${(ventaEquipo / 1_000_000).toFixed(1)} M`,
+      description: "Venta total del equipo",
+      icon: <FiUsers className="text-green-600" size={28} />,
+      link: "/gerencia/equipo",
+    },
+    {
+      title: "Clientes",
+      value: `${clientesNuevos} nuevos`,
+      description: "Clientes nuevos del mes",
+      icon: <FiBarChart2 className="text-orange-500" size={28} />,
+      link: "/gerencia/clientes",
+    },
+    {
+      title: "Productos",
+      value: productoTop,
+      description: "Producto más vendido",
+      icon: <FiShoppingBag className="text-indigo-600" size={28} />,
+      link: "/gerencia/productos",
+    },
+    {
+      title: "Rendimiento",
+      value: `${rendimientoPromedio}% promedio`,
+      description: "Desempeño global del equipo",
+      icon: <FiTrendingUp className="text-emerald-600" size={28} />,
+      link: "/gerencia/rendimiento",
+    },
+  ];
 
   return (
-    <div className="p-8">
-      {/* === Encabezado === */}
-      <h1 className="text-3xl font-bold text-blue-900 mb-2">
-        Panel de Gerencia
-      </h1>
-      <p className="text-gray-600 mb-8">
-        Bienvenido/a, <strong>{perfil.display_name || "Usuario"}</strong>{" "}
-        <br />
-        <span className="text-sm text-gray-500">
-          ({perfil.department?.replace("gerencia_", "").toUpperCase()} ·{" "}
-          {perfil.role})
-        </span>
-      </p>
-
-      {/* === Tarjetas resumen === */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-10">
-        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6">
-          <h2 className="text-gray-700 font-semibold mb-1">Ejecutivos activos</h2>
-          <p className="text-3xl font-bold text-blue-900">
-            {ejecutivos.length}
-          </p>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6">
-          <h2 className="text-gray-700 font-semibold mb-1">Zonas cubiertas</h2>
-          <p className="text-3xl font-bold text-green-700">
-            {[...new Set(ejecutivos.map((e) => e.zona))].length}
-          </p>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6">
-          <h2 className="text-gray-700 font-semibold mb-1">Supervisores</h2>
-          <p className="text-3xl font-bold text-orange-600">
-            {[...new Set(ejecutivos.map((e) => e.supervisor))].length}
-          </p>
-        </div>
-      </div>
-
-      {/* === Accesos a submódulos === */}
-      <h2 className="text-xl font-semibold text-gray-700 mb-4">Submódulos</h2>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {[
-          { name: "Metas", href: "/gerencia/metas", icon: "🎯" },
-          { name: "Equipo", href: "/gerencia/equipo", icon: "👥" },
-          { name: "Clientes", href: "/gerencia/clientes", icon: "📊" },
-          { name: "Productos", href: "/gerencia/productos", icon: "📦" },
-          { name: "Rendimiento", href: "/gerencia/rendimiento", icon: "📈" },
-        ].map((card, i) => (
-          <Link key={i} href={card.href}>
-            <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm hover:shadow-md hover:-translate-y-1 transition cursor-pointer">
-              <div className="flex items-center gap-3 mb-2">
-                <span className="text-2xl">{card.icon}</span>
-                <h3 className="text-lg font-semibold text-gray-800">
-                  {card.name}
-                </h3>
-              </div>
-              <p className="text-gray-500 text-sm">
-                Ver detalles de {card.name.toLowerCase()}
-              </p>
-            </div>
-          </Link>
-        ))}
-      </div>
-
-      {/* === Tabla del equipo === */}
-      {ejecutivos.length > 0 && (
-        <>
-          <h2 className="text-xl font-semibold text-gray-700 mt-10 mb-3">
-            Equipo a cargo
-          </h2>
-          <div className="overflow-x-auto bg-white border border-gray-200 rounded-2xl shadow-sm">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-gray-50 text-gray-600">
-                  <th className="text-left py-2 px-4">Nombre</th>
-                  <th className="text-left py-2 px-4">Zona</th>
-                  <th className="text-left py-2 px-4">Supervisor</th>
-                  <th className="text-left py-2 px-4">Cargo</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ejecutivos.map((e) => (
-                  <tr key={e.id} className="border-b hover:bg-gray-50">
-                    <td className="py-2 px-4 font-medium text-gray-800">
-                      {e.nombre}
-                    </td>
-                    <td className="py-2 px-4">{e.zona}</td>
-                    <td className="py-2 px-4">{e.supervisor}</td>
-                    <td className="py-2 px-4">{e.cargo}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      {/* ==== ENCABEZADO AZUL SPARTAN ==== */}
+      <header className="bg-[#1f4ed8] text-white py-6 px-8 shadow-md">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">SPARTAN ONE</h1>
+            <p className="text-sm opacity-90">
+              Bienvenido al panel central de gestión y reportes.
+            </p>
           </div>
-        </>
-      )}
+          {perfil && (
+            <div className="mt-4 sm:mt-0">
+              <p className="text-sm">
+                👋 Bienvenido/a,{" "}
+                <span className="font-semibold">{perfil.email}</span>
+              </p>
+              <p className="text-xs opacity-90">{fechaActual}</p>
+            </div>
+          )}
+        </div>
+      </header>
+
+      {/* ==== CONTENIDO PRINCIPAL ==== */}
+      <main className="flex-1 p-8">
+        <h2 className="text-xl font-bold text-blue-900 mb-6">
+          Panel Gerencial — {filtroGerencia || "General"}
+        </h2>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {cards.map((card, i) => (
+            <div
+              key={i}
+              className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition cursor-pointer"
+              onClick={() => router.push(card.link)}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  {card.icon}
+                  <h2 className="text-lg font-semibold text-gray-800">
+                    {card.title}
+                  </h2>
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-blue-900">{card.value}</p>
+              <p className="text-sm text-gray-500 mt-1">{card.description}</p>
+              <div className="mt-4 text-right">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    router.push(card.link);
+                  }}
+                  className="text-blue-700 font-medium hover:underline"
+                >
+                  Ver detalle →
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </main>
     </div>
   );
 }

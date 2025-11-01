@@ -22,7 +22,6 @@ export default function MetasPage() {
   const [mensual, setMensual] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // 🔗 URLs oficiales publicadas como CSV
   const SHEET_METAS =
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6eHEKLPnnwmtrSFaNvShM3zjdoJ7kr7gmaq6qK1giAXgBm4xulZ1ChS460ejlFUCfabxTect725wf/pub?gid=0&single=true&output=csv";
   const SHEET_VENTAS =
@@ -32,9 +31,11 @@ export default function MetasPage() {
     async function cargarDatos() {
       setLoading(true);
 
-      // 1️⃣ Obtener perfil desde Supabase
+      // 1️⃣ Obtener perfil del usuario logueado
       const { data } = await supabase.auth.getSession();
       const user = data.session?.user;
+      let departamento = "";
+
       if (user) {
         const { data: perfilData } = await supabase
           .from("profiles")
@@ -42,9 +43,17 @@ export default function MetasPage() {
           .eq("id", user.id)
           .single();
         setPerfil(perfilData);
+        departamento = perfilData?.department || "";
       }
 
-      // 2️⃣ Cargar CSV de Metas
+      // 2️⃣ Traducir el departamento a gerencia (para filtrar)
+      let filtroGerencia = "";
+      if (departamento === "gerencia_food") filtroGerencia = "F&B";
+      else if (departamento === "gerencia_hc") filtroGerencia = "HC";
+      else if (departamento === "gerencia_ind") filtroGerencia = "IND";
+      else filtroGerencia = ""; // Gerencia general o admin ve todo
+
+      // 3️⃣ Cargar hoja de Metas
       const metasRes = await fetch(SHEET_METAS);
       const metasText = await metasRes.text();
       const metasRows = metasText.split("\n").map((r) => r.split(","));
@@ -53,16 +62,21 @@ export default function MetasPage() {
 
       const dataMetas = metasBody
         .filter((r) => r[0]?.trim() !== "")
+        .filter((r) =>
+          filtroGerencia
+            ? r[0].toUpperCase().includes(filtroGerencia.toUpperCase())
+            : true
+        )
         .map((r) => {
-          const obj: any = { ejecutivo: r[0] };
-          metasHeaders.slice(1).forEach((mes, i) => {
-            obj[mes] = parseFloat(r[i + 1]) || 0;
+          const obj: any = { gerencia: r[0], ejecutivo: r[1] };
+          metasHeaders.slice(2).forEach((mes, i) => {
+            obj[mes] = parseFloat(r[i + 2]) || 0;
           });
           return obj;
         });
       setMetas(dataMetas);
 
-      // 3️⃣ Cargar CSV de Ventas
+      // 4️⃣ Cargar hoja de Ventas
       const ventasRes = await fetch(SHEET_VENTAS);
       const ventasText = await ventasRes.text();
       const ventasRows = ventasText.split("\n").map((r) => r.split(","));
@@ -71,22 +85,29 @@ export default function MetasPage() {
 
       const dataVentas = ventasBody
         .filter((r) => r[0]?.trim() !== "")
+        .filter((r) =>
+          filtroGerencia
+            ? r[0].toUpperCase().includes(filtroGerencia.toUpperCase())
+            : true
+        )
         .map((r) => {
-          const obj: any = { ejecutivo: r[0] };
-          ventasHeaders.slice(1).forEach((mes, i) => {
-            obj[mes] = parseFloat(r[i + 1]) || 0;
+          const obj: any = { gerencia: r[0], ejecutivo: r[1] };
+          ventasHeaders.slice(2).forEach((mes, i) => {
+            obj[mes] = parseFloat(r[i + 2]) || 0;
           });
           return obj;
         });
       setVentas(dataVentas);
 
-      // 4️⃣ Calcular promedios mensuales
-      const meses = metasHeaders.slice(1);
+      // 5️⃣ Calcular promedios mensuales
+      const meses = metasHeaders.slice(2);
       const promedioMensual = meses.map((mes) => {
         const metasMes = dataMetas.map((r) => r[mes] || 0);
         const ventasMes = dataVentas.map((r) => r[mes] || 0);
-        const metaProm = metasMes.reduce((a, b) => a + b, 0) / (metasMes.length || 1);
-        const ventaProm = ventasMes.reduce((a, b) => a + b, 0) / (ventasMes.length || 1);
+        const metaProm =
+          metasMes.reduce((a, b) => a + b, 0) / (metasMes.length || 1);
+        const ventaProm =
+          ventasMes.reduce((a, b) => a + b, 0) / (ventasMes.length || 1);
         return {
           mes,
           meta: Math.round(metaProm),
@@ -109,7 +130,7 @@ export default function MetasPage() {
       </div>
     );
 
-  // 5️⃣ Calcular promedio total anual
+  // 6️⃣ Totales
   const totalMeta = mensual.reduce((sum, m) => sum + m.meta, 0);
   const totalVenta = mensual.reduce((sum, m) => sum + m.venta, 0);
   const totalCumplimiento =
@@ -128,7 +149,7 @@ export default function MetasPage() {
         </p>
       )}
 
-      {/* === KPI principal === */}
+      {/* === KPI Totales === */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
         <div className="bg-white p-5 border rounded-2xl shadow-sm">
           <h3 className="text-gray-600 text-sm">Meta Total Anual</h3>
@@ -161,7 +182,7 @@ export default function MetasPage() {
       {/* === Gráfico === */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border mb-10">
         <h2 className="text-lg font-semibold text-gray-700 mb-4">
-          Tendencia Meta vs Venta Promedio
+          Tendencia Meta vs Venta
         </h2>
         <ResponsiveContainer width="100%" height={320}>
           <LineChart data={mensual}>
