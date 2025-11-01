@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
-
 /* =================== CONFIG =================== */
 const SHEETS = {
   clientesCSV:
@@ -124,12 +123,10 @@ async function fetchCsvNoStore(url: string) {
 }
 
 async function fetchClientesAll(): Promise<SheetRow[]> {
-  // 1) intenta API interna
   try {
     const csv = await fetchCsvNoStore("/api/sheets/clientes");
     return parseCSV(csv);
   } catch {
-    // 2) fallback directo a Google Sheets
     try {
       const csv = await fetchCsvNoStore(SHEETS.clientesCSV);
       return parseCSV(csv);
@@ -155,7 +152,6 @@ async function fetchCatalogCSV(): Promise<SheetRow[]> {
 
 /* =================== MAP =================== */
 function mapCliente(r: SheetRow): Party {
-  // Ajusta aquí si tus headers exactos difieren (acentos, espacios, etc.)
   return {
     name: r["CardName"] || "",
     rut: r["RUT"] || "",
@@ -211,7 +207,24 @@ export default function CotizacionEjecutivaSheets() {
   const [catalogo, setCatalogo] = useState<SheetRow[]>([]);
   const [rutToken, setRutToken] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [clientMode, setClientMode] = useState<ClientMode>("existing");
+  const razonRef = useRef<HTMLInputElement | null>(null);
+  const [loadingData, setLoadingData] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
+  /* =================== TOTALS =================== */
+  const totals = useMemo(() => {
+    const rows = data.items.map((it) => {
+      const precioVenta = (it.unitPrice || 0) * (1 - (it.discountPct || 0) / 100);
+      return { sub: (it.kilos || 0) * (it.qty || 0) * precioVenta };
+    });
+    const subtotal = rows.reduce((a, r) => a + r.sub, 0);
+    const tax = subtotal * ((data.taxPct ?? 19) / 100);
+    return { subtotal, tax, total: subtotal + tax };
+  }, [data]);
+
+  /* =================== GUARDAR EN SHEETS =================== */
   async function guardarCotizacion() {
     try {
       const payload = {
@@ -248,92 +261,15 @@ export default function CotizacionEjecutivaSheets() {
       });
 
       const json = await res.json();
-
-      if (json.success) {
-        alert("✅ Cotización guardada correctamente en Google Sheets");
-      } else {
-        alert("❌ Error al guardar la cotización: " + (json.error || "desconocido"));
-      }
+      if (json.success) alert("✅ Cotización guardada correctamente en Google Sheets");
+      else alert("❌ Error al guardar la cotización: " + (json.error || "desconocido"));
     } catch (err) {
       alert("⚠️ Error inesperado al guardar la cotización.");
       console.error(err);
     }
   }
 
-
-    // 🔍 Leer parámetros de URL (?ver= o ?duplicar=)
-    const searchParams = useSearchParams();
-    const verId = searchParams.get("ver");
-    const duplicarId = searchParams.get("duplicar");
-  
-    useEffect(() => {
-      if (!verId && !duplicarId) return;
-  
-      (async () => {
-        try {
-          const res = await fetch("/api/cotizaciones-fb"); // Ruta de tu API
-          const json = await res.json();
-          if (!json?.data) return;
-  
-          const filas = json.data;
-          const coincidencias = filas.filter(
-            (r: any) => r.numero_ctz === verId || r.numero_ctz === duplicarId
-          );
-          if (coincidencias.length === 0) return;
-  
-          const primera = coincidencias[0];
-          const productos = coincidencias.map((r: any) => ({
-            code: r["codigo_producto"] || "",
-            description: r["descripcion"] || "",
-            kilos: Number(r["kg"] || 0),
-            qty: Number(r["cantidad"] || 1),
-            unitPrice: Number(r["precio_unitario_presentacion"] || 0),
-            discountPct: Number(r["descuento"] || 0),
-          }));
-  
-          const nuevaData: QuoteData = {
-            ...data,
-            number: duplicarId
-              ? `CTZ-${new Date().getTime()}`
-              : primera.numero_ctz || data.number,
-            dateISO: primera.fecha || todayISO(),
-            validity: primera.validez || "10 días",
-            client: {
-              name: primera.cliente || "",
-              rut: primera.rut || "",
-              address: primera.direccion || "",
-              clientCode: primera.codigo_cliente || "",
-              condicionPago: primera.condicion_pago || "",
-              giro: primera.giro || "",
-            },
-            issuer: {
-              ...data.issuer,
-              contact: primera.ejecutivo || "",
-              email: primera.email_ejecutivo || "",
-              phone: primera.celular_ejecutivo || "",
-              paymentTerms: primera.forma_de_pago || "",
-            },
-            items: productos,
-            taxPct: 19,
-          };
-  
-          setData(nuevaData);
-        } catch (err) {
-          console.error("❌ Error cargando cotización:", err);
-        }
-      })();
-    }, [verId, duplicarId]);
-  
-
-  // Modo cliente
-  const [clientMode, setClientMode] = useState<ClientMode>("existing");
-  const razonRef = useRef<HTMLInputElement | null>(null);
-
-  // Estado fetch
-  const [loadingData, setLoadingData] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
+  /* =================== CARGAR DATOS DE SHEETS =================== */
   useEffect(() => {
     (async () => {
       setLoadingData(true);
@@ -350,16 +286,70 @@ export default function CotizacionEjecutivaSheets() {
     })();
   }, []);
 
-  const totals = useMemo(() => {
-    const rows = data.items.map((it) => {
-      const precioVenta = (it.unitPrice || 0) * (1 - (it.discountPct || 0) / 100);
-      return { sub: (it.kilos || 0) * (it.qty || 0) * precioVenta };
-    });
-    const subtotal = rows.reduce((a, r) => a + r.sub, 0);
-    const tax = subtotal * ((data.taxPct ?? 19) / 100);
-    return { subtotal, tax, total: subtotal + tax };
-  }, [data]);
+  /* =================== VER / DUPLICAR =================== */
+  const searchParams = useSearchParams();
+  const verId = searchParams.get("ver");
+  const duplicarId = searchParams.get("duplicar");
 
+  useEffect(() => {
+    if (!verId && !duplicarId) return;
+    (async () => {
+      try {
+        const res = await fetch("/api/cotizaciones-fb");
+        const json = await res.json();
+        if (!json?.data) return;
+
+        const cotizaciones = json.data.filter(
+          (r: any) =>
+            r["Código Cliente"]?.trim() === verId?.trim() ||
+            r["Código Cliente"]?.trim() === duplicarId?.trim()
+        );
+
+        if (cotizaciones.length === 0) return;
+        const primera = cotizaciones[0];
+        const productos = cotizaciones.map((r: any) => ({
+          code: r["Código Producto"] || "",
+          description: r["Descripción"] || "",
+          kilos: Number(r["Kg"] || 0),
+          qty: Number(r["Cantidad"] || 1),
+          unitPrice: Number(r["Precio Unitario/Presentación"] || 0),
+          discountPct: Number(r["Descuento"] || 0),
+        }));
+
+        const nueva: QuoteData = {
+          ...DEFAULT_QUOTE,
+          number: duplicarId
+            ? `CTZ-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`
+            : primera["Número"] || "CTZ",
+          dateISO: duplicarId ? todayISO() : primera["Fecha"] || todayISO(),
+          validity: primera["Validez"] || "10 días",
+          client: {
+            name: primera["Cliente"] || "",
+            rut: primera["RUT"] || "",
+            address: primera["Dirección"] || "",
+            clientCode: primera["Código Cliente"] || "",
+            condicionPago: primera["Condición Pago"] || "",
+            giro: primera["Giro"] || "",
+          },
+          issuer: {
+            ...DEFAULT_QUOTE.issuer,
+            contact: primera["Ejecutivo"] || "",
+            email: primera["Email Ejecutivo"] || "",
+            phone: primera["Celular Ejecutivo"] || "",
+            paymentTerms: primera["Forma de Pago"] || "",
+          },
+          items: productos,
+          taxPct: 19,
+        };
+
+        setData(nueva);
+      } catch (err) {
+        console.error("❌ Error cargando cotización:", err);
+      }
+    })();
+  }, [verId, duplicarId]);
+
+  /* =================== UI - RENDER =================== */
   function setItem(i: number, p: Partial<QuoteItem>) {
     setData((s) => {
       const n = { ...s };
@@ -368,15 +358,18 @@ export default function CotizacionEjecutivaSheets() {
       return n;
     });
   }
+
   function addItem() {
     setData((s) => ({
       ...s,
       items: [...s.items, { code: "", description: "", kilos: 0, qty: 1, unitPrice: 0, discountPct: 0 }],
     }));
   }
+
   function removeItem(i: number) {
     setData((s) => ({ ...s, items: s.items.filter((_, j) => j !== i) }));
   }
+
   function printNow() {
     window.print();
   }
@@ -400,9 +393,6 @@ export default function CotizacionEjecutivaSheets() {
   function activarClienteNuevo() {
     setClientMode("new");
     setShowSuggestions(false);
-    // Si quieres copiar lo escrito al RUT del formulario, descomenta:
-    // const v = rutToken.trim(); 
-    // setData((s) => ({ ...s, client: { ...s.client, rut: v, name: "", clientCode: "", address: "", condicionPago: "", giro: "" } }));
     setRutToken("");
     setData((s) => ({
       ...s,
@@ -410,96 +400,32 @@ export default function CotizacionEjecutivaSheets() {
     }));
     setTimeout(() => razonRef.current?.focus(), 0);
   }
+
   function activarClienteExistente() {
     setClientMode("existing");
     setShowSuggestions(false);
   }
 
-  function autofillFromCatalog(i: number, token: string) {
-    const raw = token.trim();
-    const codeFromToken = raw.includes("—") ? raw.split("—")[0].trim() : raw;
-    const findRow =
-      catalogo.find((r) => normalize(r["code"] || "") === normalize(codeFromToken)) ||
-      catalogo.find((r) => normalize(r["name"] || "") === normalize(raw)) ||
-      catalogo.find((r) => normalize(r["code"] || "").startsWith(normalize(raw))) ||
-      catalogo.find((r) => normalize(r["name"] || "").startsWith(normalize(raw))) ||
-      catalogo.find(
-        (r) =>
-          normalize(r["code"] || "").includes(normalize(raw)) ||
-          normalize(r["name"] || "").includes(normalize(raw))
-      );
-    if (!findRow) return;
-    const item = mapCatalogItem(findRow);
-    setItem(i, { ...item, qty: data.items[i]?.qty ?? 1 });
-  }
-
-  const filteredClientes = useMemo(() => {
-    if (!rutToken || rutToken.trim().length < 2 || clientMode !== "existing") return [];
-    const normQ = normalize(rutToken);
-    return clientes
-      .filter((r) => {
-        const rut = normalize(r["RUT"] || "");
-        const name = normalize(r["CardName"] || "");
-        return rut.includes(normQ) || name.includes(normQ);
-      })
-      .slice(0, 50);
-  }, [rutToken, clientes, clientMode]);
-
-  async function reloadData() {
-    try {
-      setLoadingData(true);
-      setLoadError(null);
-      const [c1, c2] = await Promise.all([
-        // intenta API → fallback directo
-        (async () => {
-          try {
-            return parseCSV(await fetchCsvNoStore("/api/sheets/clientes"));
-          } catch {
-            return parseCSV(await fetchCsvNoStore(SHEETS.clientesCSV));
-          }
-        })(),
-        (async () => {
-          try {
-            return parseCSV(await fetchCsvNoStore("/api/sheets/catalogo"));
-          } catch {
-            return parseCSV(await fetchCsvNoStore(SHEETS.catalogCSV));
-          }
-        })(),
-      ]);
-      setClientes(c1);
-      setCatalogo(c2);
-      setLastUpdated(new Date().toLocaleString("es-CL"));
-    } catch (e: any) {
-      setLoadError(e?.message ?? "No se pudo actualizar");
-    } finally {
-      setLoadingData(false);
-    }
-  }
-
+  /* =================== RENDER HTML =================== */
   return (
     <>
-      {/* Barra superior: estado + actualizar */}
+      {/* Barra superior */}
       <div className="flex items-center justify-between gap-3 mb-2 print:hidden">
         <div className="text-xs text-zinc-600">
           {loadingData ? "Cargando…" : `Clientes: ${clientes.length} · Productos: ${catalogo.length}`}
           {lastUpdated ? ` · Última actualización: ${lastUpdated}` : ""}
         </div>
-        <div className="flex items-center gap-2">
-          {loadError && <span className="text-xs text-red-600">{loadError}</span>}
-          <button
-            onClick={reloadData}
-            disabled={loadingData}
-            className={`px-3 py-1 rounded border text-sm transition
-              ${loadingData ? "opacity-60 cursor-not-allowed" : "hover:bg-blue-50 border-blue-600 text-blue-700"}`}
-            title="Volver a leer Clientes y Catálogo desde Sheets"
-          >
-            {loadingData ? "Actualizando…" : "Actualizar datos"}
-          </button>
-        </div>
+        <button
+          onClick={guardarCotizacion}
+          className="bg-blue-600 text-white px-4 py-1 rounded hover:bg-blue-700"
+        >
+          💾 Guardar Cotización
+        </button>
       </div>
 
+      {/* Cuerpo principal */}
       <div id="printArea" className="p-6 text-[13px] bg-white relative min-h-screen">
-        {/* Encabezado */}
+        {/* Header */}
         <header className="border-b pb-2 mb-4 flex justify-between items-center">
           <img src={BRAND.logo} alt="Logo" className="h-16" />
           <h1 className="text-blue-700 font-bold text-xl">COTIZACIÓN</h1>
@@ -512,73 +438,7 @@ export default function CotizacionEjecutivaSheets() {
 
         {/* Cliente y Emisor */}
         <section className="grid grid-cols-2 gap-6 border-b pb-4 mb-4">
-          {/* Cliente */}
           <Card title="Cliente">
-            {/* Toggle + buscador */}
-            <div className="flex items-center gap-2 mb-2">
-              <div className="inline-flex rounded border overflow-hidden">
-                <button
-                  type="button"
-                  onClick={activarClienteExistente}
-                  className={`px-3 py-1 text-xs ${clientMode === "existing" ? "bg-blue-600 text-white" : "bg-white"} print:hidden`}
-                  title="Buscar y seleccionar desde la lista"
-                >
-                  Cliente existente
-                </button>
-                <button
-                  type="button"
-                  onClick={activarClienteNuevo}
-                  className={`px-3 py-1 text-xs border-l ${clientMode === "new" ? "bg-blue-600 text-white" : "bg-white"} print:hidden`}
-                  title="Ingresar un cliente nuevo manualmente"
-                >
-                  Cliente nuevo
-                </button>
-              </div>
-
-              <div className="relative flex-1">
-                <input
-                  placeholder="Escriba RUT o Nombre… (mín. 2 letras)"
-                  value={rutToken}
-                  disabled={clientMode === "new"}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setRutToken(v);
-                    setShowSuggestions(v.trim().length >= 2 && clientMode === "existing");
-                  }}
-                  onFocus={() => clientMode === "existing" && setShowSuggestions(rutToken.trim().length >= 2)}
-                  className="w-full border px-2 py-1 disabled:bg-zinc-100 print:hidden"
-                />
-                {clientMode === "existing" && showSuggestions && filteredClientes.length > 0 && (
-                  <ul className="absolute z-50 bg-white border w-full max-h-64 overflow-y-auto text-xs shadow-lg">
-                    {filteredClientes.map((r, i) => (
-                      <li
-                        key={i}
-                        className="px-2 py-1 hover:bg-blue-100 cursor-pointer"
-                        onClick={() => handleSelectCliente(r)}
-                      >
-                        {r["RUT"]} — {r["CardName"]}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              <button
-                onClick={clearCliente}
-                className="text-xs bg-red-100 border px-2 py-1 rounded print:hidden"
-                title="Limpiar cliente"
-              >
-                Limpiar
-              </button>
-            </div>
-
-            {clientMode === "new" && (
-              <div className="mb-2 text-[11px] text-blue-700">
-                Modo “Cliente nuevo” activo: completa todos los campos del cliente.
-              </div>
-            )}
-
-            {/* Campos Cliente */}
             <Field label="Razón Social">
               <input
                 ref={razonRef}
@@ -626,7 +486,6 @@ export default function CotizacionEjecutivaSheets() {
             </Field>
           </Card>
 
-          {/* Emisor */}
           <Card title="Emisor">
             <Field label="Empresa">{data.issuer.name}</Field>
             <Field label="RUT">{data.issuer.rut}</Field>
@@ -656,36 +515,32 @@ export default function CotizacionEjecutivaSheets() {
             <Field label="Forma de Pago">
               <input
                 value={data.issuer.paymentTerms || ""}
-                onChange={(e) => setData((s) => ({ ...s, issuer: { ...s.issuer, paymentTerms: e.target.value } }))}
+                onChange={(e) =>
+                  setData((s) => ({ ...s, issuer: { ...s.issuer, paymentTerms: e.target.value } }))
+                }
                 className="w-full border px-2 py-1"
               />
             </Field>
           </Card>
         </section>
 
-        {/* Intro Productos */}
-        <p className="mb-2 text-sm">
-          De acuerdo a lo solicitado, tenemos el agrado de cotizar algunos de los productos que Spartan de Chile Ltda.
-          fabrica y distribuye en el país, y/o maquinaria / accesorios de limpieza industrial.
-        </p>
-
         {/* Productos */}
         <section>
-          <h2 className="bg-blue-700 text-white px-3 py-1 rounded text-sm font-semibold mb-2 print:-webkit-print-color-adjust: exact">
+          <h2 className="bg-blue-700 text-white px-3 py-1 rounded text-sm font-semibold mb-2">
             📦 Productos Cotizados
           </h2>
           <button onClick={addItem} className="bg-blue-600 text-white px-2 rounded mb-2 print:hidden">
             + Ítem
           </button>
           <table className="w-full text-xs border border-collapse">
-            <thead className="bg-blue-600 text-white print:-webkit-print-color-adjust: exact">
+            <thead className="bg-blue-600 text-white">
               <tr>
                 <th>Código</th>
                 <th>Descripción</th>
                 <th>Kilos</th>
                 <th>Cantidad</th>
                 <th>$/Kg</th>
-                <th style={{ width: "60px" }}>Desc %</th>
+                <th>Desc %</th>
                 <th>Precio Venta</th>
                 <th>Total</th>
                 <th className="print:hidden"></th>
@@ -700,9 +555,7 @@ export default function CotizacionEjecutivaSheets() {
                     <td>
                       <input
                         value={it.code || ""}
-                        list="catalog-list"
                         onChange={(e) => setItem(i, { code: e.target.value })}
-                        onBlur={(e) => autofillFromCatalog(i, e.target.value)}
                         className="border px-1 w-24"
                       />
                     </td>
@@ -710,7 +563,6 @@ export default function CotizacionEjecutivaSheets() {
                       <input
                         value={it.description}
                         onChange={(e) => setItem(i, { description: e.target.value })}
-                        onBlur={(e) => autofillFromCatalog(i, e.target.value)}
                         className="border px-1 w-full"
                       />
                     </td>
@@ -749,13 +601,6 @@ export default function CotizacionEjecutivaSheets() {
               })}
             </tbody>
           </table>
-
-          {/* Datalist del catálogo (re-usa CSV) */}
-          <datalist id="catalog-list">
-            {catalogo.map((r, i) => (
-              <option key={i} value={`${r["code"]} — ${r["name"]}`} />
-            ))}
-          </datalist>
         </section>
 
         {/* Totales */}
@@ -787,25 +632,14 @@ export default function CotizacionEjecutivaSheets() {
               className="border"
             />
           </div>
-          <h3 className="font-semibold text-blue-700 mb-2">Datos de Transferencia</h3>
-          <p>Banco: Crédito e Inversiones</p>
-          <p>Titular: Spartan de Chile Ltda.</p>
-          <p>RUT: 76.333.980-7</p>
-          <p>N° Cuenta: 25013084</p>
-          <p>Tipo de cuenta: Cta. Cte.</p>
-          <p>Email comprobantes: pagos@spartan.cl</p>
+          <h3 className="font-semibold text-blue-700 mb-2 text-[11px]">Datos de Transferencia</h3>
+          <p className="text-[11px]">Banco: Crédito e Inversiones</p>
+          <p className="text-[11px]">Titular: Spartan de Chile Ltda.</p>
+          <p className="text-[11px]">RUT: 76.333.980-7</p>
+          <p className="text-[11px]">N° Cuenta: 25013084</p>
+          <p className="text-[11px]">Tipo de cuenta: Cta. Cte.</p>
+          <p className="text-[11px]">Email comprobantes: pagos@spartan.cl</p>
         </section>
-
-        {/* Guardar Cotización */}
-<section className="mt-6 flex justify-end">
-  <button
-    onClick={guardarCotizacion}
-    className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 print:hidden"
-  >
-    💾 Guardar Cotización
-  </button>
-</section>
-
 
         {/* Footer */}
         <footer className="mt-6 flex justify-between text-sm text-zinc-500">
@@ -816,28 +650,28 @@ export default function CotizacionEjecutivaSheets() {
         </footer>
       </div>
 
-      {/* Volver (oculto al imprimir) */}
       <Link
-        href="/"
+        href="/ventas/historial-cotizacion-fb"
         className="fixed top-1/2 right-0 -translate-y-1/2 rounded-l bg-blue-600 text-white px-3 py-2 text-sm shadow-lg hover:bg-blue-700 print:hidden"
       >
         ⟵ Volver
       </Link>
 
       <style jsx>{`
-        :global(html), :global(body), :global(#printArea) {
-          -webkit-print-color-adjust: exact;
-          print-color-adjust: exact;
-        }
         @media print {
-          body * { visibility: hidden !important; }
-          #printArea, #printArea * { visibility: visible !important; }
-          #printArea { position: absolute !important; left: 0; top: 0; width: 100% !important; }
-          .print\\:hidden { display: none !important; }
-          @page { size: Letter; margin: 12mm; }
-          header, footer, table, section, h1, h2, h3, .card { break-inside: avoid; }
-          thead, .bg-blue-600, .bg-blue-700 { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          #transferencia { break-inside: avoid; }
+          body * {
+            visibility: hidden;
+          }
+          #printArea,
+          #printArea * {
+            visibility: visible;
+          }
+          #printArea {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+          }
         }
       `}</style>
     </>
@@ -861,4 +695,3 @@ function Field({ label, children }: { label: string; children: any }) {
     </div>
   );
 }
-
