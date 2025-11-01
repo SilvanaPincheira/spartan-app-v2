@@ -267,85 +267,91 @@ export default function CotizacionEjecutivaSheets() {
     const duplicarId = searchParams.get("duplicar");
   
    /* =================== VER / DUPLICAR =================== */
-useEffect(() => {
-  if (!verId && !duplicarId) return;
-
-  (async () => {
-    try {
-      const res = await fetch("/api/cotizaciones-fb");
-      const json = await res.json();
-      if (!json?.data) return;
-
-      // Busca por número de cotización o código cliente (compatibilidad)
-      const cotizaciones = json.data.filter(
-        (r: any) =>
-          r["Número Cotización"]?.trim() === verId?.trim() ||
-          r["Código Cliente"]?.trim() === verId?.trim() ||
-          r["Número Cotización"]?.trim() === duplicarId?.trim() ||
-          r["Código Cliente"]?.trim() === duplicarId?.trim()
-      );
-
-      if (cotizaciones.length === 0) return;
-      const primera = cotizaciones[0];
-
-      // 🧮 Mapea los productos y calcula correctamente precios y totales
-      const productos = cotizaciones.map((r: any) => {
-        const unitPrice = Number(r["Precio Unitario/Presentación"] || 0);
-        const descuento = Number(r["Descuento"] || 0);
-        const qty = Number(r["Cantidad"] || 1);
-        const kilos = Number(r["Kg"] || 0);
-
-        const precioVenta = unitPrice * (1 - descuento / 100);
-        const total = kilos * qty * precioVenta;
-
-        return {
-          code: r["Código Producto"] || "",
-          description: r["Descripción"] || "",
-          kilos,
-          qty,
-          unitPrice,
-          discountPct: descuento,
-          precioVenta,
-          total,
+   useEffect(() => {
+    if (!verId && !duplicarId) return;
+  
+    (async () => {
+      try {
+        const res = await fetch("/api/cotizaciones-fb");
+        const json = await res.json();
+        if (!json?.data) return;
+  
+        // 🧩 Filtra usando el campo correcto: "Número CTZ"
+        const cotizaciones = json.data.filter(
+          (r: any) =>
+            r["Número CTZ"]?.trim() === verId?.trim() ||
+            r["Código Cliente"]?.trim() === verId?.trim() ||
+            r["Número CTZ"]?.trim() === duplicarId?.trim() ||
+            r["Código Cliente"]?.trim() === duplicarId?.trim()
+        );
+  
+        if (cotizaciones.length === 0) {
+          console.warn("⚠️ No se encontró coincidencia para:", verId || duplicarId);
+          return;
+        }
+  
+        const primera = cotizaciones[0];
+  
+        // 🧮 Mapeo completo de productos
+        const productos = cotizaciones.map((r: any) => {
+          const unitPrice = Number(r["Precio Unitario/Presentación"] || 0);
+          const descuento = Number(r["Descuento"] || 0);
+          const qty = Number(r["Cantidad"] || 1);
+          const kilos = Number(r["Kg"] || 0);
+  
+          const precioVenta = unitPrice * (1 - descuento / 100);
+          const total = kilos * qty * precioVenta;
+  
+          return {
+            code: r["Código Producto"] || "",
+            description: r["Descripción"] || "",
+            kilos,
+            qty,
+            unitPrice,
+            discountPct: descuento,
+            precioVenta,
+            total,
+          };
+        });
+  
+        // 🧾 Construcción de la cotización cargada
+        const nueva: QuoteData = {
+          ...DEFAULT_QUOTE,
+          number: duplicarId
+            ? `CTZ-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`
+            : primera["Número CTZ"] ||
+              primera["Número Cotización"] ||
+              primera["Número"] ||
+              "CTZ",
+          dateISO: duplicarId ? todayISO() : primera["Fecha"] || todayISO(),
+          validity: primera["Validez"] || "10 días",
+          client: {
+            name: primera["Cliente"] || "",
+            rut: primera["RUT"] || "",
+            address: primera["Dirección"] || "",
+            clientCode: primera["Código Cliente"] || "",
+            condicionPago: primera["Condición Pago"] || "",
+            giro: primera["Giro"] || "",
+          },
+          issuer: {
+            ...DEFAULT_QUOTE.issuer,
+            contact: primera["Ejecutivo"] || "",
+            email: primera["Email Ejecutivo"] || "",
+            phone: primera["Celular Ejecutivo"] || "",
+            paymentTerms: primera["Forma de Pago"] || "",
+          },
+          items: productos,
+          taxPct: 19,
         };
-      });
-
-      // 🧩 Construcción de la cotización cargada
-      const nueva: QuoteData = {
-        ...DEFAULT_QUOTE,
-        number: duplicarId
-          ? `CTZ-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`
-          : primera["Número Cotización"] ||
-            primera["Número"] ||
-            primera["Código Cliente"] ||
-            "CTZ",
-        dateISO: duplicarId ? todayISO() : primera["Fecha"] || todayISO(),
-        validity: primera["Validez"] || "10 días",
-        client: {
-          name: primera["Cliente"] || "",
-          rut: primera["RUT"] || "",
-          address: primera["Dirección"] || "",
-          clientCode: primera["Código Cliente"] || "",
-          condicionPago: primera["Condición Pago"] || "",
-          giro: primera["Giro"] || "",
-        },
-        issuer: {
-          ...DEFAULT_QUOTE.issuer,
-          contact: primera["Ejecutivo"] || "",
-          email: primera["Email Ejecutivo"] || "",
-          phone: primera["Celular Ejecutivo"] || "",
-          paymentTerms: primera["Forma de Pago"] || "",
-        },
-        items: productos,
-        taxPct: 19,
-      };
-
-      setData(nueva);
-    } catch (err) {
-      console.error("❌ Error cargando cotización:", err);
-    }
-  })();
-}, [verId, duplicarId]);
+  
+        setData(nueva);
+        console.log("✅ Cotización cargada correctamente:", nueva);
+      } catch (err) {
+        console.error("❌ Error cargando cotización:", err);
+      }
+    })();
+  }, [verId, duplicarId]);
+  
 
   // Modo cliente
   const [clientMode, setClientMode] = useState<ClientMode>("existing");
