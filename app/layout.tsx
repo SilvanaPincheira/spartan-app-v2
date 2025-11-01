@@ -9,39 +9,60 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [session, setSession] = useState<any>(null);
+  const [perfil, setPerfil] = useState<any>(null);
+  const [menuItems, setMenuItems] = useState<any[]>([]);
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  // 🔹 Cargar sesión y perfil
   useEffect(() => {
     const supabase = createClientComponentClient();
-    supabase.auth.getSession().then(({ data }) => {
+
+    async function cargarDatos() {
+      const { data } = await supabase.auth.getSession();
       setSession(data.session);
-    });
+
+      if (data.session?.user) {
+        const { data: perfilData } = await supabase
+          .from("profiles")
+          .select("role, department, display_name, email")
+          .eq("id", data.session.user.id)
+          .single();
+
+        if (perfilData) {
+          setPerfil(perfilData);
+        }
+      }
+    }
+
+    cargarDatos();
   }, []);
+
+  // 🔹 Recalcular menú cuando el perfil esté listo
+  useEffect(() => {
+    const baseMenu = [
+      { name: "Gestión de Comodatos", href: "/comodatos", icon: "🧪" },
+      { name: "Gestión de Ventas", href: "/ventas", icon: "📈" },
+      { name: "Logística", href: "/logistica/seguimiento", icon: "🚚" },
+      { name: "Inventarios", href: "/inventarios", icon: "📦" },
+      { name: "Promociones", href: "/promociones", icon: "🎯" },
+      { name: "KPI", href: "/kpi", icon: "📊" },
+      { name: "Metas", href: "/metas", icon: "🎯" },
+      { name: "Facturas y NC", href: "/facturas-nc", icon: "🧾" },
+      { name: "Comisiones", href: "/comisiones", icon: "💰" },
+    ];
+
+    if (perfil?.role === "gerencia" || perfil?.department?.startsWith("gerencia_")) {
+      baseMenu.push({ name: "Gerencia", href: "/gerencia", icon: "🏢" });
+    }
+
+    setMenuItems(baseMenu);
+  }, [perfil]);
 
   async function handleLogout() {
     const supabase = createClientComponentClient();
     await supabase.auth.signOut();
     window.location.href = "/login";
   }
-
-  // ✅ Rol obtenido desde Supabase
-  const userRol = session?.user?.user_metadata?.rol;
-
-  // ✅ Menú dinámico: muestra Gerencia solo a gerentes
-  const menuItems = [
-    { name: "Gestión de Comodatos", href: "/comodatos", icon: "🧪" },
-    { name: "Gestión de Ventas", href: "/ventas", icon: "📈" },
-    { name: "Logística", href: "/logistica/seguimiento", icon: "🚚" },
-    { name: "Inventarios", href: "/inventarios", icon: "📦" },
-    { name: "Promociones", href: "/promociones", icon: "🎯" },
-    { name: "KPI", href: "/kpi", icon: "📊" },
-    { name: "Metas", href: "/metas", icon: "🎯" },
-    { name: "Facturas y NC", href: "/facturas-nc", icon: "🧾" },
-    { name: "Comisiones", href: "/comisiones", icon: "💰" },
-    ...(userRol === "gerente"
-      ? [{ name: "Gerencia", href: "/gerencia", icon: "🏢" }]
-      : []),
-  ];
 
   return (
     <html lang="es">
@@ -50,6 +71,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <aside className="hidden md:flex w-64 bg-white border-r shadow-sm flex-col print:hidden">
           <div className="px-4 py-6 border-b">
             <h1 className="text-xl font-bold text-[#1f4ed8]">Panel Spartan</h1>
+            {perfil && (
+              <p className="text-xs text-gray-500 mt-1">
+                👤 {perfil.display_name || perfil.email}
+                <br />
+                <span className="capitalize text-gray-400">
+                  {perfil.role} · {perfil.department?.replace("gerencia_", "").toUpperCase()}
+                </span>
+              </p>
+            )}
           </div>
 
           <div className="px-2 pt-3">
@@ -84,7 +114,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             ))}
           </nav>
 
-          {/* Botón login/logout (PC) */}
+          {/* ==== Botón login/logout (PC) ==== */}
           <div className="p-4 border-t">
             {session ? (
               <button
@@ -115,7 +145,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </button>
         </div>
 
-        {/* ==== Menú desplegable móvil ==== */}
+        {/* ==== Menú móvil ==== */}
         {mobileOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-30 z-30">
             <aside className="absolute top-0 left-0 w-64 h-full bg-white shadow-md flex flex-col">
@@ -158,7 +188,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 ))}
               </nav>
 
-              {/* Botón login/logout (Móvil) */}
+              {/* ==== Botón login/logout (Móvil) ==== */}
               <div className="p-4 border-t">
                 {session ? (
                   <button
