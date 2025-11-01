@@ -1,19 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import {
   LineChart,
   Line,
   XAxis,
   YAxis,
   Tooltip,
-  CartesianGrid,
   ResponsiveContainer,
   Legend,
+  CartesianGrid,
 } from "recharts";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
-// ✅ Parser robusto para CSV con comillas o comas
+/* === UTILIDADES === */
+function clean(value: any) {
+  return String(value || "")
+    .trim()
+    .replace(/\r|\n/g, "")
+    .replace(/\s+/g, " ");
+}
+
+// Parser robusto CSV (maneja comillas y espacios)
 function parseCSV(text: string) {
   const rows = text.trim().split(/\r?\n/);
   return rows.map((row) => {
@@ -22,238 +30,273 @@ function parseCSV(text: string) {
   });
 }
 
+// Reconstruir nombres con espacios antes de los datos numéricos
+function normalizarFilas(rows: string[][]) {
+  return rows.slice(1).map((r) => {
+    const gerencia = clean(r[0]);
+    const idxInicioDatos = r.findIndex((v) =>
+      /^\d/.test(v.replace(/\./g, "").replace(",", ".").trim())
+    );
+    const nombre = r
+      .slice(1, idxInicioDatos > 1 ? idxInicioDatos : 2)
+      .join(" ")
+      .trim();
+    const valores = r
+      .slice(idxInicioDatos)
+      .map((v) => clean(v).replace(/\./g, "").replace(",", "."));
+    return [gerencia, nombre, ...valores];
+  });
+}
+
 export default function MetasPage() {
   const supabase = createClientComponentClient();
   const [perfil, setPerfil] = useState<any>(null);
-  const [dataGlobal, setDataGlobal] = useState<any[]>([]);
+  const [dataGlobal, setDataGlobal] = useState<any>(null);
   const [dataEjecutivos, setDataEjecutivos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const SHEET_METAS =
-    "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6eHEKLPnnwmtrSFaNvShM3zjdoJ7kr7gmaq6qK1giAXgBm4xulZ1ChS460ejlFUCfabxTect725wf/pub?gid=0&single=true&output=csv";
-  const SHEET_VENTAS =
-    "https://docs.google.com/spreadsheets/d/e/2PACX-1vQXztj-EM_OgRPoKxjRiMleVhH0QVWzG7RSpGIwqMXjUwc_9ENeOYeV9VIcoTpN45vAF3HGZlWl7f4Q/pub?gid=0&single=true&output=csv";
 
   useEffect(() => {
     async function cargarDatos() {
       setLoading(true);
 
-      // === Perfil del usuario ===
       const { data } = await supabase.auth.getSession();
       const user = data.session?.user;
-      let filtroGerencia = "";
-
-      if (user) {
-        const { data: perfilData } = await supabase
-          .from("profiles")
-          .select("department, display_name, role")
-          .eq("id", user.id)
-          .single();
-
-        setPerfil(perfilData);
-
-        if (perfilData?.department === "gerencia_food") filtroGerencia = "CBORQUEZ";
-        else if (perfilData?.department === "gerencia_hc") filtroGerencia = "CAVENDANO";
-        else if (perfilData?.department === "gerencia_ind") filtroGerencia = "ADAMM";
+      if (!user) {
+        setLoading(false);
+        return;
       }
 
-      // === Leer hojas ===
+      const { data: perfilData } = await supabase
+        .from("profiles")
+        .select("display_name, department, email, role")
+        .eq("id", user.id)
+        .single();
+
+      setPerfil(perfilData);
+
+      // Determinar gerencia para filtrar hojas
+      let filtroGerencia = "";
+      if (perfilData?.department === "gerencia_food") filtroGerencia = "CBORQUEZ";
+      else if (perfilData?.department === "gerencia_hc") filtroGerencia = "CAVENDANO";
+      else if (perfilData?.department === "gerencia_ind") filtroGerencia = "ADAMM";
+
+      // URLs CSV publicadas
+      const metasURL =
+        "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6eHEKLPnnwmtrSFaNvShM3zjdoJ7kr7gmaq6qK1giAXgBm4xulZ1ChS460ejlFUCfabxTect725wf/pub?gid=0&single=true&output=csv";
+      const ventasURL =
+        "https://docs.google.com/spreadsheets/d/e/2PACX-1vQXztj-EM_OgRPoKxjRiMleVhH0QVWzG7RSpGIwqMXjUwc_9ENeOYeV9VIcoTpN45vAF3HGZlWl7f4Q/pub?gid=0&single=true&output=csv";
+
       const [metasText, ventasText] = await Promise.all([
-        fetch(SHEET_METAS).then((r) => r.text()),
-        fetch(SHEET_VENTAS).then((r) => r.text()),
+        fetch(metasURL).then((r) => r.text()),
+        fetch(ventasURL).then((r) => r.text()),
       ]);
 
       const metasRows = parseCSV(metasText);
       const ventasRows = parseCSV(ventasText);
 
-      const meses = metasRows[0].slice(2); // columnas desde Enero
-      const metas = metasRows.slice(1).filter((r) => r[0]);
-      const ventas = ventasRows.slice(1).filter((r) => r[0]);
+      const metas = normalizarFilas(metasRows);
+      const ventas = normalizarFilas(ventasRows);
 
-      // === Filtrar por gerencia ===
-      const metasFiltradas = metas.filter((r) =>
-        filtroGerencia ? r[0].toUpperCase().includes(filtroGerencia) : true
+      // Filtrar por gerencia
+      const metasFiltradas = metas.filter(
+        (r) => clean(r[0]).toUpperCase() === filtroGerencia.toUpperCase()
       );
-      const ventasFiltradas = ventas.filter((r) =>
-        filtroGerencia ? r[0].toUpperCase().includes(filtroGerencia) : true
-      );
-
-      // === Agrupar metas y ventas por ejecutivo ===
-      const ejecutivos = Array.from(
-        new Set(metasFiltradas.map((r) => r[1]?.trim()))
+      const ventasFiltradas = ventas.filter(
+        (r) => clean(r[0]).toUpperCase() === filtroGerencia.toUpperCase()
       );
 
-      const dataEjecutivosCalc = ejecutivos.map((ej) => {
-        const filaMeta = metasFiltradas.find((r) => r[1]?.trim() === ej);
-        const filaVenta = ventasFiltradas.find((r) => r[1]?.trim() === ej);
-        const obj: any = { ejecutivo: ej };
+      const meses = metasRows[0].slice(2, 14); // Enero - Diciembre
+      const mesActual = new Date().getMonth(); // 0-11
 
-        meses.forEach((mes, i) => {
-            const meta = parseFloat(
-                String(filaMeta?.[i + 2] || "0").replace(/\./g, "").replace(",", ".")
-              ) || 0;
-              
-              const venta = parseFloat(
-                String(filaVenta?.[i + 2] || "0").replace(/\./g, "").replace(",", ".")
-              ) || 0;
-               
-          obj[mes] = { meta, venta, cumplimiento: meta > 0 ? Math.round((venta / meta) * 100) : 0 };
+      // === Calcular totales ===
+      let totalMeta = 0;
+let totalVenta = 0;
+const dataTrend: { mes: string; Meta: number; Venta: number }[] = [];
+
+
+      meses.forEach((mes, i) => {
+        const sumaMeta = metasFiltradas.reduce(
+          (acc, r) =>
+            acc +
+            (parseFloat(String(r[i + 2] || "0").replace(/\./g, "").replace(",", ".")) ||
+              0),
+          0
+        );
+        const sumaVenta = ventasFiltradas.reduce(
+          (acc, r) =>
+            acc +
+            (parseFloat(String(r[i + 2] || "0").replace(/\./g, "").replace(",", ".")) ||
+              0),
+          0
+        );
+
+        totalMeta += sumaMeta;
+        totalVenta += sumaVenta;
+
+        dataTrend.push({
+          mes,
+          Meta: sumaMeta,
+          Venta: sumaVenta,
         });
-        return obj;
       });
 
-      // === Agrupar totales globales ===
-      const dataGlobalCalc = meses.map((mes, i) => {
-        let totalMeta = 0;
-        let totalVenta = 0;
-        dataEjecutivosCalc.forEach((ej) => {
-          totalMeta += ej[mes].meta;
-          totalVenta += ej[mes].venta;
-        });
+      // === Calcular cumplimiento ===
+      const cumplimientoTotal =
+        totalMeta > 0 ? ((totalVenta / totalMeta) * 100).toFixed(1) : "0";
+
+      // === Calcular cumplimiento por ejecutivo (mes actual) ===
+      const dataEjecutivosTemp = metasFiltradas.map((r) => {
+        const nombre = r[1];
+        const meta = parseFloat(
+          String(r[mesActual + 2] || "0").replace(/\./g, "").replace(",", ".")
+        );
+        const filaVenta = ventasFiltradas.find(
+          (v) => clean(v[1]).toUpperCase() === clean(nombre).toUpperCase()
+        );
+        const venta = parseFloat(
+          String(filaVenta?.[mesActual + 2] || "0")
+            .replace(/\./g, "")
+            .replace(",", ".")
+        );
+        const cumplimiento = meta > 0 ? (venta / meta) * 100 : 0;
         return {
-          mes,
-          meta: Math.round(totalMeta),
-          venta: Math.round(totalVenta),
-          cumplimiento:
-            totalMeta > 0 ? Math.round((totalVenta / totalMeta) * 100) : 0,
+          ejecutivo: nombre,
+          meta,
+          venta,
+          cumplimiento: cumplimiento.toFixed(0),
         };
       });
 
-      setDataEjecutivos(dataEjecutivosCalc);
-      setDataGlobal(dataGlobalCalc);
+      setDataGlobal({
+        totalMeta,
+        totalVenta,
+        cumplimientoTotal,
+        dataTrend,
+        mesActual: meses[mesActual],
+      });
+      setDataEjecutivos(dataEjecutivosTemp);
       setLoading(false);
     }
 
     cargarDatos();
   }, []);
 
-  if (loading)
-    return <p className="p-8 text-gray-500">Cargando datos de metas...</p>;
-
-  const totalMeta = dataGlobal.reduce((a, b) => a + b.meta, 0);
-  const totalVenta = dataGlobal.reduce((a, b) => a + b.venta, 0);
-  const cumplimientoTotal =
-    totalMeta > 0 ? Math.round((totalVenta / totalMeta) * 100) : 0;
+  if (loading) return <p className="p-8 text-gray-500">Cargando datos...</p>;
+  if (!dataGlobal)
+    return (
+      <p className="p-8 text-gray-500">
+        No se encontraron datos para esta gerencia.
+      </p>
+    );
 
   return (
     <div className="p-8">
-      <h1 className="text-3xl font-bold text-blue-900 mb-1">
+      <h1 className="text-3xl font-bold text-blue-900 mb-2">
         Cumplimiento de Metas 2025
       </h1>
-      {perfil && (
-        <p className="text-gray-600 mb-6">
-          Gerencia:{" "}
-          <strong>{perfil.department?.replace("gerencia_", "").toUpperCase()}</strong>{" "}
-          — {perfil.display_name}
-        </p>
-      )}
+      <p className="text-gray-600 mb-6">
+        Gerencia:{" "}
+        <span className="font-semibold text-blue-800">
+          {perfil?.department?.replace("gerencia_", "").toUpperCase()}
+        </span>{" "}
+        — {perfil?.email}
+      </p>
 
-      {/* === KPIs generales === */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
-        <div className="bg-white border rounded-2xl shadow-sm p-5">
-          <h3 className="text-gray-600 text-sm">Meta Total Anual</h3>
+      {/* === Indicadores principales === */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-10">
+        <div className="bg-white border rounded-xl p-5 text-center shadow-sm">
+          <h3 className="text-gray-600 mb-2 font-medium">Meta Total Anual</h3>
           <p className="text-2xl font-bold text-blue-800">
-            {totalMeta.toLocaleString("es-CL")}
+            {dataGlobal.totalMeta.toLocaleString("es-CL")}
           </p>
         </div>
-        <div className="bg-white border rounded-2xl shadow-sm p-5">
-          <h3 className="text-gray-600 text-sm">Venta Total Anual</h3>
+        <div className="bg-white border rounded-xl p-5 text-center shadow-sm">
+          <h3 className="text-gray-600 mb-2 font-medium">Venta Total Anual</h3>
           <p className="text-2xl font-bold text-green-700">
-            {totalVenta.toLocaleString("es-CL")}
+            {dataGlobal.totalVenta.toLocaleString("es-CL")}
           </p>
         </div>
-        <div className="bg-white border rounded-2xl shadow-sm p-5">
-          <h3 className="text-gray-600 text-sm">% Cumplimiento</h3>
-          <p
-            className={`text-2xl font-bold ${
-              cumplimientoTotal >= 100
-                ? "text-green-600"
-                : cumplimientoTotal >= 80
-                ? "text-yellow-600"
-                : "text-red-600"
-            }`}
-          >
-            {cumplimientoTotal}%
+        <div className="bg-white border rounded-xl p-5 text-center shadow-sm">
+          <h3 className="text-gray-600 mb-2 font-medium">% Cumplimiento</h3>
+          <p className="text-2xl font-bold text-red-600">
+            {dataGlobal.cumplimientoTotal}%
           </p>
         </div>
       </div>
 
-      {/* === Gráfico de tendencia === */}
-      <div className="bg-white border rounded-2xl shadow-sm p-6 mb-10">
-        <h2 className="text-lg font-semibold text-gray-700 mb-4">
+      {/* === Gráfico tendencia === */}
+      <div className="bg-white border rounded-xl p-6 shadow-sm mb-10">
+        <h2 className="text-lg font-semibold mb-4 text-gray-700">
           Tendencia Meta vs Venta (Total Gerencia)
         </h2>
-        <ResponsiveContainer width="100%" height={320}>
-          <LineChart data={dataGlobal}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+        <ResponsiveContainer width="100%" height={300}>
+          <LineChart data={dataGlobal.dataTrend}>
+            <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="mes" />
             <YAxis />
             <Tooltip />
             <Legend />
             <Line
               type="monotone"
-              dataKey="meta"
-              stroke="#1f4ed8"
-              strokeWidth={3}
-              name="Meta"
+              dataKey="Meta"
+              stroke="#1d4ed8"
+              strokeWidth={2}
+              dot={{ r: 3 }}
             />
             <Line
               type="monotone"
-              dataKey="venta"
+              dataKey="Venta"
               stroke="#16a34a"
-              strokeWidth={3}
-              name="Venta"
+              strokeWidth={2}
+              dot={{ r: 3 }}
             />
           </LineChart>
         </ResponsiveContainer>
       </div>
 
-      {/* === Tabla por ejecutivo (mes actual: Octubre por ejemplo) === */}
-      <div className="bg-white border rounded-2xl shadow-sm p-6">
-        <h2 className="text-lg font-semibold text-gray-700 mb-4">
-          Cumplimiento de Ejecutivos — Octubre
+      {/* === Cumplimiento por ejecutivo (mes actual) === */}
+      <div className="bg-white border rounded-xl p-6 shadow-sm">
+        <h2 className="text-lg font-semibold mb-4 text-gray-700">
+          Cumplimiento de Ejecutivos — {dataGlobal.mesActual}
         </h2>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-gray-50 text-gray-600 border-b">
-                <th className="py-2 px-3 text-left">Ejecutivo</th>
-                <th className="py-2 px-3 text-right">Meta</th>
-                <th className="py-2 px-3 text-right">Venta</th>
-                <th className="py-2 px-3 text-right">% Cumplimiento</th>
+              <tr className="bg-gray-50 border-b text-gray-600">
+                <th className="text-left py-2 px-3">Ejecutivo</th>
+                <th className="text-right py-2 px-3">Meta</th>
+                <th className="text-right py-2 px-3">Venta</th>
+                <th className="text-right py-2 px-3">% Cumplimiento</th>
               </tr>
             </thead>
             <tbody>
-              {dataEjecutivos.map((ej, i) => {
-                const mes = "Octubre"; // 👈 aquí puedes automatizar el mes actual
-                const meta = ej[mes]?.meta || 0;
-                const venta = ej[mes]?.venta || 0;
-                const cumplimiento = ej[mes]?.cumplimiento || 0;
-                return (
-                  <tr key={i} className="border-b hover:bg-gray-50">
-                    <td className="py-2 px-3 font-medium text-gray-800">
-                      {ej.ejecutivo}
-                    </td>
-                    <td className="py-2 px-3 text-right text-gray-700">
-                      {meta.toLocaleString("es-CL")}
-                    </td>
-                    <td className="py-2 px-3 text-right text-gray-700">
-                      {venta.toLocaleString("es-CL")}
-                    </td>
-                    <td
-                      className={`py-2 px-3 text-right font-semibold ${
-                        cumplimiento >= 100
-                          ? "text-green-600"
-                          : cumplimiento >= 80
-                          ? "text-yellow-600"
-                          : "text-red-600"
-                      }`}
-                    >
-                      {cumplimiento}%
-                    </td>
-                  </tr>
-                );
-              })}
+              {dataEjecutivos.map((e, i) => (
+                <tr
+                  key={i}
+                  className="border-b hover:bg-gray-50 transition-colors"
+                >
+                  <td className="py-2 px-3 font-medium text-gray-800">
+                    {e.ejecutivo}
+                  </td>
+                  <td className="py-2 px-3 text-right">
+                    {e.meta.toLocaleString("es-CL")}
+                  </td>
+                  <td className="py-2 px-3 text-right">
+                    {e.venta.toLocaleString("es-CL")}
+                  </td>
+                  <td
+                    className={`py-2 px-3 text-right font-semibold ${
+                      e.cumplimiento >= 100
+                        ? "text-green-600"
+                        : e.cumplimiento >= 70
+                        ? "text-orange-500"
+                        : "text-red-600"
+                    }`}
+                  >
+                    {e.cumplimiento}%
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -261,4 +304,3 @@ export default function MetasPage() {
     </div>
   );
 }
-
