@@ -21,7 +21,7 @@ function clean(value: any) {
     .replace(/\s+/g, " ");
 }
 
-// Parser robusto CSV (maneja comillas y espacios)
+// === Parser robusto de CSV ===
 function parseCSV(text: string) {
   const rows = text.trim().split(/\r?\n/);
   return rows.map((row) => {
@@ -30,22 +30,37 @@ function parseCSV(text: string) {
   });
 }
 
-// Reconstruir nombres con espacios antes de los datos numéricos
-function normalizarFilas(rows: string[][]) {
-  return rows.slice(1).map((r) => {
-    const gerencia = clean(r[0]);
-    const idxInicioDatos = r.findIndex((v) =>
-      /^\d/.test(v.replace(/\./g, "").replace(",", ".").trim())
-    );
-    const nombre = r
-      .slice(1, idxInicioDatos > 1 ? idxInicioDatos : 2)
-      .join(" ")
-      .trim();
-    const valores = r
-      .slice(idxInicioDatos)
-      .map((v) => clean(v).replace(/\./g, "").replace(",", "."));
-    return [gerencia, nombre, ...valores];
-  });
+// === Normalizador robusto ===
+function normalizarFilas(rows: string[][]): string[][] {
+  return rows
+    .slice(1)
+    .map((r) => {
+      if (!r) return null;
+
+      const gerencia = clean(r[0] || "");
+
+      // Encuentra primera celda numérica (inicio de los datos)
+      const idxInicioDatos = r.findIndex((v) =>
+        /^\d/.test(v.replace(/\./g, "").replace(",", ".").trim())
+      );
+
+      if (idxInicioDatos === -1) return null;
+
+      // Reconstruye nombre completo
+      const nombre = r
+        .slice(1, idxInicioDatos)
+        .join(" ")
+        .replace(/\s{2,}/g, " ")
+        .trim()
+        .toUpperCase();
+
+      const valores = r
+        .slice(idxInicioDatos)
+        .map((v) => clean(v).replace(/\./g, "").replace(",", "."));
+
+      return [gerencia, nombre, ...valores];
+    })
+    .filter((r): r is string[] => Array.isArray(r));
 }
 
 export default function MetasPage() {
@@ -74,13 +89,13 @@ export default function MetasPage() {
 
       setPerfil(perfilData);
 
-      // Determinar gerencia para filtrar hojas
+      // === Determinar Gerencia según department ===
       let filtroGerencia = "";
       if (perfilData?.department === "gerencia_food") filtroGerencia = "CBORQUEZ";
       else if (perfilData?.department === "gerencia_hc") filtroGerencia = "CAVENDANO";
       else if (perfilData?.department === "gerencia_ind") filtroGerencia = "ADAMM";
 
-      // URLs CSV publicadas
+      // === URLs de las hojas CSV ===
       const metasURL =
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6eHEKLPnnwmtrSFaNvShM3zjdoJ7kr7gmaq6qK1giAXgBm4xulZ1ChS460ejlFUCfabxTect725wf/pub?gid=0&single=true&output=csv";
       const ventasURL =
@@ -97,7 +112,7 @@ export default function MetasPage() {
       const metas = normalizarFilas(metasRows);
       const ventas = normalizarFilas(ventasRows);
 
-      // Filtrar por gerencia
+      // === Filtrar por gerencia ===
       const metasFiltradas = metas.filter(
         (r) => clean(r[0]).toUpperCase() === filtroGerencia.toUpperCase()
       );
@@ -105,14 +120,13 @@ export default function MetasPage() {
         (r) => clean(r[0]).toUpperCase() === filtroGerencia.toUpperCase()
       );
 
-      const meses = metasRows[0].slice(2, 14); // Enero - Diciembre
+      const meses = metasRows[0].slice(2, 14); // Enero-Diciembre
       const mesActual = new Date().getMonth(); // 0-11
 
-      // === Calcular totales ===
+      // === Calcular totales globales ===
       let totalMeta = 0;
-let totalVenta = 0;
-const dataTrend: { mes: string; Meta: number; Venta: number }[] = [];
-
+      let totalVenta = 0;
+      const dataTrend: { mes: string; Meta: number; Venta: number }[] = [];
 
       meses.forEach((mes, i) => {
         const sumaMeta = metasFiltradas.reduce(
@@ -122,7 +136,15 @@ const dataTrend: { mes: string; Meta: number; Venta: number }[] = [];
               0),
           0
         );
-        const sumaVenta = ventasFiltradas.reduce(
+
+        // Evita duplicados en ventas: suma solo una fila por ejecutivo único
+        const ventasUnicas = Array.from(
+          new Map(
+            ventasFiltradas.map((v) => [clean(v[1]).toUpperCase(), v])
+          ).values()
+        );
+
+        const sumaVenta = ventasUnicas.reduce(
           (acc, r) =>
             acc +
             (parseFloat(String(r[i + 2] || "0").replace(/\./g, "").replace(",", ".")) ||
@@ -140,18 +162,24 @@ const dataTrend: { mes: string; Meta: number; Venta: number }[] = [];
         });
       });
 
-      // === Calcular cumplimiento ===
+      // === Cumplimiento general ===
       const cumplimientoTotal =
         totalMeta > 0 ? ((totalVenta / totalMeta) * 100).toFixed(1) : "0";
 
-      // === Calcular cumplimiento por ejecutivo (mes actual) ===
+      // === Cumplimiento por ejecutivo (mes actual) ===
+      const ventasUnicasMes = Array.from(
+        new Map(
+          ventasFiltradas.map((v) => [clean(v[1]).toUpperCase(), v])
+        ).values()
+      );
+
       const dataEjecutivosTemp = metasFiltradas.map((r) => {
-        const nombre = r[1];
+        const nombre = clean(r[1]).toUpperCase();
         const meta = parseFloat(
           String(r[mesActual + 2] || "0").replace(/\./g, "").replace(",", ".")
         );
-        const filaVenta = ventasFiltradas.find(
-          (v) => clean(v[1]).toUpperCase() === clean(nombre).toUpperCase()
+        const filaVenta = ventasUnicasMes.find(
+          (v) => clean(v[1]).toUpperCase() === nombre
         );
         const venta = parseFloat(
           String(filaVenta?.[mesActual + 2] || "0")
@@ -202,7 +230,7 @@ const dataTrend: { mes: string; Meta: number; Venta: number }[] = [];
         — {perfil?.email}
       </p>
 
-      {/* === Indicadores principales === */}
+      {/* === Indicadores === */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-10">
         <div className="bg-white border rounded-xl p-5 text-center shadow-sm">
           <h3 className="text-gray-600 mb-2 font-medium">Meta Total Anual</h3>
@@ -218,13 +246,19 @@ const dataTrend: { mes: string; Meta: number; Venta: number }[] = [];
         </div>
         <div className="bg-white border rounded-xl p-5 text-center shadow-sm">
           <h3 className="text-gray-600 mb-2 font-medium">% Cumplimiento</h3>
-          <p className="text-2xl font-bold text-red-600">
+          <p
+            className={`text-2xl font-bold ${
+              parseFloat(dataGlobal.cumplimientoTotal) >= 100
+                ? "text-green-600"
+                : "text-red-600"
+            }`}
+          >
             {dataGlobal.cumplimientoTotal}%
           </p>
         </div>
       </div>
 
-      {/* === Gráfico tendencia === */}
+      {/* === Gráfico === */}
       <div className="bg-white border rounded-xl p-6 shadow-sm mb-10">
         <h2 className="text-lg font-semibold mb-4 text-gray-700">
           Tendencia Meta vs Venta (Total Gerencia)
@@ -254,7 +288,7 @@ const dataTrend: { mes: string; Meta: number; Venta: number }[] = [];
         </ResponsiveContainer>
       </div>
 
-      {/* === Cumplimiento por ejecutivo (mes actual) === */}
+      {/* === Tabla === */}
       <div className="bg-white border rounded-xl p-6 shadow-sm">
         <h2 className="text-lg font-semibold mb-4 text-gray-700">
           Cumplimiento de Ejecutivos — {dataGlobal.mesActual}
@@ -271,10 +305,7 @@ const dataTrend: { mes: string; Meta: number; Venta: number }[] = [];
             </thead>
             <tbody>
               {dataEjecutivos.map((e, i) => (
-                <tr
-                  key={i}
-                  className="border-b hover:bg-gray-50 transition-colors"
-                >
+                <tr key={i} className="border-b hover:bg-gray-50">
                   <td className="py-2 px-3 font-medium text-gray-800">
                     {e.ejecutivo}
                   </td>
