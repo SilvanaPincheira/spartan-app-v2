@@ -802,25 +802,33 @@ useEffect(() => {
           </div>
         </section>
 
-        {/* Transferencia */}
-        <section id="transferencia" className="mt-6 p-3 border rounded bg-zinc-50 text-xs relative">
-          <div className="absolute top-2 right-2">
-            <img
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(
-                BRAND.website
-              )}`}
-              alt="QR Spartan"
-              className="border"
-            />
-          </div>
-          <h3 className="font-semibold text-blue-700 mb-2">Datos de Transferencia</h3>
-          <p>Banco: Crédito e Inversiones</p>
-          <p>Titular: Spartan de Chile Ltda.</p>
-          <p>RUT: 76.333.980-7</p>
-          <p>N° Cuenta: 25013084</p>
-          <p>Tipo de cuenta: Cta. Cte.</p>
-          <p>Email comprobantes: pagos@spartan.cl</p>
-        </section>
+        {/* ===================== DATOS DE TRANSFERENCIA ===================== */}
+<section
+  id="transferencia"
+  className="mt-6 p-3 border rounded bg-zinc-50 text-xs relative"
+>
+  {/* QR Spartan */}
+  <div className="absolute top-2 right-2">
+    <img
+      src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(
+        "https://www.spartan.cl"
+      )}`}
+      alt="QR Spartan"
+      className="border"
+    />
+  </div>
+
+  <h3 className="font-semibold text-blue-700 mb-2">
+    Datos de Transferencia
+  </h3>
+
+  <p>Banco: Crédito e Inversiones (BCI)</p>
+  <p>Titular: Spartan de Chile Ltda.</p>
+  <p>RUT: 76.333.980-7</p>
+  <p>N° Cuenta: 25013084</p>
+  <p>Tipo de cuenta: Cuenta Corriente</p>
+  <p>Email comprobantes: pagos@spartan.cl</p>
+</section>
 
         {/* Guardar Cotización */}
 <section className="mt-6 flex justify-end">

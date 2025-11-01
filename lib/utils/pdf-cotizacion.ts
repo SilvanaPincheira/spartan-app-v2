@@ -137,7 +137,7 @@ function ensureSpace(doc: jsPDF, y: number, needed: number) {
 }
 
 /* ============================ FUNCIÓN PRINCIPAL ============================ */
-export function generarPdfCotizacion(data: DatosPDF) {
+export async function generarPdfCotizacion(data: DatosPDF) {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const { numero, fecha, cliente, productos, ejecutivo, region, opciones: optsIn } = data;
 
@@ -297,32 +297,51 @@ try {
       y += mm(4);
     });
   });
-  /* ---------- DATOS DE TRANSFERENCIA ---------- */
-y += mm(8);
-doc.setFont("helvetica", "bold");
-doc.setFontSize(9);
-doc.setTextColor(30, 64, 175); // Azul BCI
-doc.text("Datos de Transferencia", marginX, y);
-y += mm(4);
-
-doc.setFont("helvetica", "normal");
-doc.setFontSize(8);
-doc.setTextColor(80, 80, 80);
-
-const transferencia = [
-  "Banco: Crédito e Inversiones (BCI)",
-  "Titular: Spartan de Chile Ltda.",
-  "RUT: 76.333.980-7",
-  "N° Cuenta: 25013084",
-  "Tipo de cuenta: Cuenta Corriente",
-  "Email comprobantes: pagos@spartan.cl",
-];
-
-transferencia.forEach((linea) => {
-  doc.text(linea, marginX + mm(4), y);
-  y += mm(4);
-});
-
+    /* ---------- DATOS DE TRANSFERENCIA ---------- */
+    y += mm(8);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(30, 64, 175); // Azul Spartan
+    doc.text("Datos de Transferencia", marginX, y);
+    y += mm(4);
+  
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(80, 80, 80);
+  
+    const transferencia = [
+      "Banco: Crédito e Inversiones (BCI)",
+      "Titular: Spartan de Chile Ltda.",
+      "RUT: 76.333.980-7",
+      "N° Cuenta: 25013084",
+      "Tipo de cuenta: Cuenta Corriente",
+      "Email comprobantes: pagos@spartan.cl",
+    ];
+  
+    transferencia.forEach((linea) => {
+      y = ensureSpace(doc, y, mm(10)); // asegura que no corte página
+      doc.text(linea, marginX + mm(4), y);
+      y += mm(4);
+    });
+  
+    // 🔹 QR Spartan al lado derecho
+    try {
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(
+        "https://www.spartan.cl"
+      )}`;
+      const qrImg = await fetch(qrUrl)
+        .then((r) => r.blob())
+        .then((blob) => new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(blob);
+        }));
+      const qrSize = mm(25);
+      doc.addImage(qrImg, "PNG", pageW - marginX - qrSize, y - mm(28), qrSize, qrSize);
+    } catch (err) {
+      console.warn("⚠️ No se pudo generar el QR:", err);
+    }
+  
 
   /* ---------- FIRMA ---------- */
   y += mm(10);
