@@ -8,7 +8,7 @@ import { NextResponse } from "next/server";
 
 // URL de tu hoja publicada
 const SHEET_CSV_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRt6VEmY8btSUyZLz1sYGBJHFtOL5msJrzGNWmLIKZWgx8EpMMUjJPZRXsZvqwHoe6J9-h1jsTXPA03/pub?gid=0&single=true&output=csv";
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRt6VEmY8btSUyZLz1sYGBJHFtOL5msJrzGNWmLIKZWgx8EpMMUjJPZRXsZvqwHoe6J9-h1jsTXPA03/pub?gid=1811944760&single=true&output=csv";
 
 /* ===================== PARSER DE CSV ROBUSTO ===================== */
 function parseCSV(csvText: string): Record<string, string>[] {
