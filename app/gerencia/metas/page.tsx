@@ -52,9 +52,9 @@ export default function MetasPage() {
 
         setPerfil(perfilData);
 
-        if (perfilData?.department === "gerencia_food") filtroGerencia = "F&B";
-        else if (perfilData?.department === "gerencia_hc") filtroGerencia = "HC";
-        else if (perfilData?.department === "gerencia_ind") filtroGerencia = "IND";
+        if (perfilData?.department === "gerencia_food") filtroGerencia = "CBORQUEZ";
+        else if (perfilData?.department === "gerencia_hc") filtroGerencia = "CAVENDANO";
+        else if (perfilData?.department === "gerencia_ind") filtroGerencia = "ADAMM";
       }
 
       // === Leer hojas ===
