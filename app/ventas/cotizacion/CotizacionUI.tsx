@@ -212,6 +212,55 @@ export default function CotizacionEjecutivaSheets() {
   const [rutToken, setRutToken] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
 
+  async function guardarCotizacion() {
+    try {
+      const payload = {
+        fecha: data.dateISO,
+        cliente: data.client.name,
+        rut: data.client.rut,
+        codigo_cliente: data.client.clientCode,
+        direccion: data.client.address,
+        condicion_pago: data.client.condicionPago,
+        giro: data.client.giro,
+        ejecutivo: data.issuer.contact,
+        email_ejecutivo: data.issuer.email,
+        celular_ejecutivo: data.issuer.phone,
+        forma_pago: data.issuer.paymentTerms,
+        validez: data.validity,
+        productos: data.items.map((it) => ({
+          codigo_producto: it.code,
+          descripcion: it.description,
+          kg: it.kilos,
+          cantidad: it.qty,
+          precio_unitario: it.unitPrice,
+          descuento: it.discountPct,
+          total_item: (it.kilos || 0) * (it.qty || 0) * (it.unitPrice || 0),
+        })),
+        subtotal: totals.subtotal,
+        iva: totals.tax,
+        total_con_iva: totals.total,
+      };
+
+      const res = await fetch("/api/save-to-sheets-fb", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const json = await res.json();
+
+      if (json.success) {
+        alert("✅ Cotización guardada correctamente en Google Sheets");
+      } else {
+        alert("❌ Error al guardar la cotización: " + (json.error || "desconocido"));
+      }
+    } catch (err) {
+      alert("⚠️ Error inesperado al guardar la cotización.");
+      console.error(err);
+    }
+  }
+
+
     // 🔍 Leer parámetros de URL (?ver= o ?duplicar=)
     const searchParams = useSearchParams();
     const verId = searchParams.get("ver");
@@ -746,6 +795,17 @@ export default function CotizacionEjecutivaSheets() {
           <p>Tipo de cuenta: Cta. Cte.</p>
           <p>Email comprobantes: pagos@spartan.cl</p>
         </section>
+
+        {/* Guardar Cotización */}
+<section className="mt-6 flex justify-end">
+  <button
+    onClick={guardarCotizacion}
+    className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 print:hidden"
+  >
+    💾 Guardar Cotización
+  </button>
+</section>
+
 
         {/* Footer */}
         <footer className="mt-6 flex justify-between text-sm text-zinc-500">
