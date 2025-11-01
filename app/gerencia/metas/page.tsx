@@ -13,67 +13,93 @@ import {
 } from "recharts";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
-/* === UTILIDADES === */
-function clean(value: any) {
-  return String(value || "")
+/* =============== UTILS =============== */
+function clean(value: any): string {
+  return String(value ?? "")
+    .normalize("NFD") // quita tildes
+    .replace(/[\u0300-\u036f]/g, "")
     .trim()
-    .replace(/\r|\n/g, "")
-    .replace(/\s+/g, " ");
+    .replace(/\s+/g, " ")
+    .toUpperCase();
 }
 
-// === Parser robusto de CSV ===
-function parseCSV(text: string) {
-  const rows = text.trim().split(/\r?\n/);
-  return rows.map((row) => {
-    const matches = row.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g);
-    return matches ? matches.map((v) => v.replace(/^"|"$/g, "")) : [];
+function toNumber(v: string | number | undefined): number {
+  const s = String(v ?? "0").trim().replace(/\./g, "").replace(",", ".");
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Parser CSV SOLO CON COMAS. Respeta comillas y "" dentro de campos. */
+function parseCSV(text: string): string[][] {
+  const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").filter(Boolean);
+  return lines.map((line) => {
+    const out: string[] = [];
+    let curr = "";
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+
+      if (ch === '"') {
+        // Comillas escapadas ("")
+        if (inQuotes && line[i + 1] === '"') {
+          curr += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch === "," && !inQuotes) {
+        out.push(curr);
+        curr = "";
+      } else {
+        curr += ch;
+      }
+    }
+    out.push(curr);
+    return out.map((v) => v.trim());
   });
 }
 
-// === Normalizador robusto ===
-function normalizarFilas(rows: string[][]): string[][] {
-  return rows
-    .slice(1)
-    .map((r) => {
-      if (!r) return null;
+/** Normaliza filas asumiendo esquema fijo:
+ *  [0]=Gerencia, [1]=Ejecutivo, [2..]=Meses
+ */
+function normalizeRowsCommaCSV(rows: string[][]): { gerencia: string; ejecutivo: string; meses: number[] }[] {
+  if (!rows.length) return [];
+  const header = rows[0];
+  const monthStartIdx = 2; // desde "Enero"
+  const monthEndIdx = header.length; // hasta el final
 
-      const gerencia = clean(r[0] || "");
-
-      // Encuentra primera celda numérica (inicio de los datos)
-      const idxInicioDatos = r.findIndex((v) =>
-        /^\d/.test(v.replace(/\./g, "").replace(",", ".").trim())
-      );
-
-      if (idxInicioDatos === -1) return null;
-
-      // Reconstruye nombre completo
-      const nombre = r
-        .slice(1, idxInicioDatos)
-        .join(" ")
-        .replace(/\s{2,}/g, " ")
-        .trim()
-        .toUpperCase();
-
-      const valores = r
-        .slice(idxInicioDatos)
-        .map((v) => clean(v).replace(/\./g, "").replace(",", "."));
-
-      return [gerencia, nombre, ...valores];
-    })
-    .filter((r): r is string[] => Array.isArray(r));
+  return rows.slice(1).map((r) => {
+    const gerencia = clean(r[0] ?? "");
+    const ejecutivo = clean(r[1] ?? "");
+    const meses = r.slice(monthStartIdx, monthEndIdx).map((v) => toNumber(v));
+    return { gerencia, ejecutivo, meses };
+  });
 }
+
+type TrendPoint = { mes: string; Meta: number; Venta: number };
+type DataGlobal = {
+  totalMeta: number;
+  totalVenta: number;
+  cumplimientoTotal: string;
+  dataTrend: TrendPoint[];
+  mesActual: string;
+};
 
 export default function MetasPage() {
   const supabase = createClientComponentClient();
   const [perfil, setPerfil] = useState<any>(null);
-  const [dataGlobal, setDataGlobal] = useState<any>(null);
-  const [dataEjecutivos, setDataEjecutivos] = useState<any[]>([]);
+  const [dataGlobal, setDataGlobal] = useState<DataGlobal | null>(null);
+  const [dataEjecutivos, setDataEjecutivos] = useState<
+    { ejecutivo: string; meta: number; venta: number; cumplimiento: string }[]
+  >([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function cargarDatos() {
       setLoading(true);
 
+      // Sesión
       const { data } = await supabase.auth.getSession();
       const user = data.session?.user;
       if (!user) {
@@ -89,13 +115,13 @@ export default function MetasPage() {
 
       setPerfil(perfilData);
 
-      // === Determinar Gerencia según department ===
+      // Map de department -> código de gerencia usado en Sheets
       let filtroGerencia = "";
       if (perfilData?.department === "gerencia_food") filtroGerencia = "CBORQUEZ";
       else if (perfilData?.department === "gerencia_hc") filtroGerencia = "CAVENDANO";
       else if (perfilData?.department === "gerencia_ind") filtroGerencia = "ADAMM";
 
-      // === URLs de las hojas CSV ===
+      // URLs CSV (comas)
       const metasURL =
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6eHEKLPnnwmtrSFaNvShM3zjdoJ7kr7gmaq6qK1giAXgBm4xulZ1ChS460ejlFUCfabxTect725wf/pub?gid=0&single=true&output=csv";
       const ventasURL =
@@ -109,90 +135,66 @@ export default function MetasPage() {
       const metasRows = parseCSV(metasText);
       const ventasRows = parseCSV(ventasText);
 
-      const metas = normalizarFilas(metasRows);
-      const ventas = normalizarFilas(ventasRows);
+      // Meses desde header (asumimos: Gerencia, Ejecutivo, Enero..Diciembre)
+      const mesesLabels = metasRows[0].slice(2);
+      const mesActualIdx = new Date().getMonth(); // 0-11
+      const mesActualLabel = mesesLabels[mesActualIdx] ?? "Mes";
 
-      // === Filtrar por gerencia ===
-      const metasFiltradas = metas.filter(
-        (r) => clean(r[0]).toUpperCase() === filtroGerencia.toUpperCase()
-      );
-      const ventasFiltradas = ventas.filter(
-        (r) => clean(r[0]).toUpperCase() === filtroGerencia.toUpperCase()
-      );
+      // Normalizar (sin cortar nombres)
+      const metasNorm = normalizeRowsCommaCSV(metasRows);
+      const ventasNorm = normalizeRowsCommaCSV(ventasRows);
 
-      const meses = metasRows[0].slice(2, 14); // Enero-Diciembre
-      const mesActual = new Date().getMonth(); // 0-11
+      // Filtrar por gerencia
+      const metasGerencia = metasNorm.filter((r) => r.gerencia === clean(filtroGerencia));
+      const ventasGerencia = ventasNorm.filter((r) => r.gerencia === clean(filtroGerencia));
 
-      // === Calcular totales globales ===
+      // Quitar filas no válidas (TOTAL, vacíos) y deduplicar por ejecutivo
+      const isValidRow = (r: { ejecutivo: string }) =>
+        r.ejecutivo.length > 0 && !/TOTAL/i.test(r.ejecutivo);
+
+      const metasValidas = metasGerencia.filter(isValidRow);
+      const ventasValidas = ventasGerencia.filter(isValidRow);
+
+      // Deduplicación exacta por ejecutivo (última ocurrencia gana)
+      const ventasMap = new Map<string, number[]>();
+      ventasValidas.forEach((r) => {
+        ventasMap.set(r.ejecutivo, r.meses);
+      });
+      const ventasUnicas = Array.from(ventasMap.entries()).map(([ejecutivo, meses]) => ({
+        ejecutivo,
+        meses,
+      }));
+
+      // Totales por mes
       let totalMeta = 0;
       let totalVenta = 0;
-      const dataTrend: { mes: string; Meta: number; Venta: number }[] = [];
+      const dataTrend: TrendPoint[] = [];
 
-      meses.forEach((mes, i) => {
-        const sumaMeta = metasFiltradas.reduce(
-          (acc, r) =>
-            acc +
-            (parseFloat(String(r[i + 2] || "0").replace(/\./g, "").replace(",", ".")) ||
-              0),
-          0
-        );
+      for (let i = 0; i < mesesLabels.length; i++) {
+        const metaMes = metasValidas.reduce((acc, r) => acc + (r.meses[i] || 0), 0);
+        const ventaMes = ventasUnicas.reduce((acc, r) => acc + (r.meses[i] || 0), 0);
 
-        // Evita duplicados en ventas: suma solo una fila por ejecutivo único
-        const ventasUnicas = Array.from(
-          new Map(
-            ventasFiltradas.map((v) => [clean(v[1]).toUpperCase(), v])
-          ).values()
-        );
+        totalMeta += metaMes;
+        totalVenta += ventaMes;
 
-        const sumaVenta = ventasUnicas.reduce(
-          (acc, r) =>
-            acc +
-            (parseFloat(String(r[i + 2] || "0").replace(/\./g, "").replace(",", ".")) ||
-              0),
-          0
-        );
+        dataTrend.push({ mes: mesesLabels[i], Meta: metaMes, Venta: ventaMes });
+      }
 
-        totalMeta += sumaMeta;
-        totalVenta += sumaVenta;
-
-        dataTrend.push({
-          mes,
-          Meta: sumaMeta,
-          Venta: sumaVenta,
-        });
-      });
-
-      // === Cumplimiento general ===
       const cumplimientoTotal =
         totalMeta > 0 ? ((totalVenta / totalMeta) * 100).toFixed(1) : "0";
 
-      // === Cumplimiento por ejecutivo (mes actual) ===
-      const ventasUnicasMes = Array.from(
-        new Map(
-          ventasFiltradas.map((v) => [clean(v[1]).toUpperCase(), v])
-        ).values()
-      );
+      // Tabla ejecutivos (mes actual)
+      const ventasIndex = new Map<string, number>();
+      ventasUnicas.forEach((v) => {
+        ventasIndex.set(v.ejecutivo, v.meses[mesActualIdx] || 0);
+      });
 
-      const dataEjecutivosTemp = metasFiltradas.map((r) => {
-        const nombre = clean(r[1]).toUpperCase();
-        const meta = parseFloat(
-          String(r[mesActual + 2] || "0").replace(/\./g, "").replace(",", ".")
-        );
-        const filaVenta = ventasUnicasMes.find(
-          (v) => clean(v[1]).toUpperCase() === nombre
-        );
-        const venta = parseFloat(
-          String(filaVenta?.[mesActual + 2] || "0")
-            .replace(/\./g, "")
-            .replace(",", ".")
-        );
-        const cumplimiento = meta > 0 ? (venta / meta) * 100 : 0;
-        return {
-          ejecutivo: nombre,
-          meta,
-          venta,
-          cumplimiento: cumplimiento.toFixed(0),
-        };
+      const dataEjecutivosTemp = metasValidas.map((m) => {
+        const nombre = m.ejecutivo;
+        const meta = m.meses[mesActualIdx] || 0;
+        const venta = ventasIndex.get(nombre) ?? 0;
+        const cumplimiento = meta > 0 ? ((venta / meta) * 100).toFixed(0) : "0";
+        return { ejecutivo: nombre, meta, venta, cumplimiento };
       });
 
       setDataGlobal({
@@ -200,7 +202,7 @@ export default function MetasPage() {
         totalVenta,
         cumplimientoTotal,
         dataTrend,
-        mesActual: meses[mesActual],
+        mesActual: mesActualLabel,
       });
       setDataEjecutivos(dataEjecutivosTemp);
       setLoading(false);
@@ -211,17 +213,11 @@ export default function MetasPage() {
 
   if (loading) return <p className="p-8 text-gray-500">Cargando datos...</p>;
   if (!dataGlobal)
-    return (
-      <p className="p-8 text-gray-500">
-        No se encontraron datos para esta gerencia.
-      </p>
-    );
+    return <p className="p-8 text-gray-500">No se encontraron datos para esta gerencia.</p>;
 
   return (
     <div className="p-8">
-      <h1 className="text-3xl font-bold text-blue-900 mb-2">
-        Cumplimiento de Metas 2025
-      </h1>
+      <h1 className="text-3xl font-bold text-blue-900 mb-2">Cumplimiento de Metas 2025</h1>
       <p className="text-gray-600 mb-6">
         Gerencia:{" "}
         <span className="font-semibold text-blue-800">
@@ -230,7 +226,7 @@ export default function MetasPage() {
         — {perfil?.email}
       </p>
 
-      {/* === Indicadores === */}
+      {/* Indicadores */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-10">
         <div className="bg-white border rounded-xl p-5 text-center shadow-sm">
           <h3 className="text-gray-600 mb-2 font-medium">Meta Total Anual</h3>
@@ -248,9 +244,7 @@ export default function MetasPage() {
           <h3 className="text-gray-600 mb-2 font-medium">% Cumplimiento</h3>
           <p
             className={`text-2xl font-bold ${
-              parseFloat(dataGlobal.cumplimientoTotal) >= 100
-                ? "text-green-600"
-                : "text-red-600"
+              parseFloat(dataGlobal.cumplimientoTotal) >= 100 ? "text-green-600" : "text-red-600"
             }`}
           >
             {dataGlobal.cumplimientoTotal}%
@@ -258,7 +252,7 @@ export default function MetasPage() {
         </div>
       </div>
 
-      {/* === Gráfico === */}
+      {/* Gráfico */}
       <div className="bg-white border rounded-xl p-6 shadow-sm mb-10">
         <h2 className="text-lg font-semibold mb-4 text-gray-700">
           Tendencia Meta vs Venta (Total Gerencia)
@@ -270,25 +264,13 @@ export default function MetasPage() {
             <YAxis />
             <Tooltip />
             <Legend />
-            <Line
-              type="monotone"
-              dataKey="Meta"
-              stroke="#1d4ed8"
-              strokeWidth={2}
-              dot={{ r: 3 }}
-            />
-            <Line
-              type="monotone"
-              dataKey="Venta"
-              stroke="#16a34a"
-              strokeWidth={2}
-              dot={{ r: 3 }}
-            />
+            <Line type="monotone" dataKey="Meta" stroke="#1d4ed8" strokeWidth={2} dot={{ r: 3 }} />
+            <Line type="monotone" dataKey="Venta" stroke="#16a34a" strokeWidth={2} dot={{ r: 3 }} />
           </LineChart>
         </ResponsiveContainer>
       </div>
 
-      {/* === Tabla === */}
+      {/* Tabla */}
       <div className="bg-white border rounded-xl p-6 shadow-sm">
         <h2 className="text-lg font-semibold mb-4 text-gray-700">
           Cumplimiento de Ejecutivos — {dataGlobal.mesActual}
@@ -305,21 +287,15 @@ export default function MetasPage() {
             </thead>
             <tbody>
               {dataEjecutivos.map((e, i) => (
-                <tr key={i} className="border-b hover:bg-gray-50">
-                  <td className="py-2 px-3 font-medium text-gray-800">
-                    {e.ejecutivo}
-                  </td>
-                  <td className="py-2 px-3 text-right">
-                    {e.meta.toLocaleString("es-CL")}
-                  </td>
-                  <td className="py-2 px-3 text-right">
-                    {e.venta.toLocaleString("es-CL")}
-                  </td>
+                <tr key={i} className="border-b hover:bg-gray-50 transition-colors">
+                  <td className="py-2 px-3 font-medium text-gray-800">{e.ejecutivo}</td>
+                  <td className="py-2 px-3 text-right">{e.meta.toLocaleString("es-CL")}</td>
+                  <td className="py-2 px-3 text-right">{e.venta.toLocaleString("es-CL")}</td>
                   <td
                     className={`py-2 px-3 text-right font-semibold ${
-                      e.cumplimiento >= 100
+                      parseFloat(e.cumplimiento) >= 100
                         ? "text-green-600"
-                        : e.cumplimiento >= 70
+                        : parseFloat(e.cumplimiento) >= 70
                         ? "text-orange-500"
                         : "text-red-600"
                     }`}
