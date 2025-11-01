@@ -1,22 +1,10 @@
- "use client";
+"use client";
 
 import "./globals.css";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
-
-const menuItems = [
-  { name: "Gestión de Comodatos", href: "/comodatos", icon: "🧪" },
-  { name: "Gestión de Ventas", href: "/ventas", icon: "📈" },
-  { name: "Logística", href: "/logistica/seguimiento", icon: "🚚" },
-  { name: "Inventarios", href: "/inventarios", icon: "📦" },
-  { name: "Promociones", href: "/promociones", icon: "🎯" },
-  { name: "KPI", href: "/kpi", icon: "📊" },
-  { name: "Metas", href: "/metas", icon: "🎯" },
-  { name: "Facturas y NC", href: "/facturas-nc", icon: "🧾" },
-  { name: "Comisiones", href: "/comisiones", icon: "💰" }, // ✅ nuevo módulo
-];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -35,6 +23,25 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     await supabase.auth.signOut();
     window.location.href = "/login";
   }
+
+  // ✅ Rol obtenido desde Supabase
+  const userRol = session?.user?.user_metadata?.rol;
+
+  // ✅ Menú dinámico: muestra Gerencia solo a gerentes
+  const menuItems = [
+    { name: "Gestión de Comodatos", href: "/comodatos", icon: "🧪" },
+    { name: "Gestión de Ventas", href: "/ventas", icon: "📈" },
+    { name: "Logística", href: "/logistica/seguimiento", icon: "🚚" },
+    { name: "Inventarios", href: "/inventarios", icon: "📦" },
+    { name: "Promociones", href: "/promociones", icon: "🎯" },
+    { name: "KPI", href: "/kpi", icon: "📊" },
+    { name: "Metas", href: "/metas", icon: "🎯" },
+    { name: "Facturas y NC", href: "/facturas-nc", icon: "🧾" },
+    { name: "Comisiones", href: "/comisiones", icon: "💰" },
+    ...(userRol === "gerente"
+      ? [{ name: "Gerencia", href: "/gerencia", icon: "🏢" }]
+      : []),
+  ];
 
   return (
     <html lang="es">
