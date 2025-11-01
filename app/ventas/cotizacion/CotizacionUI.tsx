@@ -228,6 +228,7 @@ export default function CotizacionEjecutivaSheets() {
   async function guardarCotizacion() {
     try {
       const payload = {
+        numero_ctz: data.number,      // 👈 NUEVO: persistimos N° CTZ
         fecha: data.dateISO,
         cliente: data.client.name,
         rut: data.client.rut,
@@ -293,20 +294,40 @@ export default function CotizacionEjecutivaSheets() {
 
   useEffect(() => {
     if (!verId && !duplicarId) return;
+  
     (async () => {
       try {
         const res = await fetch("/api/cotizaciones-fb");
         const json = await res.json();
         if (!json?.data) return;
-
+  
+        // 🔍 Buscar coincidencias por número de cotización (más confiable)
         const cotizaciones = json.data.filter(
           (r: any) =>
-            r["Código Cliente"]?.trim() === verId?.trim() ||
-            r["Código Cliente"]?.trim() === duplicarId?.trim()
+            r["Número CTZ"]?.trim() === verId?.trim() ||
+            r["Número CTZ"]?.trim() === duplicarId?.trim()
         );
-
-        if (cotizaciones.length === 0) return;
+  
+        // Si no hay coincidencias, intentar fallback por Código Cliente
+        if (cotizaciones.length === 0) {
+          console.warn("⚠️ No se encontró por Número CTZ, intentando por Código Cliente");
+          cotizaciones.push(
+            ...json.data.filter(
+              (r: any) =>
+                r["Código Cliente"]?.trim() === verId?.trim() ||
+                r["Código Cliente"]?.trim() === duplicarId?.trim()
+            )
+          );
+        }
+  
+        if (cotizaciones.length === 0) {
+          console.warn("❌ No se encontró ninguna cotización");
+          return;
+        }
+  
         const primera = cotizaciones[0];
+  
+        // 🧱 Productos
         const productos = cotizaciones.map((r: any) => ({
           code: r["Código Producto"] || "",
           description: r["Descripción"] || "",
@@ -315,12 +336,13 @@ export default function CotizacionEjecutivaSheets() {
           unitPrice: Number(r["Precio Unitario/Presentación"] || 0),
           discountPct: Number(r["Descuento"] || 0),
         }));
-
+  
+        // 🧾 Nueva cotización cargada
         const nueva: QuoteData = {
           ...DEFAULT_QUOTE,
           number: duplicarId
             ? `CTZ-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`
-            : primera["Número"] || "CTZ",
+            : primera["Número CTZ"] || "CTZ-SIN-NUM",
           dateISO: duplicarId ? todayISO() : primera["Fecha"] || todayISO(),
           validity: primera["Validez"] || "10 días",
           client: {
@@ -341,7 +363,7 @@ export default function CotizacionEjecutivaSheets() {
           items: productos,
           taxPct: 19,
         };
-
+  
         setData(nueva);
       } catch (err) {
         console.error("❌ Error cargando cotización:", err);

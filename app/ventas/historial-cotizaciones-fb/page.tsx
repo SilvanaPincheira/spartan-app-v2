@@ -5,6 +5,7 @@ import Link from "next/link";
 
 /* ===================== Tipos ===================== */
 type Cotizacion = {
+  numero_ctz?: string;            // 🔹 NUEVA COLUMNA (Número CTZ)
   fecha?: string;
   cliente?: string;
   rut?: string;
