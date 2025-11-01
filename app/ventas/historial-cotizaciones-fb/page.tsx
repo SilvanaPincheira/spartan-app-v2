@@ -5,29 +5,29 @@ import Link from "next/link";
 
 /* ===================== Tipos ===================== */
 type Cotizacion = {
-  numero_ctz?: string;
-  fecha?: string;
-  cliente?: string;
-  rut?: string;
-  codigo_cliente?: string;
-  direccion?: string;
-  condicion_pago?: string;
-  giro?: string;
-  ejecutivo?: string;
-  email_ejecutivo?: string;
-  celular_ejecutivo?: string;
-  forma_de_pago?: string;
-  validez?: string;
-  codigo_producto?: string;
-  descripcion?: string;
-  kg?: string;
-  cantidad?: string;
-  precio_unitariopresentacion?: string;
-  descuento?: string;
-  total_item?: string;
-  subtotal?: string;
-  iva_19?: string;
-  total_con_iva?: string;
+  "Número CTZ"?: string;
+  Fecha?: string;
+  Cliente?: string;
+  RUT?: string;
+  "Código Cliente"?: string;
+  Dirección?: string;
+  "Condición Pago"?: string;
+  Giro?: string;
+  Ejecutivo?: string;
+  "Email Ejecutivo"?: string;
+  "Celular Ejecutivo"?: string;
+  "Forma de Pago"?: string;
+  Validez?: string;
+  "Código Producto"?: string;
+  Descripción?: string;
+  Kg?: string;
+  Cantidad?: string;
+  "Precio Unitario/Presentación"?: string;
+  Descuento?: string;
+  "Total Ítem"?: string;
+  Subtotal?: string;
+  "IVA (19%)"?: string;
+  "Total (con IVA)"?: string;
 };
 
 /* ===================== Helpers ===================== */
@@ -35,7 +35,10 @@ const normalize = (s: string = "") =>
   s.normalize("NFD").replace(/\p{Diacritic}+/gu, "").toLowerCase();
 
 const money = (n?: string | number) => {
-  const num = typeof n === "string" ? Number(n.replace(/[^\d.-]/g, "")) : n || 0;
+  const num =
+    typeof n === "string"
+      ? Number(n.replace(/[^\d.-]/g, "")) || 0
+      : n || 0;
   return num.toLocaleString("es-CL", {
     style: "currency",
     currency: "CLP",
@@ -50,6 +53,7 @@ export default function HistorialCotizacionesFB() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  /* ==== Cargar datos desde API ==== */
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -73,10 +77,11 @@ export default function HistorialCotizacionesFB() {
     const q = normalize(search);
     return data.filter(
       (r) =>
-        normalize(r.cliente || "").includes(q) ||
-        normalize(r.rut || "").includes(q) ||
-        normalize(r.ejecutivo || "").includes(q) ||
-        normalize(r.codigo_producto || "").includes(q)
+        normalize(r.Cliente || "").includes(q) ||
+        normalize(r.RUT || "").includes(q) ||
+        normalize(r.Ejecutivo || "").includes(q) ||
+        normalize(r["Código Producto"] || "").includes(q) ||
+        normalize(r.Descripción || "").includes(q)
     );
   }, [data, search]);
 
@@ -84,19 +89,19 @@ export default function HistorialCotizacionesFB() {
   const grouped = useMemo(() => {
     const map = new Map<string, Cotizacion[]>();
     for (const r of filtered) {
-      const key = r.numero_ctz || r.codigo_cliente || "SIN_NUMERO";
+      const key = r["Número CTZ"] || r["Código Cliente"] || "SIN_NUMERO";
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(r);
     }
     return Array.from(map.entries()).map(([key, rows]) => {
       const primera = rows[0];
       return {
-        numero: primera.numero_ctz || key,
-        fecha: primera.fecha,
-        cliente: primera.cliente,
-        rut: primera.rut,
-        ejecutivo: primera.ejecutivo,
-        total: primera.total_con_iva,
+        numero: primera["Número CTZ"] || key,
+        fecha: primera.Fecha,
+        cliente: primera.Cliente,
+        rut: primera.RUT,
+        ejecutivo: primera.Ejecutivo,
+        total: primera["Total (con IVA)"],
         items: rows,
       };
     });
@@ -105,6 +110,7 @@ export default function HistorialCotizacionesFB() {
   /* ===================== RENDER ===================== */
   return (
     <div className="p-6 bg-white min-h-screen">
+      {/* Encabezado */}
       <header className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-bold text-blue-700 flex items-center gap-2">
           📑 Historial de Cotizaciones F&B
@@ -121,7 +127,7 @@ export default function HistorialCotizacionesFB() {
       <div className="flex items-center gap-2 mb-5">
         <input
           type="text"
-          placeholder="Buscar por cliente, RUT, ejecutivo, código o producto..."
+          placeholder="Buscar por cliente, RUT, ejecutivo o producto..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="border rounded px-3 py-1 w-96"
@@ -130,9 +136,9 @@ export default function HistorialCotizacionesFB() {
         {error && <span className="text-sm text-red-600">{error}</span>}
       </div>
 
-      {/* Tabla general */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm border border-zinc-300 border-collapse">
+      {/* Tabla principal */}
+      <div className="overflow-x-auto border rounded shadow-sm">
+        <table className="w-full text-sm border-collapse">
           <thead className="bg-blue-700 text-white">
             <tr>
               <th className="px-2 py-1 text-left">N° Cotización</th>
@@ -146,9 +152,12 @@ export default function HistorialCotizacionesFB() {
           </thead>
           <tbody>
             {grouped.map((g, i) => (
-              <tr key={i} className="border-b hover:bg-blue-50 transition">
+              <tr
+                key={i}
+                className="border-b hover:bg-blue-50 transition cursor-pointer"
+              >
                 <td className="px-2 py-1 font-semibold text-blue-700">
-                  {g.numero || "—"}
+                  {g.numero}
                 </td>
                 <td className="px-2 py-1">{g.fecha}</td>
                 <td className="px-2 py-1">{g.cliente}</td>
