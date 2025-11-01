@@ -13,7 +13,7 @@ export default function VentasPage() {
       color: "bg-blue-50",
     },
     {
-      href: "/ventas/historial-cotizacion",
+      href: "/ventas/historial-cotizaciones-fb",
       icon: "📜",
       title: "Historial de Cotización T. Formulario",
       desc: "Consulta las cotizaciones tipo formulario grabadas por ejecutivo y cliente.",
