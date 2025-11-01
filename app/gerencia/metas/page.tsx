@@ -1,176 +1,234 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import {
   LineChart,
   Line,
   XAxis,
   YAxis,
-  CartesianGrid,
   Tooltip,
-  Legend,
+  CartesianGrid,
   ResponsiveContainer,
+  Legend,
 } from "recharts";
-import { useState } from "react";
-import { FiAward } from "react-icons/fi";
-
-type Ejecutivo = {
-  nombre: string;
-  meta: number;
-  venta: number;
-  cumplimiento: number;
-};
 
 export default function MetasPage() {
-  // 🔹 Datos sintéticos simulando metas y ventas mensuales
-  const datosMensuales = [
-    { mes: "Ene", meta: 9000000, ventas: 8700000 },
-    { mes: "Feb", meta: 9500000, ventas: 9600000 },
-    { mes: "Mar", meta: 10000000, ventas: 9800000 },
-    { mes: "Abr", meta: 9500000, ventas: 10200000 },
-    { mes: "May", meta: 10500000, ventas: 11000000 },
-    { mes: "Jun", meta: 11000000, ventas: 10400000 },
-    { mes: "Jul", meta: 10800000, ventas: 11200000 },
-    { mes: "Ago", meta: 11200000, ventas: 11800000 },
-    { mes: "Sep", meta: 11300000, ventas: 10700000 },
-    { mes: "Oct", meta: 11500000, ventas: 12000000 },
-  ];
+  const supabase = createClientComponentClient();
 
-  // 🔹 Datos sintéticos por ejecutivo
-  const ejecutivosBase = [
-    { nombre: "Ana Díaz", meta: 9500000, venta: 10200000 },
-    { nombre: "Jorge Pérez", meta: 10000000, venta: 9600000 },
-    { nombre: "Luis Soto", meta: 9000000, venta: 9100000 },
-    { nombre: "María González", meta: 8500000, venta: 8700000 },
-    { nombre: "Carlos Rivas", meta: 9500000, venta: 8900000 },
-  ];
+  const [perfil, setPerfil] = useState<any>(null);
+  const [metas, setMetas] = useState<any[]>([]);
+  const [ventas, setVentas] = useState<any[]>([]);
+  const [mensual, setMensual] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const [hovered, setHovered] = useState<string | null>(null);
+  // 🔗 URLs oficiales publicadas como CSV
+  const SHEET_METAS =
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6eHEKLPnnwmtrSFaNvShM3zjdoJ7kr7gmaq6qK1giAXgBm4xulZ1ChS460ejlFUCfabxTect725wf/pub?gid=0&single=true&output=csv";
+  const SHEET_VENTAS =
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vQXztj-EM_OgRPoKxjRiMleVhH0QVWzG7RSpGIwqMXjUwc_9ENeOYeV9VIcoTpN45vAF3HGZlWl7f4Q/pub?gid=0&single=true&output=csv";
 
-  // 🔹 Cálculo de cumplimiento (%)
-  const dataEjecutivos: Ejecutivo[] = ejecutivosBase.map((e) => ({
-    ...e,
-    cumplimiento: Number(((e.venta / e.meta) * 100).toFixed(1)),
-  }));
+  useEffect(() => {
+    async function cargarDatos() {
+      setLoading(true);
 
-  // 🔹 Ordenar ranking (de mayor a menor cumplimiento)
-  const ranking = [...dataEjecutivos].sort(
-    (a, b) => b.cumplimiento - a.cumplimiento
-  );
+      // 1️⃣ Obtener perfil desde Supabase
+      const { data } = await supabase.auth.getSession();
+      const user = data.session?.user;
+      if (user) {
+        const { data: perfilData } = await supabase
+          .from("profiles")
+          .select("role, department, display_name")
+          .eq("id", user.id)
+          .single();
+        setPerfil(perfilData);
+      }
+
+      // 2️⃣ Cargar CSV de Metas
+      const metasRes = await fetch(SHEET_METAS);
+      const metasText = await metasRes.text();
+      const metasRows = metasText.split("\n").map((r) => r.split(","));
+      const metasHeaders = metasRows[0].map((h) => h.trim());
+      const metasBody = metasRows.slice(1);
+
+      const dataMetas = metasBody
+        .filter((r) => r[0]?.trim() !== "")
+        .map((r) => {
+          const obj: any = { ejecutivo: r[0] };
+          metasHeaders.slice(1).forEach((mes, i) => {
+            obj[mes] = parseFloat(r[i + 1]) || 0;
+          });
+          return obj;
+        });
+      setMetas(dataMetas);
+
+      // 3️⃣ Cargar CSV de Ventas
+      const ventasRes = await fetch(SHEET_VENTAS);
+      const ventasText = await ventasRes.text();
+      const ventasRows = ventasText.split("\n").map((r) => r.split(","));
+      const ventasHeaders = ventasRows[0].map((h) => h.trim());
+      const ventasBody = ventasRows.slice(1);
+
+      const dataVentas = ventasBody
+        .filter((r) => r[0]?.trim() !== "")
+        .map((r) => {
+          const obj: any = { ejecutivo: r[0] };
+          ventasHeaders.slice(1).forEach((mes, i) => {
+            obj[mes] = parseFloat(r[i + 1]) || 0;
+          });
+          return obj;
+        });
+      setVentas(dataVentas);
+
+      // 4️⃣ Calcular promedios mensuales
+      const meses = metasHeaders.slice(1);
+      const promedioMensual = meses.map((mes) => {
+        const metasMes = dataMetas.map((r) => r[mes] || 0);
+        const ventasMes = dataVentas.map((r) => r[mes] || 0);
+        const metaProm = metasMes.reduce((a, b) => a + b, 0) / (metasMes.length || 1);
+        const ventaProm = ventasMes.reduce((a, b) => a + b, 0) / (ventasMes.length || 1);
+        return {
+          mes,
+          meta: Math.round(metaProm),
+          venta: Math.round(ventaProm),
+          cumplimiento: metaProm > 0 ? Math.round((ventaProm / metaProm) * 100) : 0,
+        };
+      });
+
+      setMensual(promedioMensual);
+      setLoading(false);
+    }
+
+    cargarDatos();
+  }, []);
+
+  if (loading)
+    return (
+      <div className="p-8">
+        <p className="text-gray-500">Cargando metas y ventas reales...</p>
+      </div>
+    );
+
+  // 5️⃣ Calcular promedio total anual
+  const totalMeta = mensual.reduce((sum, m) => sum + m.meta, 0);
+  const totalVenta = mensual.reduce((sum, m) => sum + m.venta, 0);
+  const totalCumplimiento =
+    totalMeta > 0 ? Math.round((totalVenta / totalMeta) * 100) : 0;
 
   return (
     <div className="p-8">
-      <h1 className="text-3xl font-bold text-blue-900 mb-2">
-        Metas y Cumplimiento
+      <h1 className="text-3xl font-bold text-blue-900 mb-1">
+        Cumplimiento de Metas 2025
       </h1>
-      <p className="text-gray-600 mb-8">
-        Tendencia de cumplimiento mensual y desempeño por ejecutivo.
-      </p>
+      {perfil && (
+        <p className="text-gray-600 mb-6">
+          Gerencia:{" "}
+          <strong>{perfil.department?.replace("gerencia_", "").toUpperCase()}</strong>{" "}
+          — {perfil.display_name}
+        </p>
+      )}
 
-      {/* 📈 Gráfico Meta vs Ventas */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm mb-8">
-        <h2 className="text-xl font-semibold text-gray-800 mb-4">
-          Tendencia Meta vs Ventas
+      {/* === KPI principal === */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
+        <div className="bg-white p-5 border rounded-2xl shadow-sm">
+          <h3 className="text-gray-600 text-sm">Meta Total Anual</h3>
+          <p className="text-2xl font-bold text-blue-800">
+            {totalMeta.toLocaleString("es-CL")}
+          </p>
+        </div>
+        <div className="bg-white p-5 border rounded-2xl shadow-sm">
+          <h3 className="text-gray-600 text-sm">Venta Total Anual</h3>
+          <p className="text-2xl font-bold text-green-700">
+            {totalVenta.toLocaleString("es-CL")}
+          </p>
+        </div>
+        <div className="bg-white p-5 border rounded-2xl shadow-sm">
+          <h3 className="text-gray-600 text-sm">% Cumplimiento</h3>
+          <p
+            className={`text-2xl font-bold ${
+              totalCumplimiento >= 100
+                ? "text-green-600"
+                : totalCumplimiento >= 80
+                ? "text-yellow-600"
+                : "text-red-600"
+            }`}
+          >
+            {totalCumplimiento}%
+          </p>
+        </div>
+      </div>
+
+      {/* === Gráfico === */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm border mb-10">
+        <h2 className="text-lg font-semibold text-gray-700 mb-4">
+          Tendencia Meta vs Venta Promedio
         </h2>
-
         <ResponsiveContainer width="100%" height={320}>
-          <LineChart data={datosMensuales}>
-            <CartesianGrid strokeDasharray="3 3" />
+          <LineChart data={mensual}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
             <XAxis dataKey="mes" />
             <YAxis />
-            <Tooltip
-              formatter={(value: number) =>
-                `$${value.toLocaleString("es-CL")}`
-              }
-            />
+            <Tooltip />
             <Legend />
             <Line
               type="monotone"
               dataKey="meta"
-              stroke="#0033A0"
-              strokeWidth={2}
-              dot={{ r: 4 }}
-              name="Meta"
+              stroke="#1f4ed8"
+              strokeWidth={3}
+              name="Meta Promedio"
             />
             <Line
               type="monotone"
-              dataKey="ventas"
-              stroke="#00A86B"
+              dataKey="venta"
+              stroke="#16a34a"
               strokeWidth={3}
-              dot={{ r: 5 }}
-              activeDot={{ r: 7 }}
-              name="Ventas"
+              name="Venta Promedio"
             />
           </LineChart>
         </ResponsiveContainer>
       </div>
 
-      {/* 🏆 Tabla de Cumplimiento */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
-        <h2 className="text-xl font-semibold text-gray-800 mb-4">
-          Cumplimiento por Ejecutivo (último mes)
+      {/* === Tabla mensual === */}
+      <div className="bg-white border rounded-2xl shadow-sm p-6">
+        <h2 className="text-lg font-semibold text-gray-700 mb-4">
+          Cumplimiento Promedio Mensual
         </h2>
-
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="text-sm text-gray-600 border-b">
-              <th className="pb-2">Ejecutivo</th>
-              <th className="pb-2">Meta</th>
-              <th className="pb-2">Venta</th>
-              <th className="pb-2">% Cumplimiento</th>
-              <th className="pb-2 text-center">Logro</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ranking.map((e, i) => (
-              <tr
-                key={i}
-                className={`text-sm border-b hover:bg-gray-50 transition ${
-                  hovered === e.nombre ? "bg-blue-50" : ""
-                }`}
-                onMouseEnter={() => setHovered(e.nombre)}
-                onMouseLeave={() => setHovered(null)}
-              >
-                <td className="py-2">{e.nombre}</td>
-                <td className="py-2">${e.meta.toLocaleString("es-CL")}</td>
-                <td className="py-2">${e.venta.toLocaleString("es-CL")}</td>
-                <td
-                  className={`py-2 font-medium ${
-                    e.cumplimiento >= 100
-                      ? "text-green-600"
-                      : e.cumplimiento >= 90
-                      ? "text-orange-500"
-                      : "text-red-500"
-                  }`}
-                >
-                  {e.cumplimiento.toFixed(1)}%
-                </td>
-                <td className="py-2 text-center">
-                  {i === 0 ? (
-                    <FiAward
-                      className="text-yellow-500"
-                      size={20}
-                      title="🥇 1° Lugar"
-                    />
-                  ) : i === 1 ? (
-                    <FiAward
-                      className="text-gray-400"
-                      size={20}
-                      title="🥈 2° Lugar"
-                    />
-                  ) : i === 2 ? (
-                    <FiAward
-                      className="text-amber-700"
-                      size={20}
-                      title="🥉 3° Lugar"
-                    />
-                  ) : (
-                    ""
-                  )}
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 text-gray-600 border-b">
+                <th className="py-2 px-3 text-left">Mes</th>
+                <th className="py-2 px-3 text-right">Meta Promedio</th>
+                <th className="py-2 px-3 text-right">Venta Promedio</th>
+                <th className="py-2 px-3 text-right">% Cumplimiento</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {mensual.map((r, i) => (
+                <tr key={i} className="border-b hover:bg-gray-50">
+                  <td className="py-2 px-3 font-medium text-gray-800">{r.mes}</td>
+                  <td className="py-2 px-3 text-right text-gray-700">
+                    {r.meta.toLocaleString("es-CL")}
+                  </td>
+                  <td className="py-2 px-3 text-right text-gray-700">
+                    {r.venta.toLocaleString("es-CL")}
+                  </td>
+                  <td
+                    className={`py-2 px-3 text-right font-semibold ${
+                      r.cumplimiento >= 100
+                        ? "text-green-600"
+                        : r.cumplimiento >= 80
+                        ? "text-yellow-600"
+                        : "text-red-600"
+                    }`}
+                  >
+                    {r.cumplimiento}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
