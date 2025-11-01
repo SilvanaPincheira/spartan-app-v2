@@ -276,33 +276,35 @@ useEffect(() => {
       const json = await res.json();
       if (!json?.data) return;
 
-      // 🧩 Buscar cotización por número exacto
+      // 🔍 Buscar por número CTZ o código cliente
       const cotizaciones = json.data.filter(
         (r: any) =>
-          r["Número CTZ"]?.trim() === verId?.trim() ||
-          r["Número CTZ"]?.trim() === duplicarId?.trim()
+          r.numero_ctz?.trim() === verId?.trim() ||
+          r.numero_ctz?.trim() === duplicarId?.trim() ||
+          r.codigo_cliente?.trim() === verId?.trim() ||
+          r.codigo_cliente?.trim() === duplicarId?.trim()
       );
 
       if (cotizaciones.length === 0) {
-        console.warn("⚠️ No se encontró cotización para", verId || duplicarId);
+        console.warn("⚠️ No se encontró cotización para:", verId || duplicarId);
         return;
       }
 
       const primera = cotizaciones[0];
 
-      // 🧮 Mapeo completo de productos
+      // 🧮 Mapear productos
       const productos = cotizaciones.map((r: any) => {
-        const unitPrice = Number(r["Precio Unitario/Presentación"] || 0);
-        const descuento = Number(r["Descuento"] || 0);
-        const qty = Number(r["Cantidad"] || 1);
-        const kilos = Number(r["Kg"] || 0);
+        const unitPrice = Number(r.precio_unitariopresentacion || 0);
+        const descuento = Number(r.descuento || 0);
+        const qty = Number(r.cantidad || 1);
+        const kilos = Number(r.kg || 0);
 
         const precioVenta = unitPrice * (1 - descuento / 100);
         const total = kilos * qty * precioVenta;
 
         return {
-          code: r["Código Producto"] || "",
-          description: r["Descripción"] || "",
+          code: r.codigo_producto || "",
+          description: r.descripcion || "",
           kilos,
           qty,
           unitPrice,
@@ -313,27 +315,29 @@ useEffect(() => {
       });
 
       // 🧾 Construcción de la cotización cargada
+      const numeroOriginal = primera.numero_ctz || "CTZ-SINNUMERO";
+
       const nueva: QuoteData = {
         ...DEFAULT_QUOTE,
         number: duplicarId
-          ? `${primera["Número CTZ"]}-DUP`
-          : primera["Número CTZ"] || "CTZ-SINNUMERO",
-        dateISO: duplicarId ? todayISO() : primera["Fecha"] || todayISO(),
-        validity: primera["Validez"] || "10 días",
+          ? `${numeroOriginal}-DUP`
+          : numeroOriginal,
+        dateISO: duplicarId ? todayISO() : primera.fecha || todayISO(),
+        validity: primera.validez || "10 días",
         client: {
-          name: primera["Cliente"] || "",
-          rut: primera["RUT"] || "",
-          address: primera["Dirección"] || "",
-          clientCode: primera["Código Cliente"] || "",
-          condicionPago: primera["Condición Pago"] || "",
-          giro: primera["Giro"] || "",
+          name: primera.cliente || "",
+          rut: primera.rut || "",
+          address: primera.direccion || "",
+          clientCode: primera.codigo_cliente || "",
+          condicionPago: primera.condicion_pago || "",
+          giro: primera.giro || "",
         },
         issuer: {
           ...DEFAULT_QUOTE.issuer,
-          contact: primera["Ejecutivo"] || "",
-          email: primera["Email Ejecutivo"] || "",
-          phone: primera["Celular Ejecutivo"] || "",
-          paymentTerms: primera["Forma de Pago"] || "",
+          contact: primera.ejecutivo || "",
+          email: primera.email_ejecutivo || "",
+          phone: primera.celular_ejecutivo || "",
+          paymentTerms: primera.forma_de_pago || "",
         },
         items: productos,
         taxPct: 19,
@@ -346,9 +350,6 @@ useEffect(() => {
     }
   })();
 }, [verId, duplicarId]);
-
-
-  
 
   // Modo cliente
   const [clientMode, setClientMode] = useState<ClientMode>("existing");
