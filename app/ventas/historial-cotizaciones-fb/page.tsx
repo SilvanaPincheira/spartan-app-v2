@@ -81,26 +81,42 @@ export default function HistorialCotizacionesFB() {
   }, [data, search]);
 
   /* ==== Agrupar por número de cotización ==== */
-  const grouped = useMemo(() => {
-    const map = new Map<string, Cotizacion[]>();
-    for (const r of filtered) {
-      const key = r.numero_ctz || r.codigo_cliente || "SIN_NUMERO";
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(r);
-    }
-    return Array.from(map.entries()).map(([key, rows]) => {
-      const primera = rows[0];
-      return {
-        numero: primera.numero_ctz || key,
-        fecha: primera.fecha,
-        cliente: primera.cliente,
-        rut: primera.rut,
-        ejecutivo: primera.ejecutivo,
-        total: primera.total_con_iva,
-        items: rows,
-      };
-    });
-  }, [filtered]);
+const grouped = useMemo(() => {
+  const map = new Map<string, Cotizacion[]>();
+
+  for (const r of filtered) {
+    // Accedemos de forma segura usando índice string
+    const numeroCTZ =
+      (r as any)["Número CTZ"] ||
+      r.numero_ctz ||
+      (r as any)["Número Cotización"] ||
+      r.codigo_cliente ||
+      "SIN_NUMERO";
+
+    if (!map.has(numeroCTZ)) map.set(numeroCTZ, []);
+    map.get(numeroCTZ)!.push(r);
+  }
+
+  return Array.from(map.entries()).map(([key, rows]) => {
+    const primera: any = rows[0]; // usamos any solo aquí para acceder libremente
+
+    return {
+      numero:
+        primera["Número CTZ"] ||
+        primera.numero_ctz ||
+        primera["Número Cotización"] ||
+        key,
+      fecha: primera["Fecha"] || primera.fecha,
+      cliente: primera["Cliente"] || primera.cliente,
+      rut: primera["RUT"] || primera.rut,
+      ejecutivo: primera["Ejecutivo"] || primera.ejecutivo,
+      total: primera["Total (con IVA)"] || primera.total_con_iva,
+      items: rows,
+    };
+  });
+}, [filtered]);
+
+  
 
   /* ===================== RENDER ===================== */
   return (

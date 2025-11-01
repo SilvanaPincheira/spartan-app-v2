@@ -267,7 +267,6 @@ export default function CotizacionEjecutivaSheets() {
     const duplicarId = searchParams.get("duplicar");
   
    /* =================== VER / DUPLICAR =================== */
-   /* =================== VER / DUPLICAR =================== */
 useEffect(() => {
   if (!verId && !duplicarId) return;
 
@@ -277,7 +276,7 @@ useEffect(() => {
       const json = await res.json();
       if (!json?.data) return;
 
-      // 🧩 Buscar por "Número CTZ"
+      // 🧩 Buscar cotización por número exacto
       const cotizaciones = json.data.filter(
         (r: any) =>
           r["Número CTZ"]?.trim() === verId?.trim() ||
@@ -285,18 +284,19 @@ useEffect(() => {
       );
 
       if (cotizaciones.length === 0) {
-        console.warn("⚠️ No se encontró la cotización:", verId || duplicarId);
+        console.warn("⚠️ No se encontró cotización para", verId || duplicarId);
         return;
       }
 
       const primera = cotizaciones[0];
 
-      // 🧮 Mapear productos (mantiene precios, descuentos, totales)
+      // 🧮 Mapeo completo de productos
       const productos = cotizaciones.map((r: any) => {
         const unitPrice = Number(r["Precio Unitario/Presentación"] || 0);
         const descuento = Number(r["Descuento"] || 0);
         const qty = Number(r["Cantidad"] || 1);
         const kilos = Number(r["Kg"] || 0);
+
         const precioVenta = unitPrice * (1 - descuento / 100);
         const total = kilos * qty * precioVenta;
 
@@ -312,11 +312,11 @@ useEffect(() => {
         };
       });
 
-      // 🧾 Armar la nueva cotización
+      // 🧾 Construcción de la cotización cargada
       const nueva: QuoteData = {
         ...DEFAULT_QUOTE,
         number: duplicarId
-          ? `${primera["Número CTZ"]}-DUP` // conserva el original y marca duplicado
+          ? `${primera["Número CTZ"]}-DUP`
           : primera["Número CTZ"] || "CTZ-SINNUMERO",
         dateISO: duplicarId ? todayISO() : primera["Fecha"] || todayISO(),
         validity: primera["Validez"] || "10 días",
@@ -346,6 +346,7 @@ useEffect(() => {
     }
   })();
 }, [verId, duplicarId]);
+
 
   
 
