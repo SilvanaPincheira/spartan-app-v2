@@ -5,29 +5,29 @@ import Link from "next/link";
 
 /* ===================== Tipos ===================== */
 type Cotizacion = {
-  "Número CTZ"?: string;
+  ["Número CTZ"]?: string;
   Fecha?: string;
   Cliente?: string;
   RUT?: string;
-  "Código Cliente"?: string;
+  ["Código Cliente"]?: string;
   Dirección?: string;
-  "Condición Pago"?: string;
+  ["Condición Pago"]?: string;
   Giro?: string;
   Ejecutivo?: string;
-  "Email Ejecutivo"?: string;
-  "Celular Ejecutivo"?: string;
-  "Forma de Pago"?: string;
+  ["Email Ejecutivo"]?: string;
+  ["Celular Ejecutivo"]?: string;
+  ["Forma de Pago"]?: string;
   Validez?: string;
-  "Código Producto"?: string;
+  ["Código Producto"]?: string;
   Descripción?: string;
   Kg?: string;
   Cantidad?: string;
-  "Precio Unitario/Presentación"?: string;
+  ["Precio Unitario/Presentación"]?: string;
   Descuento?: string;
-  "Total Ítem"?: string;
+  ["Total Ítem"]?: string;
   Subtotal?: string;
-  "IVA (19%)"?: string;
-  "Total (con IVA)"?: string;
+  ["IVA (19%)"]?: string;
+  ["Total (con IVA)"]?: string;
 };
 
 /* ===================== Helpers ===================== */
@@ -35,10 +35,7 @@ const normalize = (s: string = "") =>
   s.normalize("NFD").replace(/\p{Diacritic}+/gu, "").toLowerCase();
 
 const money = (n?: string | number) => {
-  const num =
-    typeof n === "string"
-      ? Number(n.replace(/[^\d.-]/g, "")) || 0
-      : n || 0;
+  const num = typeof n === "string" ? Number(n.replace(/[^\d.-]/g, "")) : n || 0;
   return num.toLocaleString("es-CL", {
     style: "currency",
     currency: "CLP",
@@ -53,7 +50,7 @@ export default function HistorialCotizacionesFB() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  /* ==== Cargar datos desde API ==== */
+  /* ==== Fetch ==== */
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -61,7 +58,7 @@ export default function HistorialCotizacionesFB() {
       try {
         const res = await fetch("/api/cotizaciones-fb");
         const json = await res.json();
-        if (!json.ok) throw new Error(json.error || "Error en respuesta API");
+        if (!json?.data) throw new Error(json.error || "Error en respuesta API");
         setData(json.data);
       } catch (e: any) {
         setError(e.message || "Error cargando cotizaciones");
@@ -85,14 +82,15 @@ export default function HistorialCotizacionesFB() {
     );
   }, [data, search]);
 
-  /* ==== Agrupar por número de cotización ==== */
+  /* ==== Agrupar por Número CTZ ==== */
   const grouped = useMemo(() => {
     const map = new Map<string, Cotizacion[]>();
     for (const r of filtered) {
-      const key = r["Número CTZ"] || r["Código Cliente"] || "SIN_NUMERO";
+      const key = r["Número CTZ"] || "SIN_NUMERO";
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(r);
     }
+
     return Array.from(map.entries()).map(([key, rows]) => {
       const primera = rows[0];
       return {
@@ -110,10 +108,10 @@ export default function HistorialCotizacionesFB() {
   /* ===================== RENDER ===================== */
   return (
     <div className="p-6 bg-white min-h-screen">
-      {/* Encabezado */}
+      {/* Header */}
       <header className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-bold text-blue-700 flex items-center gap-2">
-          📑 Historial de Cotizaciones F&B
+          🧾 Historial de Cotizaciones F&B
         </h1>
         <Link
           href="/ventas/cotizacion"
@@ -132,11 +130,11 @@ export default function HistorialCotizacionesFB() {
           onChange={(e) => setSearch(e.target.value)}
           className="border rounded px-3 py-1 w-96"
         />
-        {loading && <span className="text-sm text-zinc-500">Cargando...</span>}
+        {loading && <span className="text-sm text-zinc-500">Cargando…</span>}
         {error && <span className="text-sm text-red-600">{error}</span>}
       </div>
 
-      {/* Tabla principal */}
+      {/* Tabla */}
       <div className="overflow-x-auto border rounded shadow-sm">
         <table className="w-full text-sm border-collapse">
           <thead className="bg-blue-700 text-white">
@@ -152,10 +150,7 @@ export default function HistorialCotizacionesFB() {
           </thead>
           <tbody>
             {grouped.map((g, i) => (
-              <tr
-                key={i}
-                className="border-b hover:bg-blue-50 transition cursor-pointer"
-              >
+              <tr key={i} className="border-b hover:bg-blue-50 transition">
                 <td className="px-2 py-1 font-semibold text-blue-700">
                   {g.numero}
                 </td>
@@ -167,7 +162,7 @@ export default function HistorialCotizacionesFB() {
                 <td className="px-2 py-1 text-center">
                   <Link
                     href={`/ventas/cotizacion?ver=${encodeURIComponent(
-                      g.numero || ""
+                      g.numero
                     )}`}
                     className="text-blue-600 hover:underline mr-2"
                   >
@@ -175,7 +170,7 @@ export default function HistorialCotizacionesFB() {
                   </Link>
                   <Link
                     href={`/ventas/cotizacion?duplicar=${encodeURIComponent(
-                      g.numero || ""
+                      g.numero
                     )}`}
                     className="text-emerald-600 hover:underline"
                   >
@@ -184,9 +179,13 @@ export default function HistorialCotizacionesFB() {
                 </td>
               </tr>
             ))}
-            {grouped.length === 0 && !loading && (
+
+            {!loading && grouped.length === 0 && (
               <tr>
-                <td colSpan={7} className="text-center py-4 text-zinc-500">
+                <td
+                  colSpan={7}
+                  className="text-center py-4 text-zinc-500 italic"
+                >
                   No se encontraron cotizaciones.
                 </td>
               </tr>
