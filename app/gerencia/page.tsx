@@ -16,73 +16,85 @@ export default function GerenciaPage() {
 
   const [perfil, setPerfil] = useState<any>(null);
   const [cumplimientoMetas, setCumplimientoMetas] = useState<string>("...");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function cargarCumplimiento() {
-      // 1️⃣ Obtener sesión y perfil
-      const { data } = await supabase.auth.getSession();
-      const user = data.session?.user;
-      if (!user) return;
+      try {
+        setLoading(true);
 
-      const { data: perfilData } = await supabase
-        .from("profiles")
-        .select("display_name, department, email")
-        .eq("id", user.id)
-        .single();
+        // === 1️⃣ Sesión y perfil ===
+        const { data } = await supabase.auth.getSession();
+        const user = data.session?.user;
+        if (!user) return;
 
-      setPerfil(perfilData);
+        const { data: perfilData } = await supabase
+          .from("profiles")
+          .select("display_name, department, email")
+          .eq("id", user.id)
+          .single();
 
-      // 2️⃣ URLs públicas del CSV
-      const metasURL =
-        "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6eHEKLPnnwmtrSFaNvShM3zjdoJ7kr7gmaq6qK1giAXgBm4xulZ1ChS460ejlFUCfabxTect725wf/pub?gid=0&single=true&output=csv";
-      const ventasURL =
-        "https://docs.google.com/spreadsheets/d/e/2PACX-1vQXztj-EM_OgRPoKxjRiMleVhH0QVWzG7RSpGIwqMXjUwc_9ENeOYeV9VIcoTpN45vAF3HGZlWl7f4Q/pub?gid=0&single=true&output=csv";
+        if (!perfilData) return;
+        setPerfil(perfilData);
 
-      const [metasText, ventasText] = await Promise.all([
-        fetch(metasURL).then((r) => r.text()),
-        fetch(ventasURL).then((r) => r.text()),
-      ]);
+        // === 2️⃣ URLs de CSV ===
+        const metasURL =
+          "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6eHEKLPnnwmtrSFaNvShM3zjdoJ7kr7gmaq6qK1giAXgBm4xulZ1ChS460ejlFUCfabxTect725wf/pub?gid=0&single=true&output=csv";
+        const ventasURL =
+          "https://docs.google.com/spreadsheets/d/e/2PACX-1vQXztj-EM_OgRPoKxjRiMleVhH0QVWzG7RSpGIwqMXjUwc_9ENeOYeV9VIcoTpN45vAF3HGZlWl7f4Q/pub?gid=0&single=true&output=csv";
 
-      // 3️⃣ Parser CSV simple (solo comas)
-      const parse = (t: string) =>
-        t
-          .trim()
-          .split(/\r?\n/)
-          .map((line) => line.split(",").map((x) => x.trim()));
+        const [metasText, ventasText] = await Promise.all([
+          fetch(metasURL).then((r) => r.text()),
+          fetch(ventasURL).then((r) => r.text()),
+        ]);
 
-      const metas = parse(metasText);
-      const ventas = parse(ventasText);
+        // === 3️⃣ Parser CSV por comas ===
+        const parseCSV = (text: string) =>
+          text
+            .trim()
+            .split(/\r?\n/)
+            .map((line) => line.split(",").map((v) => v.trim()));
 
-      // 4️⃣ Mes actual
-      const mesActual = new Date().getMonth(); // 0 = enero, 9 = octubre
-      const header = metas[0];
+        const metas = parseCSV(metasText);
+        const ventas = parseCSV(ventasText);
 
-      // 5️⃣ Filtrar por gerencia del usuario
-      let filtroGerencia = "";
-      if (perfilData?.department === "gerencia_food") filtroGerencia = "CBORQUEZ";
-      else if (perfilData?.department === "gerencia_hc") filtroGerencia = "CAVENDANO";
-      else if (perfilData?.department === "gerencia_ind") filtroGerencia = "ADAMM";
+        if (!metas.length || !ventas.length) return;
 
-      const metasFiltradas = metas
-        .slice(1)
-        .filter((r) => r[0].toUpperCase() === filtroGerencia.toUpperCase());
-      const ventasFiltradas = ventas
-        .slice(1)
-        .filter((r) => r[0].toUpperCase() === filtroGerencia.toUpperCase());
+        // === 4️⃣ Determinar gerencia ===
+        let filtroGerencia = "";
+        if (perfilData.department === "gerencia_food") filtroGerencia = "CBORQUEZ";
+        else if (perfilData.department === "gerencia_hc") filtroGerencia = "CAVENDANO";
+        else if (perfilData.department === "gerencia_ind") filtroGerencia = "ADAMM";
 
-      // 6️⃣ Cálculo cumplimiento global (solo mes actual)
-      const totalMeta = metasFiltradas.reduce(
-        (acc, r) => acc + parseFloat(r[mesActual + 2] || "0"),
-        0
-      );
-      const totalVenta = ventasFiltradas.reduce(
-        (acc, r) => acc + parseFloat(r[mesActual + 2] || "0"),
-        0
-      );
+        // === 5️⃣ Filtrar datos por gerencia ===
+        const metasFiltradas = metas
+          .slice(1)
+          .filter((r) => r[0]?.toUpperCase() === filtroGerencia.toUpperCase());
+        const ventasFiltradas = ventas
+          .slice(1)
+          .filter((r) => r[0]?.toUpperCase() === filtroGerencia.toUpperCase());
 
-      const cumplimiento =
-        totalMeta > 0 ? ((totalVenta / totalMeta) * 100).toFixed(1) : "0";
-      setCumplimientoMetas(cumplimiento);
+        // === 6️⃣ Calcular avance de mes actual ===
+        const mesActual = new Date().getMonth(); // 0=Enero
+        let totalMeta = 0;
+        let totalVenta = 0;
+
+        metasFiltradas.forEach((r) => {
+          const val = parseFloat(r[mesActual + 2]?.replace(/\./g, "").replace(",", "."));
+          if (!isNaN(val)) totalMeta += val;
+        });
+        ventasFiltradas.forEach((r) => {
+          const val = parseFloat(r[mesActual + 2]?.replace(/\./g, "").replace(",", "."));
+          if (!isNaN(val)) totalVenta += val;
+        });
+
+        const cumplimiento =
+          totalMeta > 0 ? ((totalVenta / totalMeta) * 100).toFixed(1) : "0";
+        setCumplimientoMetas(cumplimiento);
+        setLoading(false);
+      } catch (error) {
+        console.error("Error al calcular cumplimiento:", error);
+      }
     }
 
     cargarCumplimiento();
@@ -91,7 +103,10 @@ export default function GerenciaPage() {
   const cards = [
     {
       title: "Metas",
-      value: `${cumplimientoMetas}% de avance`,
+      value:
+        cumplimientoMetas === "..."
+          ? "Cargando..."
+          : `${cumplimientoMetas}% de avance`,
       description: "Cumplimiento de metas mensuales",
       icon: <FiTarget className="text-blue-600" size={28} />,
       link: "/gerencia/metas",
@@ -138,6 +153,7 @@ export default function GerenciaPage() {
         Resumen general del área con indicadores clave de desempeño
       </p>
 
+      {/* === Tarjetas principales === */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
         {cards.map((card, i) => (
           <div
@@ -148,9 +164,7 @@ export default function GerenciaPage() {
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 {card.icon}
-                <h2 className="text-lg font-semibold text-gray-800">
-                  {card.title}
-                </h2>
+                <h2 className="text-lg font-semibold text-gray-800">{card.title}</h2>
               </div>
             </div>
             <p className="text-2xl font-bold text-blue-900">{card.value}</p>
