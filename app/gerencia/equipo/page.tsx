@@ -4,9 +4,8 @@ import { useEffect, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { FaMedal } from "react-icons/fa";
 
-/* === UTILIDADES === */
-function clean(value: any) {
-  return String(value || "").trim().replace(/\r|\n/g, "").replace(/\s+/g, " ");
+function clean(v: any) {
+  return String(v || "").trim().replace(/\r|\n/g, "").replace(/\s+/g, " ");
 }
 function parseCSV(text: string) {
   const rows = text.trim().split(/\r?\n/);
@@ -17,15 +16,16 @@ export default function EquipoPage() {
   const supabase = createClientComponentClient();
   const [perfil, setPerfil] = useState<any>(null);
   const [ranking, setRanking] = useState<any[]>([]);
-  const [clientesNuevos, setClientesNuevos] = useState<any[]>([]);
+  const [clientes, setClientes] = useState<any[]>([]);
   const [convenios, setConvenios] = useState<any[]>([]);
+  const [mostrarTodosClientes, setMostrarTodosClientes] = useState(false);
+  const [mostrarTodosConvenios, setMostrarTodosConvenios] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function cargarDatos() {
       setLoading(true);
 
-      /* === Sesión y perfil === */
       const { data } = await supabase.auth.getSession();
       const user = data.session?.user;
       if (!user) return;
@@ -39,136 +39,121 @@ export default function EquipoPage() {
       if (!perfilData) return;
       setPerfil(perfilData);
 
-      /* === Determinar filtro de gerencia === */
       let filtroGerencia = "";
       if (perfilData.department === "gerencia_food") filtroGerencia = "CBORQUEZ";
       else if (perfilData.department === "gerencia_hc") filtroGerencia = "CAVENDANO";
       else if (perfilData.department === "gerencia_ind") filtroGerencia = "ADAMM";
 
-      /* === 1️⃣ Leer hoja de Ventas === */
+      /* === 1️⃣ Ventas 2025 === */
       const ventasURL =
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vQXztj-EM_OgRPoKxjRiMleVhH0QVWzG7RSpGIwqMXjUwc_9ENeOYeV9VIcoTpN45vAF3HGZlWl7f4Q/pub?gid=0&single=true&output=csv";
       const ventasText = await fetch(ventasURL).then((r) => r.text());
       const ventasRows = parseCSV(ventasText);
+
       const ventas = ventasRows
         .slice(1)
         .filter((r) => clean(r[0]).toUpperCase() === filtroGerencia.toUpperCase());
 
       const rankingTemp = ventas.map((r) => {
-        const nombre = r[1];
-        const ventasTotales = r
+        const nombre = clean(r[1]);
+        const total = r
           .slice(2, 13)
           .reduce((acc, val) => acc + (parseFloat(val.replace(/\./g, "").replace(",", ".")) || 0), 0);
-        return { nombre, ventasTotales };
+        return { nombre, total };
       });
 
-      const totalGeneral = rankingTemp.reduce((acc, r) => acc + r.ventasTotales, 0);
+      const totalGeneral = rankingTemp.reduce((a, b) => a + b.total, 0);
       const rankingFinal = rankingTemp
-        .sort((a, b) => b.ventasTotales - a.ventasTotales)
+        .sort((a, b) => b.total - a.total)
         .slice(0, 5)
         .map((r, i) => ({
           ...r,
           posicion: i + 1,
-          porcentaje: totalGeneral > 0 ? ((r.ventasTotales / totalGeneral) * 100).toFixed(1) : "0.0",
+          porcentaje: totalGeneral > 0 ? ((r.total / totalGeneral) * 100).toFixed(1) : "0",
         }));
       setRanking(rankingFinal);
 
-      /* === 2️⃣ Leer hoja Clientes Nuevos === */
+      /* === 2️⃣ Clientes nuevos 2025 === */
       const clientesURL =
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vQp7GbIVB3BqNycXVRvoJLoZk_ZIQ60cPsmaniDY2ch9LKEV_uTsGYvaND5I5RJr7QcwlVoGmZuteTy/pub?gid=0&single=true&output=csv";
       const clientesText = await fetch(clientesURL).then((r) => r.text());
       const clientesRows = parseCSV(clientesText);
 
-      const headerClientes = clientesRows[0];
-      const idxVendedor = headerClientes.indexOf("VENDEDOR");
-      const idxTotal = headerClientes.indexOf("Total Linea");
-      const idxRUT = headerClientes.indexOf("Rut");
+      const headClientes = clientesRows[0];
+      const idxEjecutivo = headClientes.indexOf("Ejecutivo");
+      const idxTotal = headClientes.indexOf("Total Linea");
+      const idxRUT = headClientes.indexOf("Rut");
 
-      const clientes = clientesRows.slice(1).filter((r) =>
-        clean(r[idxVendedor]).toUpperCase().includes(filtroGerencia.toUpperCase())
+      const filasClientes = clientesRows.slice(1).filter((r) =>
+        clean(r[idxEjecutivo]).toUpperCase().includes(filtroGerencia.toUpperCase())
       );
 
-      const resumenPorEjecutivo: Record<
-        string,
-        { total: number; clientesUnicos: Set<string> }
-      > = {};
-
-      clientes.forEach((r) => {
-        const vendedor = clean(r[idxVendedor]);
+      const resumenClientes: Record<string, { total: number; ruts: Set<string> }> = {};
+      filasClientes.forEach((r) => {
+        const ejecutivo = clean(r[idxEjecutivo]);
         const rut = clean(r[idxRUT]);
         const total = parseFloat(r[idxTotal]?.replace(/\./g, "").replace(",", ".")) || 0;
-
-        if (!resumenPorEjecutivo[vendedor])
-          resumenPorEjecutivo[vendedor] = { total: 0, clientesUnicos: new Set() };
-
-        resumenPorEjecutivo[vendedor].total += total;
-        if (rut) resumenPorEjecutivo[vendedor].clientesUnicos.add(rut);
+        if (!resumenClientes[ejecutivo])
+          resumenClientes[ejecutivo] = { total: 0, ruts: new Set() };
+        resumenClientes[ejecutivo].total += total;
+        if (rut) resumenClientes[ejecutivo].ruts.add(rut);
       });
 
-      const resumenClientes = Object.entries(resumenPorEjecutivo)
-        .map(([vendedor, data]) => ({
-          vendedor,
-          total: data.total,
-          cantidadClientes: data.clientesUnicos.size,
-          ticketPromedio: data.clientesUnicos.size > 0 ? data.total / data.clientesUnicos.size : 0,
+      const clientesFinal = Object.entries(resumenClientes)
+        .map(([ejecutivo, data]) => ({
+          ejecutivo,
+          clientesNuevos: data.ruts.size,
+          totalVendido: data.total,
+          ticketPromedio:
+            data.ruts.size > 0 ? data.total / data.ruts.size : 0,
         }))
-        .sort((a, b) => b.cantidadClientes - a.cantidadClientes)
-        .slice(0, 5);
-      setClientesNuevos(resumenClientes);
+        .sort((a, b) => b.clientesNuevos - a.clientesNuevos);
+      setClientes(clientesFinal);
 
-      /* === 3️⃣ Leer hoja Convenios === */
-      const conveniosURL =
+      /* === 3️⃣ Convenios === */
+      const convURL =
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_PWqSrhUDslNNd3Wtt1VfXjdV9XfB4612o2qWlI-p91OKb5-1UDkkdOQuT422aJn9bMZIQhE-Ppo/pub?gid=0&single=true&output=csv";
-      const conveniosText = await fetch(conveniosURL).then((r) => r.text());
-      const conveniosRows = parseCSV(conveniosText);
+      const convText = await fetch(convURL).then((r) => r.text());
+      const convRows = parseCSV(convText);
 
-      const headerConv = conveniosRows[0];
-      const idxEmp = headerConv.indexOf("Empleado Ventas");
-      const idxActivoHasta = headerConv.indexOf("Activo hasta");
-      const idxPrecioLista = headerConv.indexOf("Precio Lista");
-      const idxPrecioEspecial = headerConv.indexOf("Precio especial");
-      const idxDesc = headerConv.indexOf("Descuento en %");
+      const headConv = convRows[0];
+      const idxEjec = headConv.indexOf("Ejecutivo");
+      const idxActivoHasta = headConv.indexOf("Activo hasta");
+      const idxLista = headConv.indexOf("Precio Lista");
+      const idxEspecial = headConv.indexOf("Precio especial");
+      const idxDesc = headConv.indexOf("Descuento en %");
 
       const hoy = new Date();
-      const conveniosFiltrados = conveniosRows.slice(1).filter((r) => {
-        const emp = clean(r[idxEmp]);
+      const resumenConv: Record<string, { cant: number; ahorro: number; sumDesc: number }> = {};
+
+      convRows.slice(1).forEach((r) => {
+        const ejecutivo = clean(r[idxEjec]);
         const hasta = new Date(r[idxActivoHasta]);
-        return (
-          clean(emp).toUpperCase().includes(filtroGerencia.toUpperCase()) &&
-          (!isNaN(hasta.getTime()) ? hasta >= hoy : true)
-        );
-      });
+        if (!ejecutivo.toUpperCase().includes(filtroGerencia.toUpperCase())) return;
+        if (!isNaN(hasta.getTime()) && hasta < hoy) return;
 
-      const resumenConv: Record<
-        string,
-        { cantidad: number; totalDesc: number; promDesc: number; sumDesc: number }
-      > = {};
-
-      conveniosFiltrados.forEach((r) => {
-        const emp = clean(r[idxEmp]);
-        const lista = parseFloat(r[idxPrecioLista]?.replace(/\./g, "").replace(",", ".")) || 0;
-        const especial = parseFloat(r[idxPrecioEspecial]?.replace(/\./g, "").replace(",", ".")) || 0;
+        const lista = parseFloat(r[idxLista]?.replace(/\./g, "").replace(",", ".")) || 0;
+        const especial = parseFloat(r[idxEspecial]?.replace(/\./g, "").replace(",", ".")) || 0;
         const desc = parseFloat(r[idxDesc]?.replace(",", ".")) || 0;
         const ahorro = lista - especial;
 
-        if (!resumenConv[emp])
-          resumenConv[emp] = { cantidad: 0, totalDesc: 0, promDesc: 0, sumDesc: 0 };
+        if (!resumenConv[ejecutivo])
+          resumenConv[ejecutivo] = { cant: 0, ahorro: 0, sumDesc: 0 };
 
-        resumenConv[emp].cantidad += 1;
-        resumenConv[emp].totalDesc += ahorro;
-        resumenConv[emp].sumDesc += desc;
+        resumenConv[ejecutivo].cant += 1;
+        resumenConv[ejecutivo].ahorro += ahorro;
+        resumenConv[ejecutivo].sumDesc += desc;
       });
 
-      const resumenConvenios = Object.entries(resumenConv)
-        .map(([emp, d]) => ({
-          emp,
-          cantidad: d.cantidad,
-          totalAhorro: d.totalDesc,
-          promedioDescuento: d.cantidad > 0 ? d.sumDesc / d.cantidad : 0,
+      const conveniosFinal = Object.entries(resumenConv)
+        .map(([ejecutivo, d]) => ({
+          ejecutivo,
+          cantidad: d.cant,
+          promedioDescuento: d.cant > 0 ? d.sumDesc / d.cant : 0,
+          ahorroTotal: d.ahorro,
         }))
-        .sort((a, b) => b.cantidad - a.cantidad)
-        .slice(0, 5);
-      setConvenios(resumenConvenios);
+        .sort((a, b) => b.cantidad - a.cantidad);
+      setConvenios(conveniosFinal);
 
       setLoading(false);
     }
@@ -178,7 +163,6 @@ export default function EquipoPage() {
 
   if (loading) return <p className="p-8 text-gray-500">Cargando datos...</p>;
 
-  /* === UI === */
   return (
     <div className="p-8">
       <h1 className="text-3xl font-bold text-blue-900 mb-2">
@@ -188,22 +172,24 @@ export default function EquipoPage() {
         Gerente: <strong>{perfil?.display_name || perfil?.email}</strong>
       </p>
 
-      {/* === 1️⃣ Top 5 Ventas === */}
+      {/* === 1️⃣ Ranking === */}
       <div className="bg-white border rounded-2xl shadow-sm p-6 mb-10">
-        <h2 className="text-lg font-semibold text-gray-700 mb-4">🏆 Top 5 Ejecutivos por Ventas Anuales</h2>
+        <h2 className="text-lg font-semibold text-gray-700 mb-4">
+          🏆 Top 5 Ejecutivos por Ventas Anuales
+        </h2>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b bg-gray-50 text-gray-600">
               <th className="text-left py-2 px-3">Pos.</th>
               <th className="text-left py-2 px-3">Ejecutivo</th>
-              <th className="text-right py-2 px-3">Venta total ($)</th>
+              <th className="text-right py-2 px-3">Ventas ($)</th>
               <th className="text-right py-2 px-3">% del total</th>
             </tr>
           </thead>
           <tbody>
             {ranking.map((r) => (
               <tr key={r.nombre} className="border-b hover:bg-gray-50">
-                <td className="py-2 px-3 font-semibold flex items-center gap-2">
+                <td className="py-2 px-3 flex items-center gap-2 font-semibold">
                   <FaMedal
                     size={18}
                     className={
@@ -219,8 +205,8 @@ export default function EquipoPage() {
                   {r.posicion}
                 </td>
                 <td className="py-2 px-3 text-gray-800 font-medium">{r.nombre}</td>
-                <td className="py-2 px-3 text-right text-blue-900 font-semibold">
-                  {r.ventasTotales.toLocaleString("es-CL")}
+                <td className="py-2 px-3 text-right text-blue-800 font-semibold">
+                  {r.total.toLocaleString("es-CL")}
                 </td>
                 <td className="py-2 px-3 text-right text-gray-600">{r.porcentaje}%</td>
               </tr>
@@ -231,7 +217,9 @@ export default function EquipoPage() {
 
       {/* === 2️⃣ Clientes nuevos === */}
       <div className="bg-white border rounded-2xl shadow-sm p-6 mb-10">
-        <h2 className="text-lg font-semibold text-gray-700 mb-4">👥 Top 5 Ejecutivos por Clientes Nuevos (RUT únicos)</h2>
+        <h2 className="text-lg font-semibold text-gray-700 mb-4">
+          👥 Clientes Nuevos 2025
+        </h2>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b bg-gray-50 text-gray-600">
@@ -242,12 +230,12 @@ export default function EquipoPage() {
             </tr>
           </thead>
           <tbody>
-            {clientesNuevos.map((c) => (
-              <tr key={c.vendedor} className="border-b hover:bg-gray-50">
-                <td className="py-2 px-3 font-medium text-gray-800">{c.vendedor}</td>
-                <td className="py-2 px-3 text-right">{c.cantidadClientes}</td>
-                <td className="py-2 px-3 text-right text-blue-800 font-semibold">
-                  {c.total.toLocaleString("es-CL")}
+            {(mostrarTodosClientes ? clientes : clientes.slice(0, 5)).map((c) => (
+              <tr key={c.ejecutivo} className="border-b hover:bg-gray-50">
+                <td className="py-2 px-3 font-medium text-gray-800">{c.ejecutivo}</td>
+                <td className="py-2 px-3 text-right">{c.clientesNuevos}</td>
+                <td className="py-2 px-3 text-right text-green-700 font-semibold">
+                  {c.totalVendido.toLocaleString("es-CL")}
                 </td>
                 <td className="py-2 px-3 text-right text-gray-700">
                   {c.ticketPromedio.toLocaleString("es-CL")}
@@ -256,11 +244,23 @@ export default function EquipoPage() {
             ))}
           </tbody>
         </table>
+        {clientes.length > 5 && (
+          <div className="text-center mt-4">
+            <button
+              onClick={() => setMostrarTodosClientes(!mostrarTodosClientes)}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
+            >
+              {mostrarTodosClientes ? "Mostrar menos" : "Mostrar todos"}
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* === 3️⃣ Convenios activos === */}
+      {/* === 3️⃣ Convenios === */}
       <div className="bg-white border rounded-2xl shadow-sm p-6">
-        <h2 className="text-lg font-semibold text-gray-700 mb-4">💰 Convenios Activos y Descuentos</h2>
+        <h2 className="text-lg font-semibold text-gray-700 mb-4">
+          💰 Convenios Activos
+        </h2>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b bg-gray-50 text-gray-600">
@@ -271,20 +271,38 @@ export default function EquipoPage() {
             </tr>
           </thead>
           <tbody>
-            {convenios.map((c) => (
-              <tr key={c.emp} className="border-b hover:bg-gray-50">
-                <td className="py-2 px-3 font-medium text-gray-800">{c.emp}</td>
+            {(mostrarTodosConvenios ? convenios : convenios.slice(0, 5)).map((c) => (
+              <tr key={c.ejecutivo} className="border-b hover:bg-gray-50">
+                <td className="py-2 px-3 font-medium text-gray-800">{c.ejecutivo}</td>
                 <td className="py-2 px-3 text-right">{c.cantidad}</td>
-                <td className="py-2 px-3 text-right text-orange-600 font-semibold">
+                <td
+                  className={`py-2 px-3 text-right font-semibold ${
+                    c.promedioDescuento > 20
+                      ? "text-red-600"
+                      : c.promedioDescuento < 10
+                      ? "text-green-600"
+                      : "text-orange-500"
+                  }`}
+                >
                   {c.promedioDescuento.toFixed(1)}%
                 </td>
-                <td className="py-2 px-3 text-right text-green-700 font-semibold">
-                  {c.totalAhorro.toLocaleString("es-CL")}
+                <td className="py-2 px-3 text-right text-blue-800 font-semibold">
+                  {c.ahorroTotal.toLocaleString("es-CL")}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+        {convenios.length > 5 && (
+          <div className="text-center mt-4">
+            <button
+              onClick={() => setMostrarTodosConvenios(!mostrarTodosConvenios)}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
+            >
+              {mostrarTodosConvenios ? "Mostrar menos" : "Mostrar todos"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
