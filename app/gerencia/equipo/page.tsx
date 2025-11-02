@@ -39,7 +39,7 @@ export default function EquipoPage() {
 
       // === URLs Google Sheets ===
       const ventasURL =
-        "https://docs.google.com/spreadsheets/d/e/2PACX-1vQXztj-EM_OgRPoKxjRiMleVhH0QVWzG7RSpGIwqMXjUwc_9ENeOYeV9VIcoTpN45vAF3HGZlWl7f4Q/pub?gid=0&single=true&output=csv";
+        "https://docs.google.com/spreadsheets/d/e/2PACX-1vQXztj-EM_OgRPoKxjRiMleVhH0QVWzG7RSpGIwqMXjUwc_9ENeOYeV9VIcoTpN45vAF3HGZlWlWl7f4Q/pub?gid=0&single=true&output=csv";
       const clientesURL =
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vQp7GbIVB3BqNycXVRvoJLoZk_ZIQ60cPsmaniDY2ch9LKEV_uTsGYvaND5I5RJr7QcwlVoGmZuteTy/pub?gid=0&single=true&output=csv";
       const conveniosURL =
@@ -98,14 +98,14 @@ export default function EquipoPage() {
       setTopEjecutivos(ordenados);
 
       /* ---------------------------
-         CLIENTES NUEVOS (Código SN)
+         CLIENTES NUEVOS (Código SN + Total Linea)
       --------------------------- */
       const cRows = parseCSV(clientesText);
       const cHeaders = cRows[0].map(normalize);
       const cIdxGerencia = cHeaders.indexOf("gerencia");
       const cIdxEjecutivo = cHeaders.indexOf("ejecutivo");
-      const cIdxCodigoSN = cHeaders.indexOf("código sn");
-      const cIdxTotal = cHeaders.indexOf("total linea");
+      const cIdxCodigoSN = cHeaders.findIndex((h) => h.includes("código sn"));
+      const cIdxTotal = cHeaders.findIndex((h) => h.includes("total linea"));
 
       const cFiltradas = cRows.slice(1).filter(
         (r) =>
@@ -121,26 +121,27 @@ export default function EquipoPage() {
       cFiltradas.forEach((r) => {
         const ejecutivo = r[cIdxEjecutivo];
         const codigo = r[cIdxCodigoSN];
-        const total = parseFloat(r[cIdxTotal]?.replace(/\./g, "").replace(",", ".")) || 0;
+        const total = parseFloat(
+          (r[cIdxTotal] || "0").replace(/\./g, "").replace(",", ".")
+        ) || 0;
+
         if (!mapClientes.has(ejecutivo))
           mapClientes.set(ejecutivo, { codigos: new Set(), total: 0 });
         mapClientes.get(ejecutivo)!.codigos.add(codigo);
         mapClientes.get(ejecutivo)!.total += total;
       });
 
-      const clientesArray = Array.from(mapClientes.entries()).map(
-        ([ejecutivo, d]) => ({
-          ejecutivo,
-          clientes: d.codigos.size,
-          total: d.total,
-          ticketProm: d.codigos.size ? d.total / d.codigos.size : 0,
-        })
-      );
+      const clientesArray = Array.from(mapClientes.entries()).map(([ejecutivo, d]) => ({
+        ejecutivo,
+        clientes: d.codigos.size,
+        total: d.total,
+        ticketProm: d.codigos.size ? d.total / d.codigos.size : 0,
+      }));
 
       setClientesNuevos(clientesArray);
 
       /* ---------------------------
-         CONVENIOS ACTIVOS
+         CONVENIOS ACTIVOS (Monto descontado)
       --------------------------- */
       const convRows = parseCSV(conveniosText);
       const convHeaders = convRows[0].map(normalize);
@@ -157,7 +158,7 @@ export default function EquipoPage() {
 
       const mapConv = new Map<
         string,
-        { nombres: Set<string>; descuentos: number[]; ahorro: number }
+        { nombres: Set<string>; descuentos: number[]; descuentoTotal: number }
       >();
 
       convFiltradas.forEach((r) => {
@@ -167,10 +168,10 @@ export default function EquipoPage() {
         const pl = parseFloat(r[plIdx]?.replace(/\./g, "")) || 0;
         const pe = parseFloat(r[peIdx]?.replace(/\./g, "")) || 0;
         if (!mapConv.has(ejecutivo))
-          mapConv.set(ejecutivo, { nombres: new Set(), descuentos: [], ahorro: 0 });
+          mapConv.set(ejecutivo, { nombres: new Set(), descuentos: [], descuentoTotal: 0 });
         mapConv.get(ejecutivo)!.nombres.add(nombre);
         mapConv.get(ejecutivo)!.descuentos.push(desc);
-        mapConv.get(ejecutivo)!.ahorro += pl - pe;
+        mapConv.get(ejecutivo)!.descuentoTotal += pl - pe;
       });
 
       const convArray = Array.from(mapConv.entries()).map(([ejecutivo, d]) => ({
@@ -182,7 +183,7 @@ export default function EquipoPage() {
                 d.descuentos.reduce((a, b) => a + b, 0) / d.descuentos.length
               ).toFixed(1)
             : "0.0",
-        ahorro: d.ahorro,
+        descuentoTotal: d.descuentoTotal,
       }));
 
       setConvenios(convArray);
@@ -294,7 +295,7 @@ export default function EquipoPage() {
                 <th className="text-left py-2 px-4">Ejecutivo</th>
                 <th className="text-right py-2 px-4">Convenios activos</th>
                 <th className="text-right py-2 px-4">Prom. descuento (%)</th>
-                <th className="text-right py-2 px-4">Ahorro total ($)</th>
+                <th className="text-right py-2 px-4">Monto descontado ($)</th>
               </tr>
             </thead>
             <tbody>
@@ -306,8 +307,8 @@ export default function EquipoPage() {
                   <td className="py-2 px-4">{e.ejecutivo}</td>
                   <td className="py-2 px-4 text-right">{e.convenios}</td>
                   <td className="py-2 px-4 text-right">{e.promDesc}%</td>
-                  <td className="py-2 px-4 text-right text-green-700 font-medium">
-                    {e.ahorro.toLocaleString("es-CL")}
+                  <td className="py-2 px-4 text-right text-red-600 font-medium">
+                    {e.descuentoTotal.toLocaleString("es-CL")}
                   </td>
                 </tr>
               ))}
@@ -324,3 +325,4 @@ export default function EquipoPage() {
     </div>
   );
 }
+
