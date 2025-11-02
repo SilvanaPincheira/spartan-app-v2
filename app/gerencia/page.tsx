@@ -26,12 +26,11 @@ export default function GerenciaPage() {
   const supabase = createClientComponentClient();
 
   const [perfil, setPerfil] = useState<any>(null);
-  const [cumplimientoMetas, setCumplimientoMetas] = useState<number | null>(
-    null
-  );
+  const [cumplimientoMetas, setCumplimientoMetas] = useState<number | null>(null);
+  const [totalEjecutivos, setTotalEjecutivos] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
-  /* === CARGA DE PERFIL Y DATOS === */
+  /* === CARGA DE DATOS === */
   useEffect(() => {
     async function cargarDatos() {
       setLoading(true);
@@ -41,7 +40,7 @@ export default function GerenciaPage() {
       const user = data.session?.user;
       if (!user) return;
 
-      // 2️⃣ Perfil de Supabase
+      // 2️⃣ Perfil Supabase
       const { data: perfilData } = await supabase
         .from("profiles")
         .select("display_name, department, email, role")
@@ -51,19 +50,27 @@ export default function GerenciaPage() {
       if (!perfilData) return;
       setPerfil(perfilData);
 
-      // 3️⃣ Filtro de gerencia
+      // 3️⃣ Mapeo de gerencia
       let filtroGerencia = "";
       if (perfilData.department === "gerencia_food") filtroGerencia = "CBORQUEZ";
       else if (perfilData.department === "gerencia_hc") filtroGerencia = "CAVENDANO";
       else if (perfilData.department === "gerencia_ind") filtroGerencia = "ADAMM";
 
-      // 4️⃣ URLs de Google Sheets
+      /* === Cargar ejecutivos desde Supabase === */
+      const { count: totalEj } = await supabase
+        .from("ejecutivos")
+        .select("*", { count: "exact", head: true })
+        .eq("gerencia", filtroGerencia)
+        .eq("activo", true);
+
+      setTotalEjecutivos(totalEj || 0);
+
+      /* === Cargar cumplimiento de metas === */
       const metasURL =
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6eHEKLPnnwmtrSFaNvShM3zjdoJ7kr7gmaq6qK1giAXgBm4xulZ1ChS460ejlFUCfabxTect725wf/pub?gid=0&single=true&output=csv";
       const ventasURL =
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vQXztj-EM_OgRPoKxjRiMleVhH0QVWzG7RSpGIwqMXjUwc_9ENeOYeV9VIcoTpN45vAF3HGZlWl7f4Q/pub?gid=0&single=true&output=csv";
 
-      // 5️⃣ Descargar hojas
       const [metasText, ventasText] = await Promise.all([
         fetch(metasURL).then((r) => r.text()),
         fetch(ventasURL).then((r) => r.text()),
@@ -72,7 +79,6 @@ export default function GerenciaPage() {
       const metasRows = parseCSV(metasText);
       const ventasRows = parseCSV(ventasText);
 
-      // 6️⃣ Filtrar por gerencia
       const metas = metasRows
         .slice(1)
         .filter((r) => clean(r[0]).toUpperCase() === filtroGerencia.toUpperCase());
@@ -80,7 +86,6 @@ export default function GerenciaPage() {
         .slice(1)
         .filter((r) => clean(r[0]).toUpperCase() === filtroGerencia.toUpperCase());
 
-      // 7️⃣ Calcular cumplimiento del mes actual
       const mesActual = new Date().getMonth(); // 0=Enero
       let totalMeta = 0;
       let totalVenta = 0;
@@ -117,7 +122,7 @@ export default function GerenciaPage() {
     return "text-red-600";
   };
 
-  /* === TARJETAS PRINCIPALES === */
+  /* === TARJETAS === */
   const cards = [
     {
       title: "Metas",
@@ -132,9 +137,12 @@ export default function GerenciaPage() {
     },
     {
       title: "Equipo",
-      value: "7 ejecutivos activos",
+      value:
+        totalEjecutivos !== null
+          ? `${totalEjecutivos} ejecutivos activos`
+          : "Cargando...",
       colorClass: "text-gray-800",
-      description: "Rendimiento y ventas por ejecutivo",
+      description: "Miembros del equipo bajo tu gerencia",
       icon: <FiUsers className="text-green-600" size={28} />,
       link: "/gerencia/equipo",
     },
@@ -142,7 +150,7 @@ export default function GerenciaPage() {
       title: "Clientes",
       value: "243 activos / 38 inactivos",
       colorClass: "text-gray-800",
-      description: "Clientes nuevos y con precios especiales",
+      description: "Clientes nuevos y frecuentes",
       icon: <FiBarChart2 className="text-orange-500" size={28} />,
       link: "/gerencia/clientes",
     },
@@ -158,7 +166,7 @@ export default function GerenciaPage() {
       title: "Rendimiento",
       value: "Margen total: 18.2%",
       colorClass: "text-gray-800",
-      description: "Análisis financiero y eficiencia del área",
+      description: "Eficiencia general del área",
       icon: <FiTrendingUp className="text-emerald-600" size={28} />,
       link: "/gerencia/rendimiento",
     },
@@ -167,7 +175,6 @@ export default function GerenciaPage() {
   /* === INTERFAZ === */
   return (
     <div className="p-8">
-      {/* === Encabezado === */}
       <h1 className="text-3xl font-bold text-blue-900 mb-2">
         Panel Gerencial —{" "}
         {perfil?.department
