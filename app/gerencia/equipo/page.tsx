@@ -10,6 +10,9 @@ export default function EquipoPage() {
   const [topEjecutivos, setTopEjecutivos] = useState<any[]>([]);
   const [clientesNuevos, setClientesNuevos] = useState<any[]>([]);
   const [convenios, setConvenios] = useState<any[]>([]);
+  const [mostrarTodosTop, setMostrarTodosTop] = useState(false);
+  const [mostrarTodosClientes, setMostrarTodosClientes] = useState(false);
+  const [mostrarTodosConvenios, setMostrarTodosConvenios] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -28,163 +31,161 @@ export default function EquipoPage() {
 
       setPerfil(perfilData);
 
-      // === Gerencia según usuario ===
+      // === Determinar gerencia ===
       let filtroGerencia = "";
       if (perfilData?.department === "gerencia_food") filtroGerencia = "CBORQUEZ";
       else if (perfilData?.department === "gerencia_hc") filtroGerencia = "CAVENDANO";
       else if (perfilData?.department === "gerencia_ind") filtroGerencia = "ADAMM";
 
       // === URLs Google Sheets ===
+      const ventasURL =
+        "https://docs.google.com/spreadsheets/d/e/2PACX-1vQXztj-EM_OgRPoKxjRiMleVhH0QVWzG7RSpGIwqMXjUwc_9ENeOYeV9VIcoTpN45vAF3HGZlWl7f4Q/pub?gid=0&single=true&output=csv";
       const clientesURL =
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vQp7GbIVB3BqNycXVRvoJLoZk_ZIQ60cPsmaniDY2ch9LKEV_uTsGYvaND5I5RJr7QcwlVoGmZuteTy/pub?gid=0&single=true&output=csv";
       const conveniosURL =
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_PWqSrhUDslNNd3Wtt1VfXjdV9XfB4612o2qWlI-p91OKb5-1UDkkdOQuT422aJn9bMZIQhE-Ppo/pub?gid=0&single=true&output=csv";
-      const ventasURL =
-        "https://docs.google.com/spreadsheets/d/e/2PACX-1vQXztj-EM_OgRPoKxjRiMleVhH0QVWzG7RSpGIwqMXjUwc_9ENeOYeV9VIcoTpN45vAF3HGZlWl7f4Q/pub?gid=0&single=true&output=csv";
 
-      const [clientesText, conveniosText, ventasText] = await Promise.all([
+      const [ventasText, clientesText, conveniosText] = await Promise.all([
+        fetch(ventasURL).then((r) => r.text()),
         fetch(clientesURL).then((r) => r.text()),
         fetch(conveniosURL).then((r) => r.text()),
-        fetch(ventasURL).then((r) => r.text()),
       ]);
 
-      const parseCSV = (text: string) =>
-        text
+      const parseCSV = (t: string) =>
+        t
           .trim()
           .split(/\r?\n/)
           .map((row) => row.split(",").map((v) => v.trim()));
 
-      const clientesRows = parseCSV(clientesText);
-      const conveniosRows = parseCSV(conveniosText);
+      const normalize = (txt: string) =>
+        txt.toLowerCase().trim().replace(/\s+/g, " ");
+
+      /* ---------------------------
+         TOP 5 EJECUTIVOS
+      --------------------------- */
       const ventasRows = parseCSV(ventasText);
+      const vHeaders = ventasRows[0].map(normalize);
+      const vIdxGerencia = vHeaders.indexOf("gerencia");
+      const vIdxEjecutivo = vHeaders.indexOf("ejecutivo");
 
-      const normalizeHeaders = (headers: string[]) =>
-        headers.map((h) => h.toLowerCase().trim());
-
-      /* ===============================
-         CLIENTES NUEVOS
-      =============================== */
-      const clientesHeader = normalizeHeaders(clientesRows[0]);
-      const idxGerencia = clientesHeader.indexOf("gerencia");
-      const idxEjecutivo = clientesHeader.indexOf("ejecutivo");
-      const idxRut = clientesHeader.indexOf("rut");
-      const idxTotal = clientesHeader.indexOf("total linea");
-
-      const clientesFiltrados = clientesRows.slice(1).filter(
-        (r) =>
-          r[idxGerencia] &&
-          r[idxGerencia].trim().toUpperCase() === filtroGerencia.toUpperCase()
-      );
-
-      const clientesPorEjecutivo: Record<
-        string,
-        { ruts: Set<string>; total: number }
-      > = {};
-
-      clientesFiltrados.forEach((r) => {
-        const ejecutivo = r[idxEjecutivo] || "";
-        const rut = r[idxRut] || "";
-        const total = parseFloat(r[idxTotal]?.replace(/\./g, "")) || 0;
-
-        if (!clientesPorEjecutivo[ejecutivo]) {
-          clientesPorEjecutivo[ejecutivo] = { ruts: new Set(), total: 0 };
-        }
-
-        clientesPorEjecutivo[ejecutivo].ruts.add(rut);
-        clientesPorEjecutivo[ejecutivo].total += total;
-      });
-
-      const clientesArray = Object.entries(clientesPorEjecutivo).map(
-        ([ejecutivo, datos]) => ({
-          ejecutivo,
-          clientes: datos.ruts.size,
-          total: datos.total,
-          ticketPromedio: datos.ruts.size ? datos.total / datos.ruts.size : 0,
-        })
-      );
-
-      /* ===============================
-         CONVENIOS (por Nombre SN único)
-      =============================== */
-      const conveniosHeader = normalizeHeaders(conveniosRows[0]);
-      const cIdxGerencia = conveniosHeader.indexOf("gerencia");
-      const cIdxEjecutivo = conveniosHeader.indexOf("ejecutivo");
-      const cIdxNombre = conveniosHeader.indexOf("nombre sn");
-      const cIdxDesc = conveniosHeader.indexOf("descuento en %");
-      const cIdxPL = conveniosHeader.indexOf("precio lista");
-      const cIdxPE = conveniosHeader.indexOf("precio especial");
-
-      const conveniosFiltrados = conveniosRows.slice(1).filter(
-        (r) =>
-          r[cIdxGerencia] &&
-          r[cIdxGerencia].trim().toUpperCase() === filtroGerencia.toUpperCase()
-      );
-
-      const conveniosPorEjecutivo: Record<
-        string,
-        { clientesSN: Set<string>; descuentos: number[]; ahorro: number }
-      > = {};
-
-      conveniosFiltrados.forEach((r) => {
-        const ejecutivo = r[cIdxEjecutivo] || "";
-        const clienteSN = r[cIdxNombre] || "";
-        const desc = parseFloat(r[cIdxDesc]?.replace(",", ".")) || 0;
-        const pl = parseFloat(r[cIdxPL]?.replace(/\./g, "")) || 0;
-        const pe = parseFloat(r[cIdxPE]?.replace(/\./g, "")) || 0;
-
-        if (!conveniosPorEjecutivo[ejecutivo]) {
-          conveniosPorEjecutivo[ejecutivo] = {
-            clientesSN: new Set(),
-            descuentos: [],
-            ahorro: 0,
-          };
-        }
-
-        conveniosPorEjecutivo[ejecutivo].clientesSN.add(clienteSN);
-        conveniosPorEjecutivo[ejecutivo].descuentos.push(desc);
-        conveniosPorEjecutivo[ejecutivo].ahorro += pl - pe;
-      });
-
-      const conveniosArray = Object.entries(conveniosPorEjecutivo).map(
-        ([ejecutivo, datos]) => ({
-          ejecutivo,
-          convenios: datos.clientesSN.size,
-          promDesc:
-            datos.descuentos.length > 0
-              ? (
-                  datos.descuentos.reduce((a, b) => a + b, 0) /
-                  datos.descuentos.length
-                ).toFixed(1)
-              : "0.0",
-          ahorro: datos.ahorro,
-        })
-      );
-
-      /* ===============================
-         TOP 5 EJECUTIVOS (por Ventas)
-      =============================== */
-      const ventasHeader = normalizeHeaders(ventasRows[0]);
-      const vIdxGerencia = ventasHeader.indexOf("gerencia");
-      const vIdxEjecutivo = ventasHeader.indexOf("ejecutivo");
-
+      const mesActual = new Date().getMonth(); // 0-11
       const ventasFiltradas = ventasRows.slice(1).filter(
         (r) =>
           r[vIdxGerencia] &&
-          r[vIdxGerencia].trim().toUpperCase() === filtroGerencia.toUpperCase()
+          r[vIdxGerencia].toUpperCase() === filtroGerencia.toUpperCase()
       );
 
-      const top = ventasFiltradas.map((r) => {
+      const totales = ventasFiltradas.map((r) => {
         const ejecutivo = r[vIdxEjecutivo];
-        const total = r.slice(2, 14).reduce(
-          (acc, val) => acc + (parseFloat(val.replace(/\./g, "")) || 0),
-          0
-        );
+        const total = r
+          .slice(2, 14)
+          .slice(0, mesActual + 1)
+          .reduce(
+            (acc, v) => acc + (parseFloat(v.replace(/\./g, "").replace(",", ".")) || 0),
+            0
+          );
         return { ejecutivo, total };
       });
 
-      setTopEjecutivos(top.sort((a, b) => b.total - a.total).slice(0, 5));
+      const totalGeneral = totales.reduce((a, b) => a + b.total, 0);
+      const ordenados = totales
+        .sort((a, b) => b.total - a.total)
+        .map((e) => ({
+          ...e,
+          participacion: totalGeneral ? (e.total / totalGeneral) * 100 : 0,
+        }));
+
+      setTopEjecutivos(ordenados);
+
+      /* ---------------------------
+         CLIENTES NUEVOS (Código SN)
+      --------------------------- */
+      const cRows = parseCSV(clientesText);
+      const cHeaders = cRows[0].map(normalize);
+      const cIdxGerencia = cHeaders.indexOf("gerencia");
+      const cIdxEjecutivo = cHeaders.indexOf("ejecutivo");
+      const cIdxCodigoSN = cHeaders.indexOf("código sn");
+      const cIdxTotal = cHeaders.indexOf("total linea");
+
+      const cFiltradas = cRows.slice(1).filter(
+        (r) =>
+          r[cIdxGerencia] &&
+          r[cIdxGerencia].toUpperCase() === filtroGerencia.toUpperCase()
+      );
+
+      const mapClientes = new Map<
+        string,
+        { codigos: Set<string>; total: number }
+      >();
+
+      cFiltradas.forEach((r) => {
+        const ejecutivo = r[cIdxEjecutivo];
+        const codigo = r[cIdxCodigoSN];
+        const total = parseFloat(r[cIdxTotal]?.replace(/\./g, "").replace(",", ".")) || 0;
+        if (!mapClientes.has(ejecutivo))
+          mapClientes.set(ejecutivo, { codigos: new Set(), total: 0 });
+        mapClientes.get(ejecutivo)!.codigos.add(codigo);
+        mapClientes.get(ejecutivo)!.total += total;
+      });
+
+      const clientesArray = Array.from(mapClientes.entries()).map(
+        ([ejecutivo, d]) => ({
+          ejecutivo,
+          clientes: d.codigos.size,
+          total: d.total,
+          ticketProm: d.codigos.size ? d.total / d.codigos.size : 0,
+        })
+      );
+
       setClientesNuevos(clientesArray);
-      setConvenios(conveniosArray);
+
+      /* ---------------------------
+         CONVENIOS ACTIVOS
+      --------------------------- */
+      const convRows = parseCSV(conveniosText);
+      const convHeaders = convRows[0].map(normalize);
+      const gIdx = convHeaders.indexOf("gerencia");
+      const eIdx = convHeaders.indexOf("ejecutivo");
+      const nIdx = convHeaders.indexOf("nombre sn");
+      const dIdx = convHeaders.indexOf("descuento en %");
+      const plIdx = convHeaders.indexOf("precio lista");
+      const peIdx = convHeaders.indexOf("precio especial");
+
+      const convFiltradas = convRows.slice(1).filter(
+        (r) => r[gIdx] && r[gIdx].toUpperCase() === filtroGerencia.toUpperCase()
+      );
+
+      const mapConv = new Map<
+        string,
+        { nombres: Set<string>; descuentos: number[]; ahorro: number }
+      >();
+
+      convFiltradas.forEach((r) => {
+        const ejecutivo = r[eIdx];
+        const nombre = r[nIdx];
+        const desc = parseFloat(r[dIdx]?.replace(",", ".")) || 0;
+        const pl = parseFloat(r[plIdx]?.replace(/\./g, "")) || 0;
+        const pe = parseFloat(r[peIdx]?.replace(/\./g, "")) || 0;
+        if (!mapConv.has(ejecutivo))
+          mapConv.set(ejecutivo, { nombres: new Set(), descuentos: [], ahorro: 0 });
+        mapConv.get(ejecutivo)!.nombres.add(nombre);
+        mapConv.get(ejecutivo)!.descuentos.push(desc);
+        mapConv.get(ejecutivo)!.ahorro += pl - pe;
+      });
+
+      const convArray = Array.from(mapConv.entries()).map(([ejecutivo, d]) => ({
+        ejecutivo,
+        convenios: d.nombres.size,
+        promDesc:
+          d.descuentos.length > 0
+            ? (
+                d.descuentos.reduce((a, b) => a + b, 0) / d.descuentos.length
+              ).toFixed(1)
+            : "0.0",
+        ahorro: d.ahorro,
+      }));
+
+      setConvenios(convArray);
       setLoading(false);
     }
 
@@ -196,46 +197,55 @@ export default function EquipoPage() {
   return (
     <div className="p-8">
       <h1 className="text-3xl font-bold text-blue-900 mb-6">
-        Equipo — {perfil?.email}
+        Equipo — {perfil?.display_name}
       </h1>
 
       {/* === TOP 5 === */}
-      <h2 className="text-lg font-semibold mb-3 text-gray-800">
-        🏆 Top 5 Ejecutivos por Ventas Anuales
-      </h2>
-      {topEjecutivos.length === 0 ? (
-        <p className="text-gray-500 mb-6">No hay datos disponibles.</p>
-      ) : (
-        <div className="bg-white border rounded-xl shadow-sm mb-10">
+      <section className="mb-10">
+        <h2 className="text-lg font-semibold text-gray-800 mb-3">
+          🏆 Top 5 Ejecutivos — Ventas acumuladas hasta mes actual
+        </h2>
+        <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b text-gray-600">
               <tr>
                 <th className="text-left py-2 px-4">Ejecutivo</th>
-                <th className="text-right py-2 px-4">Total vendido ($)</th>
+                <th className="text-right py-2 px-4">Venta ($)</th>
+                <th className="text-right py-2 px-4">% Participación</th>
               </tr>
             </thead>
             <tbody>
-              {topEjecutivos.map((e, i) => (
+              {(mostrarTodosTop
+                ? topEjecutivos
+                : topEjecutivos.slice(0, 5)
+              ).map((e, i) => (
                 <tr key={i} className="border-b hover:bg-gray-50">
                   <td className="py-2 px-4">{e.ejecutivo}</td>
-                  <td className="py-2 px-4 text-right text-green-600">
+                  <td className="py-2 px-4 text-right text-green-700 font-medium">
                     {e.total.toLocaleString("es-CL")}
+                  </td>
+                  <td className="py-2 px-4 text-right">
+                    {e.participacion.toFixed(1)}%
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      )}
+        <button
+          onClick={() => setMostrarTodosTop(!mostrarTodosTop)}
+          className="mt-3 text-blue-700 hover:underline"
+        >
+          {mostrarTodosTop ? "Mostrar menos" : "Mostrar todos"}
+        </button>
+      </section>
 
       {/* === CLIENTES NUEVOS === */}
-      <h2 className="text-lg font-semibold mb-3 text-gray-800">
-        👥 Clientes nuevos (RUT únicos)
-      </h2>
-      {clientesNuevos.length === 0 ? (
-        <p className="text-gray-500 mb-6">No hay clientes nuevos registrados.</p>
-      ) : (
-        <div className="bg-white border rounded-xl shadow-sm mb-10">
+      <section className="mb-10">
+        <h2 className="text-lg font-semibold text-gray-800 mb-3">
+          👥 Clientes nuevos (por Código SN)
+        </h2>
+        <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b text-gray-600">
               <tr>
@@ -246,31 +256,38 @@ export default function EquipoPage() {
               </tr>
             </thead>
             <tbody>
-              {clientesNuevos.map((e, i) => (
+              {(mostrarTodosClientes
+                ? clientesNuevos
+                : clientesNuevos.slice(0, 5)
+              ).map((e, i) => (
                 <tr key={i} className="border-b hover:bg-gray-50">
                   <td className="py-2 px-4">{e.ejecutivo}</td>
                   <td className="py-2 px-4 text-right">{e.clientes}</td>
-                  <td className="py-2 px-4 text-right text-green-600">
+                  <td className="py-2 px-4 text-right text-green-700 font-medium">
                     {e.total.toLocaleString("es-CL")}
                   </td>
                   <td className="py-2 px-4 text-right">
-                    {e.ticketPromedio.toLocaleString("es-CL")}
+                    {e.ticketProm.toLocaleString("es-CL")}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      )}
+        <button
+          onClick={() => setMostrarTodosClientes(!mostrarTodosClientes)}
+          className="mt-3 text-blue-700 hover:underline"
+        >
+          {mostrarTodosClientes ? "Mostrar menos" : "Mostrar todos"}
+        </button>
+      </section>
 
       {/* === CONVENIOS === */}
-      <h2 className="text-lg font-semibold mb-3 text-gray-800">
-        💰 Convenios activos
-      </h2>
-      {convenios.length === 0 ? (
-        <p className="text-gray-500">No hay convenios activos.</p>
-      ) : (
-        <div className="bg-white border rounded-xl shadow-sm">
+      <section>
+        <h2 className="text-lg font-semibold text-gray-800 mb-3">
+          💰 Convenios activos
+        </h2>
+        <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b text-gray-600">
               <tr>
@@ -281,12 +298,15 @@ export default function EquipoPage() {
               </tr>
             </thead>
             <tbody>
-              {convenios.map((e, i) => (
+              {(mostrarTodosConvenios
+                ? convenios
+                : convenios.slice(0, 5)
+              ).map((e, i) => (
                 <tr key={i} className="border-b hover:bg-gray-50">
                   <td className="py-2 px-4">{e.ejecutivo}</td>
                   <td className="py-2 px-4 text-right">{e.convenios}</td>
                   <td className="py-2 px-4 text-right">{e.promDesc}%</td>
-                  <td className="py-2 px-4 text-right text-green-600">
+                  <td className="py-2 px-4 text-right text-green-700 font-medium">
                     {e.ahorro.toLocaleString("es-CL")}
                   </td>
                 </tr>
@@ -294,7 +314,13 @@ export default function EquipoPage() {
             </tbody>
           </table>
         </div>
-      )}
+        <button
+          onClick={() => setMostrarTodosConvenios(!mostrarTodosConvenios)}
+          className="mt-3 text-blue-700 hover:underline"
+        >
+          {mostrarTodosConvenios ? "Mostrar menos" : "Mostrar todos"}
+        </button>
+      </section>
     </div>
   );
 }
