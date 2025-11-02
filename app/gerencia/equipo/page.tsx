@@ -3,6 +3,21 @@
 import { useEffect, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
+/* === UTILIDADES === */
+function parseCSV(text: string): string[][] {
+  return text
+    .trim()
+    .split(/\r?\n/)
+    .map((row) =>
+      row.split(",").map((v) => v.trim().replace(/^"|"$/g, ""))
+    );
+}
+
+function clean(value: any) {
+  return String(value || "").trim().replace(/\r|\n/g, "").replace(/\s+/g, " ");
+}
+
+/* === COMPONENTE PRINCIPAL === */
 export default function EquipoPage() {
   const supabase = createClientComponentClient();
 
@@ -10,22 +25,23 @@ export default function EquipoPage() {
   const [topEjecutivos, setTopEjecutivos] = useState<any[]>([]);
   const [clientesNuevos, setClientesNuevos] = useState<any[]>([]);
   const [convenios, setConvenios] = useState<any[]>([]);
-  const [mostrarTodosTop, setMostrarTodosTop] = useState(false);
-  const [mostrarTodosClientes, setMostrarTodosClientes] = useState(false);
-  const [mostrarTodosConvenios, setMostrarTodosConvenios] = useState(false);
+  const [mostrarTop, setMostrarTop] = useState(false);
+  const [mostrarClientes, setMostrarClientes] = useState(false);
+  const [mostrarConvenios, setMostrarConvenios] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function cargarDatos() {
       setLoading(true);
 
+      // === Obtener sesión y perfil ===
       const { data } = await supabase.auth.getSession();
       const user = data.session?.user;
-      if (!user) return;
+      if (!user) return setLoading(false);
 
       const { data: perfilData } = await supabase
         .from("profiles")
-        .select("display_name, department, email")
+        .select("display_name, department, email, role")
         .eq("id", user.id)
         .single();
 
@@ -37,9 +53,9 @@ export default function EquipoPage() {
       else if (perfilData?.department === "gerencia_hc") filtroGerencia = "CAVENDANO";
       else if (perfilData?.department === "gerencia_ind") filtroGerencia = "ADAMM";
 
-      // === URLs Google Sheets ===
+      /* === URLs Google Sheets === */
       const ventasURL =
-        "https://docs.google.com/spreadsheets/d/e/2PACX-1vQXztj-EM_OgRPoKxjRiMleVhH0QVWzG7RSpGIwqMXjUwc_9ENeOYeV9VIcoTpN45vAF3HGZlWlWl7f4Q/pub?gid=0&single=true&output=csv";
+        "https://docs.google.com/spreadsheets/d/e/2PACX-1vQXztj-EM_OgRPoKxjRiMleVhH0QVWzG7RSpGIwqMXjUwc_9ENeOYeV9VIcoTpN45vAF3HGZlWl7f4Q/pub?gid=0&single=true&output=csv";
       const clientesURL =
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vQp7GbIVB3BqNycXVRvoJLoZk_ZIQ60cPsmaniDY2ch9LKEV_uTsGYvaND5I5RJr7QcwlVoGmZuteTy/pub?gid=0&single=true&output=csv";
       const conveniosURL =
@@ -51,142 +67,96 @@ export default function EquipoPage() {
         fetch(conveniosURL).then((r) => r.text()),
       ]);
 
-      const parseCSV = (t: string) =>
-        t
-          .trim()
-          .split(/\r?\n/)
-          .map((row) => row.split(",").map((v) => v.trim()));
-
-      const normalize = (txt: string) =>
-        txt.toLowerCase().trim().replace(/\s+/g, " ");
-
-      /* ---------------------------
-         TOP 5 EJECUTIVOS
-      --------------------------- */
       const ventasRows = parseCSV(ventasText);
-      const vHeaders = ventasRows[0].map(normalize);
-      const vIdxGerencia = vHeaders.indexOf("gerencia");
-      const vIdxEjecutivo = vHeaders.indexOf("ejecutivo");
+      const clientesRows = parseCSV(clientesText);
+      const conveniosRows = parseCSV(conveniosText);
 
+      /* === LIMPIAR Y FILTRAR === */
+      const ventas = ventasRows.slice(1).filter((r) => clean(r[0]) === filtroGerencia);
+      const clientes = clientesRows.slice(1).filter((r) => clean(r[0]) === filtroGerencia);
+      const convenios = conveniosRows.slice(1).filter((r) => clean(r[0]) === filtroGerencia);
+
+      /* ====================== TOP 5 EJECUTIVOS ====================== */
+      const meses = ventasRows[0].slice(2, 14);
       const mesActual = new Date().getMonth(); // 0-11
-      const ventasFiltradas = ventasRows.slice(1).filter(
-        (r) =>
-          r[vIdxGerencia] &&
-          r[vIdxGerencia].toUpperCase() === filtroGerencia.toUpperCase()
-      );
 
-      const totales = ventasFiltradas.map((r) => {
-        const ejecutivo = r[vIdxEjecutivo];
+      const ejecutivosTotales = ventas.map((r) => {
+        const nombre = clean(r[1]);
         const total = r
-          .slice(2, 14)
-          .slice(0, mesActual + 1)
-          .reduce(
-            (acc, v) => acc + (parseFloat(v.replace(/\./g, "").replace(",", ".")) || 0),
-            0
-          );
-        return { ejecutivo, total };
+          .slice(2, mesActual + 3)
+          .reduce((acc, v) => acc + (parseFloat(v.replace(/\./g, "").replace(",", ".")) || 0), 0);
+        return { nombre, total };
       });
 
-      const totalGeneral = totales.reduce((a, b) => a + b.total, 0);
-      const ordenados = totales
+      const totalGeneral = ejecutivosTotales.reduce((a, b) => a + b.total, 0);
+
+      const top5 = ejecutivosTotales
         .sort((a, b) => b.total - a.total)
         .map((e) => ({
           ...e,
-          participacion: totalGeneral ? (e.total / totalGeneral) * 100 : 0,
+          participacion: totalGeneral > 0 ? ((e.total / totalGeneral) * 100).toFixed(1) : "0.0",
         }));
 
-      setTopEjecutivos(ordenados);
+      setTopEjecutivos(top5);
 
-      /* ---------------------------
-         CLIENTES NUEVOS (Código SN + Total Linea)
-      --------------------------- */
-      const cRows = parseCSV(clientesText);
-      const cHeaders = cRows[0].map(normalize);
-      const cIdxGerencia = cHeaders.indexOf("gerencia");
-      const cIdxEjecutivo = cHeaders.indexOf("ejecutivo");
-      const cIdxCodigoSN = cHeaders.findIndex((h) => h.includes("código sn"));
-      const cIdxTotal = cHeaders.findIndex((h) => h.includes("total linea"));
+      /* ====================== CLIENTES NUEVOS ====================== */
+      const clientesAgrupados: Record<string, any> = {};
 
-      const cFiltradas = cRows.slice(1).filter(
-        (r) =>
-          r[cIdxGerencia] &&
-          r[cIdxGerencia].toUpperCase() === filtroGerencia.toUpperCase()
-      );
+      clientes.forEach((r) => {
+        const ejecutivo = clean(r[1]);
+        const codigoSN = clean(r[15]);
+        const totalLinea = parseFloat(r[14]?.replace(/\./g, "").replace(",", ".")) || 0;
 
-      const mapClientes = new Map<
-        string,
-        { codigos: Set<string>; total: number }
-      >();
-
-      cFiltradas.forEach((r) => {
-        const ejecutivo = r[cIdxEjecutivo];
-        const codigo = r[cIdxCodigoSN];
-        const total = parseFloat(
-          (r[cIdxTotal] || "0").replace(/\./g, "").replace(",", ".")
-        ) || 0;
-
-        if (!mapClientes.has(ejecutivo))
-          mapClientes.set(ejecutivo, { codigos: new Set(), total: 0 });
-        mapClientes.get(ejecutivo)!.codigos.add(codigo);
-        mapClientes.get(ejecutivo)!.total += total;
+        if (!clientesAgrupados[ejecutivo]) {
+          clientesAgrupados[ejecutivo] = { clientes: new Set(), total: 0 };
+        }
+        clientesAgrupados[ejecutivo].clientes.add(codigoSN);
+        clientesAgrupados[ejecutivo].total += totalLinea;
       });
 
-      const clientesArray = Array.from(mapClientes.entries()).map(([ejecutivo, d]) => ({
-        ejecutivo,
-        clientes: d.codigos.size,
-        total: d.total,
-        ticketProm: d.codigos.size ? d.total / d.codigos.size : 0,
-      }));
+      const clientesArray = Object.entries(clientesAgrupados).map(([ejecutivo, data]: any) => {
+        const totalVendido = data.total;
+        const clientesNuevos = data.clientes.size;
+        return {
+          ejecutivo,
+          clientesNuevos,
+          totalVendido,
+          ticketPromedio: clientesNuevos > 0 ? totalVendido / clientesNuevos : 0,
+        };
+      });
 
       setClientesNuevos(clientesArray);
 
-      /* ---------------------------
-         CONVENIOS ACTIVOS (Monto descontado)
-      --------------------------- */
-      const convRows = parseCSV(conveniosText);
-      const convHeaders = convRows[0].map(normalize);
-      const gIdx = convHeaders.indexOf("gerencia");
-      const eIdx = convHeaders.indexOf("ejecutivo");
-      const nIdx = convHeaders.indexOf("nombre sn");
-      const dIdx = convHeaders.indexOf("descuento en %");
-      const plIdx = convHeaders.indexOf("precio lista");
-      const peIdx = convHeaders.indexOf("precio especial");
+      /* ====================== CONVENIOS ACTIVOS ====================== */
+      const conveniosAgrupados: Record<string, any> = {};
 
-      const convFiltradas = convRows.slice(1).filter(
-        (r) => r[gIdx] && r[gIdx].toUpperCase() === filtroGerencia.toUpperCase()
-      );
+      convenios.forEach((r) => {
+        const ejecutivo = clean(r[1]);
+        const desc = parseFloat(r[9]?.replace(",", ".") || "0");
+        const precioLista = parseFloat(r[7]?.replace(/\./g, "").replace(",", ".")) || 0;
+        const precioEsp = parseFloat(r[8]?.replace(/\./g, "").replace(",", ".")) || 0;
 
-      const mapConv = new Map<
-        string,
-        { nombres: Set<string>; descuentos: number[]; descuentoTotal: number }
-      >();
-
-      convFiltradas.forEach((r) => {
-        const ejecutivo = r[eIdx];
-        const nombre = r[nIdx];
-        const desc = parseFloat(r[dIdx]?.replace(",", ".")) || 0;
-        const pl = parseFloat(r[plIdx]?.replace(/\./g, "")) || 0;
-        const pe = parseFloat(r[peIdx]?.replace(/\./g, "")) || 0;
-        if (!mapConv.has(ejecutivo))
-          mapConv.set(ejecutivo, { nombres: new Set(), descuentos: [], descuentoTotal: 0 });
-        mapConv.get(ejecutivo)!.nombres.add(nombre);
-        mapConv.get(ejecutivo)!.descuentos.push(desc);
-        mapConv.get(ejecutivo)!.descuentoTotal += pl - pe;
+        if (!conveniosAgrupados[ejecutivo]) {
+          conveniosAgrupados[ejecutivo] = { count: 0, descuentos: [], ahorro: 0 };
+        }
+        conveniosAgrupados[ejecutivo].count += 1;
+        conveniosAgrupados[ejecutivo].descuentos.push(desc);
+        conveniosAgrupados[ejecutivo].ahorro += precioLista - precioEsp;
       });
 
-      const convArray = Array.from(mapConv.entries()).map(([ejecutivo, d]) => ({
+      const conveniosArray = Object.entries(conveniosAgrupados).map(([ejecutivo, data]: any) => ({
         ejecutivo,
-        convenios: d.nombres.size,
+        convenios: data.count,
         promDesc:
-          d.descuentos.length > 0
-            ? (
-                d.descuentos.reduce((a, b) => a + b, 0) / d.descuentos.length
-              ).toFixed(1)
-            : "0.0",
-        descuentoTotal: d.descuentoTotal,
+          data.descuentos.length > 0
+            ? (data.descuentos.reduce((a: number, b: number) => a + b, 0) /
+                data.descuentos.length).toFixed(1)
+            : "0",
+        ahorro: data.ahorro,
       }));
 
-      setConvenios(convArray);
+      setConvenios(conveniosArray);
+
       setLoading(false);
     }
 
@@ -198,129 +168,136 @@ export default function EquipoPage() {
   return (
     <div className="p-8">
       <h1 className="text-3xl font-bold text-blue-900 mb-6">
-        Equipo — {perfil?.display_name}
+        Equipo — {perfil?.email}
       </h1>
 
-      {/* === TOP 5 === */}
-      <section className="mb-10">
-        <h2 className="text-lg font-semibold text-gray-800 mb-3">
-          🏆 Top 5 Ejecutivos — Ventas acumuladas hasta mes actual
+      {/* ====================== TOP 5 EJECUTIVOS ====================== */}
+      <section className="bg-white border rounded-xl shadow-sm p-6 mb-10">
+        <h2 className="text-lg font-semibold mb-4 text-yellow-700 flex items-center gap-2">
+          🏅 Top 5 Ejecutivos por Ventas Anuales
         </h2>
-        <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b text-gray-600">
-              <tr>
-                <th className="text-left py-2 px-4">Ejecutivo</th>
-                <th className="text-right py-2 px-4">Venta ($)</th>
-                <th className="text-right py-2 px-4">% Participación</th>
+            <thead>
+              <tr className="bg-gray-50 border-b text-gray-600">
+                <th className="text-left py-2 px-3">Ejecutivo</th>
+                <th className="text-right py-2 px-3">Total vendido ($)</th>
+                <th className="text-right py-2 px-3">% Participación</th>
               </tr>
             </thead>
             <tbody>
-              {(mostrarTodosTop
-                ? topEjecutivos
-                : topEjecutivos.slice(0, 5)
-              ).map((e, i) => (
-                <tr key={i} className="border-b hover:bg-gray-50">
-                  <td className="py-2 px-4">{e.ejecutivo}</td>
-                  <td className="py-2 px-4 text-right text-green-700 font-medium">
+              {(mostrarTop ? topEjecutivos : topEjecutivos.slice(0, 5)).map((e, i) => (
+                <tr key={i} className="border-b hover:bg-gray-50 transition">
+                  <td className="py-2 px-3 font-medium text-gray-800">{e.nombre}</td>
+                  <td className="py-2 px-3 text-right text-green-700 font-semibold">
                     {e.total.toLocaleString("es-CL")}
                   </td>
-                  <td className="py-2 px-4 text-right">
-                    {e.participacion.toFixed(1)}%
-                  </td>
+                  <td className="py-2 px-3 text-right">{e.participacion}%</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <button
-          onClick={() => setMostrarTodosTop(!mostrarTodosTop)}
-          className="mt-3 text-blue-700 hover:underline"
-        >
-          {mostrarTodosTop ? "Mostrar menos" : "Mostrar todos"}
-        </button>
+        {topEjecutivos.length > 5 && (
+          <div className="text-center mt-4">
+            <button
+              onClick={() => setMostrarTop(!mostrarTop)}
+              className="bg-blue-600 text-white text-sm px-4 py-2 rounded-md hover:bg-blue-700"
+            >
+              {mostrarTop ? "Mostrar menos" : "Mostrar todos"}
+            </button>
+          </div>
+        )}
       </section>
 
-      {/* === CLIENTES NUEVOS === */}
-      <section className="mb-10">
-        <h2 className="text-lg font-semibold text-gray-800 mb-3">
-          👥 Clientes nuevos (por Código SN)
+      {/* ====================== CLIENTES NUEVOS ====================== */}
+      <section className="bg-white border rounded-xl shadow-sm p-6 mb-10">
+        <h2 className="text-lg font-semibold mb-4 text-purple-700 flex items-center gap-2">
+          👥 Clientes nuevos (RUT únicos)
         </h2>
-        <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b text-gray-600">
-              <tr>
-                <th className="text-left py-2 px-4">Ejecutivo</th>
-                <th className="text-right py-2 px-4">Clientes nuevos</th>
-                <th className="text-right py-2 px-4">Total vendido ($)</th>
-                <th className="text-right py-2 px-4">Ticket promedio ($)</th>
+            <thead>
+              <tr className="bg-gray-50 border-b text-gray-600">
+                <th className="text-left py-2 px-3">Ejecutivo</th>
+                <th className="text-right py-2 px-3">Clientes nuevos</th>
+                <th className="text-right py-2 px-3">Total vendido ($)</th>
+                <th className="text-right py-2 px-3">Ticket promedio ($)</th>
               </tr>
             </thead>
             <tbody>
-              {(mostrarTodosClientes
+              {(mostrarClientes
                 ? clientesNuevos
                 : clientesNuevos.slice(0, 5)
-              ).map((e, i) => (
-                <tr key={i} className="border-b hover:bg-gray-50">
-                  <td className="py-2 px-4">{e.ejecutivo}</td>
-                  <td className="py-2 px-4 text-right">{e.clientes}</td>
-                  <td className="py-2 px-4 text-right text-green-700 font-medium">
-                    {e.total.toLocaleString("es-CL")}
+              ).map((c, i) => (
+                <tr key={i} className="border-b hover:bg-gray-50 transition">
+                  <td className="py-2 px-3 font-medium text-gray-800">{c.ejecutivo}</td>
+                  <td className="py-2 px-3 text-right">{c.clientesNuevos}</td>
+                  <td className="py-2 px-3 text-right text-green-700 font-semibold">
+                    {c.totalVendido.toLocaleString("es-CL")}
                   </td>
-                  <td className="py-2 px-4 text-right">
-                    {e.ticketProm.toLocaleString("es-CL")}
+                  <td className="py-2 px-3 text-right text-blue-700">
+                    {c.ticketPromedio.toLocaleString("es-CL")}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <button
-          onClick={() => setMostrarTodosClientes(!mostrarTodosClientes)}
-          className="mt-3 text-blue-700 hover:underline"
-        >
-          {mostrarTodosClientes ? "Mostrar menos" : "Mostrar todos"}
-        </button>
+        {clientesNuevos.length > 5 && (
+          <div className="text-center mt-4">
+            <button
+              onClick={() => setMostrarClientes(!mostrarClientes)}
+              className="bg-blue-600 text-white text-sm px-4 py-2 rounded-md hover:bg-blue-700"
+            >
+              {mostrarClientes ? "Mostrar menos" : "Mostrar todos"}
+            </button>
+          </div>
+        )}
       </section>
 
-      {/* === CONVENIOS === */}
-      <section>
-        <h2 className="text-lg font-semibold text-gray-800 mb-3">
+      {/* ====================== CONVENIOS ACTIVOS ====================== */}
+      <section className="bg-white border rounded-xl shadow-sm p-6">
+        <h2 className="text-lg font-semibold mb-4 text-amber-700 flex items-center gap-2">
           💰 Convenios activos
         </h2>
-        <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b text-gray-600">
-              <tr>
-                <th className="text-left py-2 px-4">Ejecutivo</th>
-                <th className="text-right py-2 px-4">Convenios activos</th>
-                <th className="text-right py-2 px-4">Prom. descuento (%)</th>
-                <th className="text-right py-2 px-4">Monto descontado ($)</th>
+            <thead>
+              <tr className="bg-gray-50 border-b text-gray-600">
+                <th className="text-left py-2 px-3">Ejecutivo</th>
+                <th className="text-right py-2 px-3">Convenios activos</th>
+                <th className="text-right py-2 px-3">Prom. descuento (%)</th>
+                <th className="text-right py-2 px-3">Ahorro total ($)</th>
               </tr>
             </thead>
             <tbody>
-              {(mostrarTodosConvenios
+              {(mostrarConvenios
                 ? convenios
                 : convenios.slice(0, 5)
               ).map((e, i) => (
-                <tr key={i} className="border-b hover:bg-gray-50">
-                  <td className="py-2 px-4">{e.ejecutivo}</td>
-                  <td className="py-2 px-4 text-right">{e.convenios}</td>
-                  <td className="py-2 px-4 text-right">{e.promDesc}%</td>
-                  <td className="py-2 px-4 text-right text-red-600 font-medium">
-                    {e.descuentoTotal.toLocaleString("es-CL")}
+                <tr key={i} className="border-b hover:bg-gray-50 transition">
+                  <td className="py-2 px-3 font-medium text-gray-800">{e.ejecutivo}</td>
+                  <td className="py-2 px-3 text-right">{e.convenios}</td>
+                  <td className="py-2 px-3 text-right text-orange-600">{e.promDesc}%</td>
+                  <td className="py-2 px-3 text-right text-green-700 font-semibold">
+                    {e.ahorro.toLocaleString("es-CL")}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <button
-          onClick={() => setMostrarTodosConvenios(!mostrarTodosConvenios)}
-          className="mt-3 text-blue-700 hover:underline"
-        >
-          {mostrarTodosConvenios ? "Mostrar menos" : "Mostrar todos"}
-        </button>
+        {convenios.length > 5 && (
+          <div className="text-center mt-4">
+            <button
+              onClick={() => setMostrarConvenios(!mostrarConvenios)}
+              className="bg-blue-600 text-white text-sm px-4 py-2 rounded-md hover:bg-blue-700"
+            >
+              {mostrarConvenios ? "Mostrar menos" : "Mostrar todos"}
+            </button>
+          </div>
+        )}
       </section>
     </div>
   );
