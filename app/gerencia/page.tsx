@@ -1,4 +1,5 @@
 "use client";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -10,104 +11,104 @@ import {
 } from "react-icons/fi";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
+/* === FUNCIONES UTILITARIAS === */
+function clean(value: any) {
+  return String(value || "").trim().replace(/\r|\n/g, "").replace(/\s+/g, " ");
+}
+
+function parseCSV(text: string) {
+  const rows = text.trim().split(/\r?\n/);
+  return rows.map((r) => r.split(",").map((v) => v.trim()));
+}
+
 export default function GerenciaPage() {
   const router = useRouter();
   const supabase = createClientComponentClient();
 
   const [perfil, setPerfil] = useState<any>(null);
-  const [cumplimientoMetas, setCumplimientoMetas] = useState<string>("...");
-  const [loading, setLoading] = useState(true);
+  const [cumplimientoMetas, setCumplimientoMetas] = useState<number | null>(
+    null
+  );
 
+  /* === CARGAR PERFIL Y CUMPLIMIENTO === */
   useEffect(() => {
-    async function cargarCumplimiento() {
-      try {
-        setLoading(true);
+    async function cargarDatos() {
+      const { data } = await supabase.auth.getSession();
+      const user = data.session?.user;
+      if (!user) return;
 
-        // === 1️⃣ Sesión y perfil ===
-        const { data } = await supabase.auth.getSession();
-        const user = data.session?.user;
-        if (!user) return;
+      const { data: perfilData } = await supabase
+        .from("profiles")
+        .select("display_name, department, email, role")
+        .eq("id", user.id)
+        .single();
 
-        const { data: perfilData } = await supabase
-          .from("profiles")
-          .select("display_name, department, email")
-          .eq("id", user.id)
-          .single();
+      if (!perfilData) return;
+      setPerfil(perfilData);
 
-        if (!perfilData) return;
-        setPerfil(perfilData);
+      // === Determinar filtro de gerencia ===
+      let filtroGerencia = "";
+      if (perfilData.department === "gerencia_food") filtroGerencia = "CBORQUEZ";
+      else if (perfilData.department === "gerencia_hc") filtroGerencia = "CAVENDANO";
+      else if (perfilData.department === "gerencia_ind") filtroGerencia = "ADAMM";
 
-        // === 2️⃣ URLs de CSV ===
-        const metasURL =
-          "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6eHEKLPnnwmtrSFaNvShM3zjdoJ7kr7gmaq6qK1giAXgBm4xulZ1ChS460ejlFUCfabxTect725wf/pub?gid=0&single=true&output=csv";
-        const ventasURL =
-          "https://docs.google.com/spreadsheets/d/e/2PACX-1vQXztj-EM_OgRPoKxjRiMleVhH0QVWzG7RSpGIwqMXjUwc_9ENeOYeV9VIcoTpN45vAF3HGZlWl7f4Q/pub?gid=0&single=true&output=csv";
+      // === URLs CSV ===
+      const metasURL =
+        "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6eHEKLPnnwmtrSFaNvShM3zjdoJ7kr7gmaq6qK1giAXgBm4xulZ1ChS460ejlFUCfabxTect725wf/pub?gid=0&single=true&output=csv";
+      const ventasURL =
+        "https://docs.google.com/spreadsheets/d/e/2PACX-1vQXztj-EM_OgRPoKxjRiMleVhH0QVWzG7RSpGIwqMXjUwc_9ENeOYeV9VIcoTpN45vAF3HGZlWl7f4Q/pub?gid=0&single=true&output=csv";
 
-        const [metasText, ventasText] = await Promise.all([
-          fetch(metasURL).then((r) => r.text()),
-          fetch(ventasURL).then((r) => r.text()),
-        ]);
+      // === Cargar ambos archivos ===
+      const [metasText, ventasText] = await Promise.all([
+        fetch(metasURL).then((r) => r.text()),
+        fetch(ventasURL).then((r) => r.text()),
+      ]);
 
-        // === 3️⃣ Parser CSV por comas ===
-        const parseCSV = (text: string) =>
-          text
-            .trim()
-            .split(/\r?\n/)
-            .map((line) => line.split(",").map((v) => v.trim()));
+      const metasRows = parseCSV(metasText);
+      const ventasRows = parseCSV(ventasText);
 
-        const metas = parseCSV(metasText);
-        const ventas = parseCSV(ventasText);
+      const metas = metasRows.slice(1).filter(
+        (r) => clean(r[0]).toUpperCase() === filtroGerencia.toUpperCase()
+      );
+      const ventas = ventasRows.slice(1).filter(
+        (r) => clean(r[0]).toUpperCase() === filtroGerencia.toUpperCase()
+      );
 
-        if (!metas.length || !ventas.length) return;
+      const meses = metasRows[0].slice(2, 14);
+      let totalMeta = 0;
+      let totalVenta = 0;
 
-        // === 4️⃣ Determinar gerencia ===
-        let filtroGerencia = "";
-        if (perfilData.department === "gerencia_food") filtroGerencia = "CBORQUEZ";
-        else if (perfilData.department === "gerencia_hc") filtroGerencia = "CAVENDANO";
-        else if (perfilData.department === "gerencia_ind") filtroGerencia = "ADAMM";
+      meses.forEach((_, i) => {
+        totalMeta += metas.reduce(
+          (acc, r) =>
+            acc + (parseFloat(r[i + 2]?.replace(/\./g, "").replace(",", ".")) || 0),
+          0
+        );
+        totalVenta += ventas.reduce(
+          (acc, r) =>
+            acc + (parseFloat(r[i + 2]?.replace(/\./g, "").replace(",", ".")) || 0),
+          0
+        );
+      });
 
-        // === 5️⃣ Filtrar datos por gerencia ===
-        const metasFiltradas = metas
-          .slice(1)
-          .filter((r) => r[0]?.toUpperCase() === filtroGerencia.toUpperCase());
-        const ventasFiltradas = ventas
-          .slice(1)
-          .filter((r) => r[0]?.toUpperCase() === filtroGerencia.toUpperCase());
+      const cumplimientoTotal =
+        totalMeta > 0 ? (totalVenta / totalMeta) * 100 : 0;
 
-        // === 6️⃣ Calcular avance de mes actual ===
-        const mesActual = new Date().getMonth(); // 0=Enero
-        let totalMeta = 0;
-        let totalVenta = 0;
-
-        metasFiltradas.forEach((r) => {
-          const val = parseFloat(r[mesActual + 2]?.replace(/\./g, "").replace(",", "."));
-          if (!isNaN(val)) totalMeta += val;
-        });
-        ventasFiltradas.forEach((r) => {
-          const val = parseFloat(r[mesActual + 2]?.replace(/\./g, "").replace(",", "."));
-          if (!isNaN(val)) totalVenta += val;
-        });
-
-        const cumplimiento =
-          totalMeta > 0 ? ((totalVenta / totalMeta) * 100).toFixed(1) : "0";
-        setCumplimientoMetas(cumplimiento);
-        setLoading(false);
-      } catch (error) {
-        console.error("Error al calcular cumplimiento:", error);
-      }
+      setCumplimientoMetas(parseFloat(cumplimientoTotal.toFixed(1)));
     }
 
-    cargarCumplimiento();
+    cargarDatos();
   }, []);
 
+  /* === TARJETAS PRINCIPALES === */
   const cards = [
     {
       title: "Metas",
       value:
-        cumplimientoMetas === "..."
-          ? "Cargando..."
-          : `${cumplimientoMetas}% de avance`,
-      description: "Cumplimiento de metas mensuales",
+        cumplimientoMetas !== null
+          ? `${cumplimientoMetas.toFixed(1)}% de avance`
+          : "Cargando...",
+      description: "Cumplimiento total de la gerencia",
       icon: <FiTarget className="text-blue-600" size={28} />,
       link: "/gerencia/metas",
     },
@@ -141,19 +142,26 @@ export default function GerenciaPage() {
     },
   ];
 
+  /* === UI === */
   return (
     <div className="p-8">
       <h1 className="text-3xl font-bold text-blue-900 mb-2">
-        Panel Gerencial —{" "}
-        {perfil?.department
-          ? perfil.department.replace("gerencia_", "").toUpperCase()
-          : "..."}
+        Panel Gerencial — {perfil?.department?.replace("gerencia_", "").toUpperCase()}
       </h1>
       <p className="text-gray-600 mb-8">
-        Resumen general del área con indicadores clave de desempeño
+        Bienvenido/a, <strong>{perfil?.email}</strong>
+        <br />
+        <span className="text-sm text-gray-500">
+          {new Date().toLocaleDateString("es-CL", {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+          })}
+        </span>
       </p>
 
-      {/* === Tarjetas principales === */}
+      {/* === Tarjetas === */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
         {cards.map((card, i) => (
           <div
