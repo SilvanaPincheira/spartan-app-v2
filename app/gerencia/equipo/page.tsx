@@ -1,18 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-} from "recharts";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { FaMedal } from "react-icons/fa";
 
-/* === Utilidades === */
+/* === UTILIDADES === */
 function clean(value: any) {
   return String(value || "").trim().replace(/\r|\n/g, "").replace(/\s+/g, " ");
 }
@@ -24,13 +16,8 @@ function parseCSV(text: string) {
 export default function EquipoPage() {
   const supabase = createClientComponentClient();
   const [perfil, setPerfil] = useState<any>(null);
-  const [equipo, setEquipo] = useState<any[]>([]);
+  const [ranking, setRanking] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [resumen, setResumen] = useState({
-    totalActivos: 0,
-    totalVentas: 0,
-    promedioCumplimiento: 0,
-  });
 
   useEffect(() => {
     async function cargarDatos() {
@@ -50,84 +37,44 @@ export default function EquipoPage() {
       if (!perfilData) return;
       setPerfil(perfilData);
 
-      /* === Determinar filtro gerencia === */
+      /* === Determinar filtro de gerencia === */
       let filtroGerencia = "";
       if (perfilData.department === "gerencia_food") filtroGerencia = "CBORQUEZ";
       else if (perfilData.department === "gerencia_hc") filtroGerencia = "CAVENDANO";
       else if (perfilData.department === "gerencia_ind") filtroGerencia = "ADAMM";
 
-      /* === Ejecutivos de esta gerencia === */
-      const { data: ejecutivos } = await supabase
-        .from("ejecutivos")
-        .select("id, nombre, zona, supervisor, activo")
-        .eq("gerencia", filtroGerencia)
-        .eq("activo", true);
-
-      if (!ejecutivos) return;
-
-      /* === Cargar Metas y Ventas === */
-      const metasURL =
-        "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6eHEKLPnnwmtrSFaNvShM3zjdoJ7kr7gmaq6qK1giAXgBm4xulZ1ChS460ejlFUCfabxTect725wf/pub?gid=0&single=true&output=csv";
+      /* === Leer hoja de Ventas === */
       const ventasURL =
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vQXztj-EM_OgRPoKxjRiMleVhH0QVWzG7RSpGIwqMXjUwc_9ENeOYeV9VIcoTpN45vAF3HGZlWl7f4Q/pub?gid=0&single=true&output=csv";
 
-      const [metasText, ventasText] = await Promise.all([
-        fetch(metasURL).then((r) => r.text()),
-        fetch(ventasURL).then((r) => r.text()),
-      ]);
-
-      const metasRows = parseCSV(metasText);
+      const ventasText = await fetch(ventasURL).then((r) => r.text());
       const ventasRows = parseCSV(ventasText);
-      const metas = metasRows.slice(1).filter(
-        (r) => clean(r[0]).toUpperCase() === filtroGerencia.toUpperCase()
-      );
-      const ventas = ventasRows.slice(1).filter(
-        (r) => clean(r[0]).toUpperCase() === filtroGerencia.toUpperCase()
-      );
+      const ventas = ventasRows
+        .slice(1)
+        .filter((r) => clean(r[0]).toUpperCase() === filtroGerencia.toUpperCase());
 
-      const mesActual = new Date().getMonth(); // 0=Enero
-      let totalVentas = 0;
-      let totalCumplimiento = 0;
-
-      const equipoConDatos = ejecutivos.map((e) => {
-        const metaFila = metas.find(
-          (r) => clean(r[1]).toUpperCase() === clean(e.nombre).toUpperCase()
-        );
-        const ventaFila = ventas.find(
-          (r) => clean(r[1]).toUpperCase() === clean(e.nombre).toUpperCase()
-        );
-
-        const meta = parseFloat(
-          metaFila?.[mesActual + 2]?.replace(/\./g, "").replace(",", ".") || "0"
-        );
-        const venta = parseFloat(
-          ventaFila?.[mesActual + 2]?.replace(/\./g, "").replace(",", ".") || "0"
-        );
-
-        const cumplimiento = meta > 0 ? (venta / meta) * 100 : 0;
-        totalVentas += venta;
-        totalCumplimiento += cumplimiento;
-
-        return {
-          ...e,
-          meta,
-          venta,
-          cumplimiento: cumplimiento.toFixed(1),
-        };
+      /* === Calcular ventas anuales === */
+      const meses = ventasRows[0].slice(2, 13); // Enero - Octubre
+      const rankingTemp = ventas.map((r) => {
+        const nombre = r[1];
+        const ventasTotales = r
+          .slice(2, 13)
+          .reduce((acc, val) => acc + (parseFloat(val.replace(/\./g, "").replace(",", ".")) || 0), 0);
+        return { nombre, ventasTotales };
       });
 
-      const promedioCumplimiento =
-        equipoConDatos.length > 0
-          ? totalCumplimiento / equipoConDatos.length
-          : 0;
+      const totalGeneral = rankingTemp.reduce((acc, r) => acc + r.ventasTotales, 0);
 
-      setEquipo(equipoConDatos);
-      setResumen({
-        totalActivos: equipoConDatos.length,
-        totalVentas,
-        promedioCumplimiento,
-      });
+      const rankingFinal = rankingTemp
+        .sort((a, b) => b.ventasTotales - a.ventasTotales)
+        .slice(0, 5)
+        .map((r, i) => ({
+          ...r,
+          posicion: i + 1,
+          porcentaje: totalGeneral > 0 ? ((r.ventasTotales / totalGeneral) * 100).toFixed(1) : "0.0",
+        }));
 
+      setRanking(rankingFinal);
       setLoading(false);
     }
 
@@ -140,74 +87,50 @@ export default function EquipoPage() {
   return (
     <div className="p-8">
       <h1 className="text-3xl font-bold text-blue-900 mb-2">
-        Equipo —{" "}
-        {perfil?.department
-          ? perfil.department.replace("gerencia_", "").toUpperCase()
-          : ""}
+        Equipo — {perfil?.department?.replace("gerencia_", "").toUpperCase()}
       </h1>
-      <p className="text-gray-600 mb-6">
-        Gerente: <strong>{perfil?.display_name || perfil?.email}</strong>
+      <p className="text-gray-600 mb-8">
+        Desempeño del equipo por ventas acumuladas (Enero–{new Date().toLocaleString("es-CL", { month: "long" })})
       </p>
 
-      {/* === Resumen === */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-10">
-        <div className="bg-white border rounded-xl p-5 text-center shadow-sm">
-          <h3 className="text-gray-600 mb-1">Ejecutivos activos</h3>
-          <p className="text-2xl font-bold text-blue-800">
-            {resumen.totalActivos}
-          </p>
-        </div>
-        <div className="bg-white border rounded-xl p-5 text-center shadow-sm">
-          <h3 className="text-gray-600 mb-1">Ventas totales mes</h3>
-          <p className="text-2xl font-bold text-green-700">
-            {resumen.totalVentas.toLocaleString("es-CL")}
-          </p>
-        </div>
-        <div className="bg-white border rounded-xl p-5 text-center shadow-sm">
-          <h3 className="text-gray-600 mb-1">Cumplimiento promedio</h3>
-          <p className="text-2xl font-bold text-orange-600">
-            {resumen.promedioCumplimiento.toFixed(1)}%
-          </p>
-        </div>
-      </div>
-
-      {/* === Tabla de ejecutivos === */}
-      <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
+      {/* === Top 5 ejecutivos === */}
+      <div className="bg-white border rounded-2xl shadow-sm p-6 mb-10">
+        <h2 className="text-lg font-semibold text-gray-700 mb-4">🏆 Top 5 Ejecutivos por Ventas</h2>
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-gray-50 border-b text-gray-600">
+            <tr className="border-b bg-gray-50 text-gray-600">
+              <th className="text-left py-2 px-3">Pos.</th>
               <th className="text-left py-2 px-3">Ejecutivo</th>
-              <th className="text-left py-2 px-3">Zona</th>
-              <th className="text-left py-2 px-3">Supervisor</th>
-              <th className="text-right py-2 px-3">Meta</th>
-              <th className="text-right py-2 px-3">Venta</th>
-              <th className="text-right py-2 px-3">% Cumpl.</th>
+              <th className="text-right py-2 px-3">Venta total ($)</th>
+              <th className="text-right py-2 px-3">% del total</th>
             </tr>
           </thead>
           <tbody>
-            {equipo.map((e, i) => (
-              <tr key={i} className="border-b hover:bg-gray-50">
-                <td className="py-2 px-3 font-medium text-gray-800">
-                  {e.nombre}
+            {ranking.map((r) => (
+              <tr key={r.nombre} className="border-b hover:bg-gray-50 transition">
+                <td className="py-2 px-3 font-semibold">
+                  <div className="flex items-center gap-2">
+                    <FaMedal
+                      size={18}
+                      className={
+                        r.posicion === 1
+                          ? "text-yellow-400"
+                          : r.posicion === 2
+                          ? "text-gray-400"
+                          : r.posicion === 3
+                          ? "text-amber-700"
+                          : "text-blue-300"
+                      }
+                    />
+                    {r.posicion}
+                  </div>
                 </td>
-                <td className="py-2 px-3">{e.zona || "-"}</td>
-                <td className="py-2 px-3">{e.supervisor || "-"}</td>
-                <td className="py-2 px-3 text-right">
-                  {e.meta.toLocaleString("es-CL")}
+                <td className="py-2 px-3 text-gray-800 font-medium">{r.nombre}</td>
+                <td className="py-2 px-3 text-right font-semibold text-blue-900">
+                  {r.ventasTotales.toLocaleString("es-CL")}
                 </td>
-                <td className="py-2 px-3 text-right">
-                  {e.venta.toLocaleString("es-CL")}
-                </td>
-                <td
-                  className={`py-2 px-3 text-right font-semibold ${
-                    e.cumplimiento >= 100
-                      ? "text-green-600"
-                      : e.cumplimiento >= 70
-                      ? "text-orange-500"
-                      : "text-red-600"
-                  }`}
-                >
-                  {e.cumplimiento}%
+                <td className="py-2 px-3 text-right text-gray-600">
+                  {r.porcentaje}%
                 </td>
               </tr>
             ))}
@@ -215,23 +138,21 @@ export default function EquipoPage() {
         </table>
       </div>
 
-      {/* === Gráfico ranking === */}
-      {equipo.length > 0 && (
-        <div className="bg-white border rounded-xl shadow-sm p-6 mt-10">
-          <h2 className="text-lg font-semibold mb-4 text-gray-700">
-            Ranking de Cumplimiento (%)
-          </h2>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={equipo}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="nombre" />
-              <YAxis />
-              <Tooltip />
-              <Bar dataKey="cumplimiento" fill="#1d4ed8" />
-            </BarChart>
-          </ResponsiveContainer>
+      {/* === Placeholders para siguientes módulos === */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white border rounded-2xl shadow-sm p-6">
+          <h2 className="text-lg font-semibold text-gray-700 mb-3">👥 Clientes nuevos por ejecutivo</h2>
+          <p className="text-gray-500 text-sm">
+            Aquí mostraremos los clientes nuevos y su impacto en ventas ($), una vez tengamos la hoja “Clientes Nuevos 2025”.
+          </p>
         </div>
-      )}
+        <div className="bg-white border rounded-2xl shadow-sm p-6">
+          <h2 className="text-lg font-semibold text-gray-700 mb-3">💰 Convenios y precios especiales</h2>
+          <p className="text-gray-500 text-sm">
+            Aquí se mostrará la cantidad de convenios activos y clientes con precios especiales (SAP o Google Sheets).
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
