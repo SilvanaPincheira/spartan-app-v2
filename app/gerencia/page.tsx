@@ -11,7 +11,7 @@ import {
 } from "react-icons/fi";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
-/* === FUNCIONES UTILITARIAS === */
+/* === UTILIDADES === */
 function clean(value: any) {
   return String(value || "").trim().replace(/\r|\n/g, "").replace(/\s+/g, " ");
 }
@@ -29,14 +29,19 @@ export default function GerenciaPage() {
   const [cumplimientoMetas, setCumplimientoMetas] = useState<number | null>(
     null
   );
+  const [loading, setLoading] = useState(true);
 
-  /* === CARGAR PERFIL Y CUMPLIMIENTO === */
+  /* === CARGA DE PERFIL Y DATOS === */
   useEffect(() => {
     async function cargarDatos() {
+      setLoading(true);
+
+      // 1️⃣ Obtener sesión
       const { data } = await supabase.auth.getSession();
       const user = data.session?.user;
       if (!user) return;
 
+      // 2️⃣ Perfil de Supabase
       const { data: perfilData } = await supabase
         .from("profiles")
         .select("display_name, department, email, role")
@@ -46,19 +51,19 @@ export default function GerenciaPage() {
       if (!perfilData) return;
       setPerfil(perfilData);
 
-      // === Determinar filtro de gerencia ===
+      // 3️⃣ Filtro de gerencia
       let filtroGerencia = "";
       if (perfilData.department === "gerencia_food") filtroGerencia = "CBORQUEZ";
       else if (perfilData.department === "gerencia_hc") filtroGerencia = "CAVENDANO";
       else if (perfilData.department === "gerencia_ind") filtroGerencia = "ADAMM";
 
-      // === URLs CSV ===
+      // 4️⃣ URLs de Google Sheets
       const metasURL =
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6eHEKLPnnwmtrSFaNvShM3zjdoJ7kr7gmaq6qK1giAXgBm4xulZ1ChS460ejlFUCfabxTect725wf/pub?gid=0&single=true&output=csv";
       const ventasURL =
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vQXztj-EM_OgRPoKxjRiMleVhH0QVWzG7RSpGIwqMXjUwc_9ENeOYeV9VIcoTpN45vAF3HGZlWl7f4Q/pub?gid=0&single=true&output=csv";
 
-      // === Cargar ambos archivos ===
+      // 5️⃣ Descargar hojas
       const [metasText, ventasText] = await Promise.all([
         fetch(metasURL).then((r) => r.text()),
         fetch(ventasURL).then((r) => r.text()),
@@ -67,38 +72,50 @@ export default function GerenciaPage() {
       const metasRows = parseCSV(metasText);
       const ventasRows = parseCSV(ventasText);
 
-      const metas = metasRows.slice(1).filter(
-        (r) => clean(r[0]).toUpperCase() === filtroGerencia.toUpperCase()
-      );
-      const ventas = ventasRows.slice(1).filter(
-        (r) => clean(r[0]).toUpperCase() === filtroGerencia.toUpperCase()
-      );
+      // 6️⃣ Filtrar por gerencia
+      const metas = metasRows
+        .slice(1)
+        .filter((r) => clean(r[0]).toUpperCase() === filtroGerencia.toUpperCase());
+      const ventas = ventasRows
+        .slice(1)
+        .filter((r) => clean(r[0]).toUpperCase() === filtroGerencia.toUpperCase());
 
-      const meses = metasRows[0].slice(2, 14);
+      // 7️⃣ Calcular cumplimiento del mes actual
+      const mesActual = new Date().getMonth(); // 0=Enero
       let totalMeta = 0;
       let totalVenta = 0;
 
-      meses.forEach((_, i) => {
-        totalMeta += metas.reduce(
-          (acc, r) =>
-            acc + (parseFloat(r[i + 2]?.replace(/\./g, "").replace(",", ".")) || 0),
-          0
+      metas.forEach((r) => {
+        const val = parseFloat(
+          r[mesActual + 2]?.replace(/\./g, "").replace(",", ".")
         );
-        totalVenta += ventas.reduce(
-          (acc, r) =>
-            acc + (parseFloat(r[i + 2]?.replace(/\./g, "").replace(",", ".")) || 0),
-          0
+        if (!isNaN(val)) totalMeta += val;
+      });
+
+      ventas.forEach((r) => {
+        const val = parseFloat(
+          r[mesActual + 2]?.replace(/\./g, "").replace(",", ".")
         );
+        if (!isNaN(val)) totalVenta += val;
       });
 
       const cumplimientoTotal =
         totalMeta > 0 ? (totalVenta / totalMeta) * 100 : 0;
 
       setCumplimientoMetas(parseFloat(cumplimientoTotal.toFixed(1)));
+      setLoading(false);
     }
 
     cargarDatos();
   }, []);
+
+  /* === COLOR SEGÚN CUMPLIMIENTO === */
+  const getColor = (valor: number | null) => {
+    if (valor === null) return "text-gray-400";
+    if (valor >= 100) return "text-green-600";
+    if (valor >= 70) return "text-orange-500";
+    return "text-red-600";
+  };
 
   /* === TARJETAS PRINCIPALES === */
   const cards = [
@@ -108,13 +125,15 @@ export default function GerenciaPage() {
         cumplimientoMetas !== null
           ? `${cumplimientoMetas.toFixed(1)}% de avance`
           : "Cargando...",
-      description: "Cumplimiento total de la gerencia",
+      colorClass: getColor(cumplimientoMetas),
+      description: "Cumplimiento mensual de la gerencia",
       icon: <FiTarget className="text-blue-600" size={28} />,
       link: "/gerencia/metas",
     },
     {
       title: "Equipo",
       value: "7 ejecutivos activos",
+      colorClass: "text-gray-800",
       description: "Rendimiento y ventas por ejecutivo",
       icon: <FiUsers className="text-green-600" size={28} />,
       link: "/gerencia/equipo",
@@ -122,13 +141,15 @@ export default function GerenciaPage() {
     {
       title: "Clientes",
       value: "243 activos / 38 inactivos",
-      description: "Clientes nuevos, frecuentes y con precios especiales",
+      colorClass: "text-gray-800",
+      description: "Clientes nuevos y con precios especiales",
       icon: <FiBarChart2 className="text-orange-500" size={28} />,
       link: "/gerencia/clientes",
     },
     {
       title: "Productos",
       value: "Top ventas en $ y Kg",
+      colorClass: "text-gray-800",
       description: "Mix de productos y márgenes",
       icon: <FiShoppingBag className="text-indigo-600" size={28} />,
       link: "/gerencia/productos",
@@ -136,20 +157,25 @@ export default function GerenciaPage() {
     {
       title: "Rendimiento",
       value: "Margen total: 18.2%",
+      colorClass: "text-gray-800",
       description: "Análisis financiero y eficiencia del área",
       icon: <FiTrendingUp className="text-emerald-600" size={28} />,
       link: "/gerencia/rendimiento",
     },
   ];
 
-  /* === UI === */
+  /* === INTERFAZ === */
   return (
     <div className="p-8">
+      {/* === Encabezado === */}
       <h1 className="text-3xl font-bold text-blue-900 mb-2">
-        Panel Gerencial — {perfil?.department?.replace("gerencia_", "").toUpperCase()}
+        Panel Gerencial —{" "}
+        {perfil?.department
+          ? perfil.department.replace("gerencia_", "").toUpperCase()
+          : "..."}
       </h1>
       <p className="text-gray-600 mb-8">
-        Bienvenido/a, <strong>{perfil?.email}</strong>
+        Bienvenido/a, <strong>{perfil?.display_name || perfil?.email}</strong>
         <br />
         <span className="text-sm text-gray-500">
           {new Date().toLocaleDateString("es-CL", {
@@ -172,10 +198,16 @@ export default function GerenciaPage() {
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 {card.icon}
-                <h2 className="text-lg font-semibold text-gray-800">{card.title}</h2>
+                <h2 className="text-lg font-semibold text-gray-800">
+                  {card.title}
+                </h2>
               </div>
             </div>
-            <p className="text-2xl font-bold text-blue-900">{card.value}</p>
+            <p className={`text-2xl font-bold ${card.colorClass}`}>
+              {loading && card.title === "Metas"
+                ? "Cargando..."
+                : card.value}
+            </p>
             <p className="text-sm text-gray-500 mt-1">{card.description}</p>
             <div className="mt-4 text-right">
               <button
