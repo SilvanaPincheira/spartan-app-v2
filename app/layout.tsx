@@ -5,6 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import AvisosFlotantes from "@/components/AvisosFlotantes";
+
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -216,6 +218,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
         {/* ==== Contenido principal ==== */}
         <main className="flex-1 p-6 mt-14 md:mt-0 overflow-y-auto">{children}</main>
+        {/* 🔔 Avisos flotantes */}
+  <AvisosFlotantes />
       </body>
     </html>
   );
