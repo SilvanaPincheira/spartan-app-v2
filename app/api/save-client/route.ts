@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 // 👉 URL de tu Apps Script para "clientesnuevos"
 const APPS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbxw5Lp3rXZzto-w7v_TwXASsjE4DI5Nz4kkktL2fpEO4W1AZxcOIEKfqYkNX3NDR-Rt5w/exec";
+  "https://script.google.com/macros/s/AKfycbxU8VrYtzQPI5ofdDbNLIIQbHSIE78Tz5UId-OKhwt_AN7cSSBq71zylmiPDV3UDFGVHw/exec";
 
 export async function POST(req: Request) {
   try {
