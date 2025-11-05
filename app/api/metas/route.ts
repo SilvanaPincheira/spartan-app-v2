@@ -28,7 +28,7 @@ export async function GET() {
 
     // 2️⃣ URL directa de Google Sheets (formato CSV)
     const url =
-      "https://docs.google.com/spreadsheets/d/1GASOV0vl85q5STfvDn5hdZFD0Mwcj2SzXM6IqvgI50A/gviz/tq?tqx=out:csv&sheet=meta";
+      "https://docs.google.com/spreadsheets/d/e/2PACX-1vQeg3EGhKOHiA9cRDqPioN5oaHZUOpDxB1olx-H6jkUIdBnyRvgEBJwe3IQeb3N7e9rnsQy4UnOQlk1/pub?gid=1307997110&single=true&output=csv";
 
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) {
