@@ -68,7 +68,7 @@ export async function GET() {
       "entrega",
       "total_quimicos",        // ✅ ventas reales
       "no_son_equipo_venta",
-      "meta_septiembre_2025",  // ✅ meta
+      "meta_Noviembre_2025",  // ✅ meta
       "cumplimiento",          // monto faltante (si lo necesitas)
       "cumplimiento_",         // % cumplimiento
     ];
