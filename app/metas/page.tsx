@@ -16,7 +16,7 @@ export default function MetasPage() {
     "entrega",
     "total_quimicos",
     "no_son_equipo_venta",
-    "meta_septiembre_2025",
+    "meta_noviembre_2025",
     "cumplimiento",
     "cumplimiento_",
   ];
