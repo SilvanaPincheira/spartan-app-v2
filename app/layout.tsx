@@ -52,7 +52,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       { name: "Metas", href: "/metas", icon: "🎯" },
       { name: "Facturas y NC", href: "/facturas-nc", icon: "🧾" },
       { name: "Comisiones", href: "/comisiones", icon: "💰" },
-      { name: "Herramientas", href:"/Herramientas", icon:"🧰"}
+      { name: "Herramientas", href:"/herramientas", icon:"🧰"}
     ];
 
     if (perfil?.role === "gerencia" || perfil?.department?.startsWith("gerencia_")) {
