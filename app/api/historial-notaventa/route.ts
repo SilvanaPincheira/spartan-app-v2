@@ -3,10 +3,9 @@ import { NextResponse } from "next/server";
 /* ============================================================================
    ⚙️ CONFIGURACIÓN GOOGLE SHEET
    ============================================================================ */
-const SHEET_ID =
-  "2PACX-1vR2dwvhSGvvFFPBiRxUgF8Q99HkWJlyoFKLDo6Mmu4HvCH_hJtdyV_7WTrOjkUp6u0pMyAOf543M1UE";
-const GID = "0";
-const CSV_URL = `https://docs.google.com/spreadsheets/d/e/${SHEET_ID}/pub?gid=${GID}&single=true&output=csv`;
+// URL completa (debe ser pública con permiso “Cualquiera con el enlace”)
+const CSV_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vR2dwvhSGvvFFPBiRxUgF8Q99HkWJlyoFKLDo6Mmu4HvCH_hJtdyV_7WTrOjkUp6u0pMyAOf543M1UE/pub?gid=0&single=true&output=csv";
 
 /* ============================================================================
    🧩 Parser CSV seguro (respeta comas dentro de comillas)
@@ -15,6 +14,7 @@ function parseCsv(text: string): Record<string, string>[] {
   const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
   const headers = lines[0].split(",").map((h) => h.trim());
   const rows: Record<string, string>[] = [];
+
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
     const row: Record<string, string> = {};
@@ -35,7 +35,7 @@ export async function GET(req: Request) {
     const nvParam = (searchParams.get("nv") || "").trim();
     const emailParam = (searchParams.get("email") || "").toLowerCase().trim();
 
-    // Leer hoja pública
+    // 📥 Leer hoja pública
     const res = await fetch(CSV_URL, { cache: "no-store" });
     if (!res.ok)
       throw new Error("No se pudo acceder al Sheet público (revisa permisos).");
@@ -43,7 +43,7 @@ export async function GET(req: Request) {
     const csv = await res.text();
     const filas = parseCsv(csv);
 
-    // 🧩 Rellenar N° NV hacia abajo (para celdas vacías)
+    // 🧩 Propagar el número NV hacia abajo
     let ultimoNumero = "";
     for (const f of filas) {
       const num = f["Número NV"] || f["Numero NV"] || f["N° NV"] || "";
@@ -51,17 +51,15 @@ export async function GET(req: Request) {
       else f["Número NV"] = ultimoNumero;
     }
 
-    // 🔍 Filtrar por email del login (EMAIL_COL)
+    // 🔍 Filtrar por email logueado
     let filtradas = filas;
     if (emailParam) {
-      filtradas = filtradas.filter((f) => {
-        const correo = (f["EMAIL_COL"] || "").toLowerCase().trim();
-
-            return correo === emailParam;
-      });
+      filtradas = filtradas.filter((f) =>
+        (f["EMAIL_COL"] || "").toLowerCase().trim() === emailParam
+      );
     }
 
-    // 🔍 Si llega ?nv=..., aplicar filtro doble NV + email
+    // 🔍 Si llega ?nv=..., aplicar filtro adicional
     if (nvParam) {
       filtradas = filtradas.filter((f) => {
         const nv = (f["Número NV"] || f["Numero NV"] || f["N° NV"] || "").trim();
@@ -72,7 +70,7 @@ export async function GET(req: Request) {
       });
     }
 
-    // 🧱 Agrupar por número NV
+    // 🧱 Agrupar por N° NV
     const agrupadas: Record<string, any> = {};
     for (const r of filtradas) {
       const numeroNV =
@@ -141,7 +139,6 @@ export async function GET(req: Request) {
 
     const data = Object.values(agrupadas);
 
-    // 🧩 Si no hay resultados
     if (nvParam && data.length === 0) {
       return NextResponse.json({
         ok: false,
@@ -149,7 +146,6 @@ export async function GET(req: Request) {
       });
     }
 
-    // ✅ Respuesta final
     return NextResponse.json({ ok: true, totalNotas: data.length, data });
   } catch (err: any) {
     console.error("❌ Error en historial-notaventa:", err);
