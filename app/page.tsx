@@ -1,10 +1,26 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { Card, CardContent } from "@/components/ui/card";
 import GaugeChart from "react-gauge-chart";
+import {
+  Home,
+  Gauge,
+  FileText,
+  Package,
+  FolderCog,
+  BookMarked,
+  Info,
+  Shield,
+  BookOpen,
+  ClipboardList,
+  FlaskConical,
+  ChevronRight,
+  ChevronDown,
+} from "lucide-react";
 
 const LOGO_URL =
   "https://assets.jumpseller.com/store/spartan-de-chile/themes/317202/options/27648963/Logo-spartan-white.png?1600810625";
@@ -12,6 +28,7 @@ const LOGO_URL =
 export default function HomeMenu() {
   const supabase = createClientComponentClient();
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [openHerramientas, setOpenHerramientas] = useState(false);
 
   // Datos del dashboard
   const [ventas, setVentas] = useState(0);
@@ -21,7 +38,7 @@ export default function HomeMenu() {
   const [facturas, setFacturas] = useState(0);
   const [alertas, setAlertas] = useState(0);
 
-  // Fecha actual (para detectar el mes)
+  // Fecha actual
   const now = new Date();
   const meses = [
     "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
@@ -51,20 +68,16 @@ export default function HomeMenu() {
         if (metasRes.ok) {
           const json = await metasRes.json();
           const row = json?.data?.[0];
-
           if (row) {
-            // 🔹 Tomamos las columnas dinámicamente según el mes
             const metaKey = `meta_${mesActual.toLowerCase()}_${anioActual}`;
             const ventasReal = Number(String(row["total_quimicos"]).replace(/[^0-9.-]/g, ""));
             const metaReal = Number(String(row[metaKey]).replace(/[^0-9.-]/g, ""));
-            const cumplimiento$ = Number(String(row["cumplimiento"]).replace(/[^0-9.-]/g, ""));
             const cumplimientoPct = Number(
               String(row["cumplimiento_"]).replace(/[^0-9.-]/g, "")
             );
 
             setVentas(ventasReal || 0);
             setMeta(metaReal || 1);
-            // Si hay cumplimiento % en hoja, úsalo, sino calcula
             setPorcentaje(
               cumplimientoPct > 0
                 ? Math.round(cumplimientoPct)
@@ -94,12 +107,23 @@ export default function HomeMenu() {
           setAlertas(json?.data?.length || 0);
         }
       } catch (err) {
-        console.error("❌ Error cargando datos de dashboard:", err);
+        console.error("❌ Error cargando dashboard:", err);
       }
     })();
   }, [supabase, mesActual, anioActual]);
 
-  // Fecha legible
+  // Sidebar principal
+  const herramientas = [
+    { name: "Catálogo", href: "/herramientas/catalogo", icon: BookMarked },
+    { name: "Folletos", href: "/herramientas/folletos", icon: Info },
+    { name: "Fichas Técnicas", href: "/herramientas/ft-fichas-tecnicas", icon: FileText },
+    { name: "Hojas de Seguridad", href: "/herramientas/hds-hojas-seguridad", icon: Shield },
+    { name: "Info TIPS", href: "/herramientas/info-tips", icon: BookOpen },
+    { name: "Productos", href: "/herramientas/productos", icon: Package },
+    { name: "Registros ISP", href: "/herramientas/registros-isp", icon: FlaskConical },
+    { name: "Registros SAG", href: "/herramientas/registros-sag", icon: ClipboardList },
+  ];
+
   const today = new Date().toLocaleDateString("es-CL", {
     weekday: "long",
     year: "numeric",
@@ -107,59 +131,90 @@ export default function HomeMenu() {
     day: "numeric",
   });
 
-  const mensajes = [
-    "🚀 Listo para un día productivo.",
-    "📊 Revisa tus reportes y KPIs.",
-    "⚡ Gestiona tus comodatos y ventas fácilmente.",
-    "✅ No olvides dar seguimiento a tus clientes.",
-  ];
-  const randomMsg = mensajes[Math.floor(Math.random() * mensajes.length)];
-
   return (
-    <div className="min-h-screen bg-zinc-50 text-zinc-900">
-      {/* Header */}
-      <header className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-[#1f4ed8]" />
-        <div className="absolute inset-y-0 right-[-20%] w-[60%] rotate-[-8deg] bg-sky-400/60" />
-        <div className="relative mx-auto max-w-7xl px-6 py-8">
-          <div className="flex items-center gap-4 md:gap-6">
-            <Image
-              src={LOGO_URL}
-              alt="Spartan"
-              width={200}
-              height={60}
-              unoptimized
-              className="h-12 w-auto md:h-28 object-contain drop-shadow-sm"
-            />
-            <div>
-              <h1 className="text-white uppercase font-semibold tracking-widest text-2xl md:text-3xl">
-                Spartan One
-              </h1>
-              <p className="mt-1 text-white/80 text-sm max-w-2xl">
-                Bienvenido al panel central de gestión y reportes.
-              </p>
-            </div>
-          </div>
-        </div>
-      </header>
+    <div className="flex min-h-screen bg-zinc-50 text-zinc-900">
+      {/* === Sidebar === */}
+      <aside className="w-64 bg-white border-r h-screen p-4 space-y-3 shadow-sm">
+        <Image
+          src={LOGO_URL}
+          alt="Spartan"
+          width={180}
+          height={50}
+          unoptimized
+          className="mx-auto mb-4"
+        />
 
-      {/* Contenido */}
-      <main className="relative mx-auto max-w-7xl px-6 py-10 space-y-8">
-        {/* Saludo */}
-        <section className="rounded-2xl border bg-white shadow-sm p-6 text-center">
+        <Link
+          href="/inicio"
+          className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-blue-50 text-sm font-medium text-gray-700"
+        >
+          <Home size={18} /> Inicio
+        </Link>
+
+        <Link
+          href="/metas"
+          className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-blue-50 text-sm font-medium text-gray-700"
+        >
+          <Gauge size={18} /> Metas
+        </Link>
+
+        <Link
+          href="/notasventa"
+          className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-blue-50 text-sm font-medium text-gray-700"
+        >
+          <FileText size={18} /> Notas de Venta
+        </Link>
+
+        <Link
+          href="/comodatos"
+          className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-blue-50 text-sm font-medium text-gray-700"
+        >
+          <Package size={18} /> Comodatos
+        </Link>
+
+        {/* === Herramientas === */}
+        <button
+          onClick={() => setOpenHerramientas(!openHerramientas)}
+          className="w-full flex items-center justify-between px-3 py-2 rounded-md text-sm font-semibold text-gray-700 hover:bg-gray-50"
+        >
+          <span className="flex items-center gap-2">
+            <FolderCog size={18} />
+            Herramientas
+          </span>
+          {openHerramientas ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        </button>
+
+        {openHerramientas && (
+          <div className="ml-5 space-y-1">
+            {herramientas.map((sub) => (
+              <Link
+                key={sub.name}
+                href={sub.href}
+                className="flex items-center gap-2 px-3 py-1 rounded-md text-sm text-gray-600 hover:bg-gray-50"
+              >
+                <sub.icon size={16} />
+                {sub.name}
+              </Link>
+            ))}
+          </div>
+        )}
+      </aside>
+
+      {/* === Contenido central === */}
+      <main className="flex-1 p-8 overflow-y-auto">
+        <section className="rounded-2xl border bg-white shadow-sm p-6 text-center mb-8">
           <h2 className="text-2xl font-bold text-[#2B6CFF] mb-2">
             👋 Bienvenido{userEmail ? `, ${userEmail}` : ""}
           </h2>
           <p className="text-zinc-600 mb-2">{today}</p>
-          <p className="text-lg font-medium">{randomMsg}</p>
+          <p className="text-lg font-medium">📊 Revisa tus reportes y KPIs.</p>
         </section>
 
         {/* Dashboard */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Gauge principal */}
           <div className="bg-white shadow rounded-2xl p-6 flex flex-col items-center">
             <h2 className="text-lg font-semibold text-blue-600 mb-4">
-              Avance Meta {mesActual.charAt(0) + mesActual.slice(1).toLowerCase()} {anioActual}
+              Avance Meta {mesActual} {anioActual}
             </h2>
             <GaugeChart
               id="gauge-chart"
@@ -171,70 +226,38 @@ export default function HomeMenu() {
             />
             <p className="mt-4 text-2xl font-bold">{porcentaje}%</p>
             <p className="text-gray-500">
-              {ventas.toLocaleString("es-CL", {
-                style: "currency",
-                currency: "CLP",
-              })}{" "}
-              de{" "}
-              {meta.toLocaleString("es-CL", {
-                style: "currency",
-                currency: "CLP",
-              })}
+              {ventas.toLocaleString("es-CL", { style: "currency", currency: "CLP" })} de{" "}
+              {meta.toLocaleString("es-CL", { style: "currency", currency: "CLP" })}
             </p>
           </div>
 
-          {/* KPIs secundarios */}
           <div className="grid grid-cols-2 gap-4">
             <Card>
               <CardContent className="p-4">
                 <h3 className="text-sm text-gray-500">Ventas del Mes</h3>
                 <p className="text-2xl font-bold text-green-600">
-                  {ventas.toLocaleString("es-CL", {
-                    style: "currency",
-                    currency: "CLP",
-                  })}
+                  {ventas.toLocaleString("es-CL", { style: "currency", currency: "CLP" })}
                 </p>
               </CardContent>
             </Card>
-
             <Card>
               <CardContent className="p-4">
                 <h3 className="text-sm text-gray-500">Meta Mensual</h3>
                 <p className="text-2xl font-bold text-blue-600">
-                  {meta.toLocaleString("es-CL", {
-                    style: "currency",
-                    currency: "CLP",
-                  })}
+                  {meta.toLocaleString("es-CL", { style: "currency", currency: "CLP" })}
                 </p>
               </CardContent>
             </Card>
-
             <Card>
               <CardContent className="p-4">
                 <h3 className="text-sm text-gray-500">Comodatos Activos</h3>
                 <p className="text-2xl font-bold text-orange-600">{comodatos}</p>
               </CardContent>
             </Card>
-
             <Card>
               <CardContent className="p-4">
                 <h3 className="text-sm text-gray-500">Facturas Emitidas</h3>
                 <p className="text-2xl font-bold text-purple-600">{facturas}</p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-l-4 border-red-600 col-span-2">
-              <CardContent className="p-4">
-                <h3 className="text-sm text-red-600 font-semibold">⚠️ Alertas</h3>
-                <p className="text-lg font-bold text-red-700">
-                  Tienes {alertas} clientes sin comprar
-                </p>
-                <a
-                  href="/kpi/alertas-clientes-comodatos"
-                  className="text-sm text-blue-600 hover:underline"
-                >
-                  Ver detalles →
-                </a>
               </CardContent>
             </Card>
           </div>
