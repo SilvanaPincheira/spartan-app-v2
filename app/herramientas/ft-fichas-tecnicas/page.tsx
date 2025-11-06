@@ -15,7 +15,7 @@ export default function HerramientasProductosPage() {
 
       <div className="bg-white rounded-2xl shadow border border-gray-200 overflow-hidden">
         <iframe
-          src="https://drive.google.com/embeddedfolderview?id=1X2c_imhT6LxLfr98jImxiDmk_iB03KCJ#grid"
+          src="https://drive.google.com/drive/folders/1Bv5yu08GDu9FAbxSEtA10Xzb-0MT3iyF?usp=sharing"
           style={{
             width: "100%",
             height: "85vh",
