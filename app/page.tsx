@@ -21,10 +21,14 @@ export default function HomeMenu() {
   const [facturas, setFacturas] = useState(0);
   const [alertas, setAlertas] = useState(0);
 
-  // Encuesta
-  const [rating, setRating] = useState<number | null>(null);
-  const [comentario, setComentario] = useState("");
-  const [enviado, setEnviado] = useState(false);
+  // Fecha actual (para detectar el mes)
+  const now = new Date();
+  const meses = [
+    "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
+    "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE",
+  ];
+  const mesActual = meses[now.getMonth()];
+  const anioActual = now.getFullYear();
 
   useEffect(() => {
     (async () => {
@@ -47,12 +51,27 @@ export default function HomeMenu() {
         if (metasRes.ok) {
           const json = await metasRes.json();
           const row = json?.data?.[0];
+
           if (row) {
+            // 🔹 Tomamos las columnas dinámicamente según el mes
+            const metaKey = `meta_${mesActual.toLowerCase()}_${anioActual}`;
             const ventasReal = Number(String(row["total_quimicos"]).replace(/[^0-9.-]/g, ""));
-            const metaReal = Number(String(row["meta_septiembre_2025"]).replace(/[^0-9.-]/g, ""));
+            const metaReal = Number(String(row[metaKey]).replace(/[^0-9.-]/g, ""));
+            const cumplimiento$ = Number(String(row["cumplimiento"]).replace(/[^0-9.-]/g, ""));
+            const cumplimientoPct = Number(
+              String(row["cumplimiento_"]).replace(/[^0-9.-]/g, "")
+            );
+
             setVentas(ventasReal || 0);
             setMeta(metaReal || 1);
-            setPorcentaje(metaReal > 0 ? Math.round((ventasReal / metaReal) * 100) : 0);
+            // Si hay cumplimiento % en hoja, úsalo, sino calcula
+            setPorcentaje(
+              cumplimientoPct > 0
+                ? Math.round(cumplimientoPct)
+                : metaReal > 0
+                ? Math.round((ventasReal / metaReal) * 100)
+                : 0
+            );
           }
         }
 
@@ -78,27 +97,9 @@ export default function HomeMenu() {
         console.error("❌ Error cargando datos de dashboard:", err);
       }
     })();
-  }, [supabase]);
+  }, [supabase, mesActual, anioActual]);
 
-  // Manejo de envío de encuesta
-  async function enviarEncuesta(e: React.FormEvent) {
-    e.preventDefault();
-    if (!rating) return alert("Selecciona una puntuación.");
-
-    const { data: { user } } = await supabase.auth.getUser();
-    const { error } = await supabase.from("encuesta_app").insert([
-      {
-        user_id: user?.id || null,
-        rating,
-        comentario,
-      },
-    ]);
-
-    if (error) console.error(error);
-    else setEnviado(true);
-  }
-
-  // Fecha y mensajes
+  // Fecha legible
   const today = new Date().toLocaleDateString("es-CL", {
     weekday: "long",
     year: "numeric",
@@ -115,8 +116,8 @@ export default function HomeMenu() {
   const randomMsg = mensajes[Math.floor(Math.random() * mensajes.length)];
 
   return (
-    <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-      {/* Header corporativo */}
+    <div className="min-h-screen bg-zinc-50 text-zinc-900">
+      {/* Header */}
       <header className="relative overflow-hidden">
         <div className="absolute inset-0 bg-[#1f4ed8]" />
         <div className="absolute inset-y-0 right-[-20%] w-[60%] rotate-[-8deg] bg-sky-400/60" />
@@ -130,7 +131,7 @@ export default function HomeMenu() {
               unoptimized
               className="h-12 w-auto md:h-28 object-contain drop-shadow-sm"
             />
-            <div className="min-w-0">
+            <div>
               <h1 className="text-white uppercase font-semibold tracking-widest text-2xl md:text-3xl">
                 Spartan One
               </h1>
@@ -142,7 +143,7 @@ export default function HomeMenu() {
         </div>
       </header>
 
-      {/* Contenido principal */}
+      {/* Contenido */}
       <main className="relative mx-auto max-w-7xl px-6 py-10 space-y-8">
         {/* Saludo */}
         <section className="rounded-2xl border bg-white shadow-sm p-6 text-center">
@@ -155,9 +156,10 @@ export default function HomeMenu() {
 
         {/* Dashboard */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Gauge principal */}
           <div className="bg-white shadow rounded-2xl p-6 flex flex-col items-center">
             <h2 className="text-lg font-semibold text-blue-600 mb-4">
-              Avance Meta Mensual
+              Avance Meta {mesActual.charAt(0) + mesActual.slice(1).toLowerCase()} {anioActual}
             </h2>
             <GaugeChart
               id="gauge-chart"
@@ -181,6 +183,7 @@ export default function HomeMenu() {
             </p>
           </div>
 
+          {/* KPIs secundarios */}
           <div className="grid grid-cols-2 gap-4">
             <Card>
               <CardContent className="p-4">
@@ -236,53 +239,6 @@ export default function HomeMenu() {
             </Card>
           </div>
         </div>
-
-        {/* Encuesta de satisfacción */}
-        <section className="bg-white rounded-2xl shadow p-6 max-w-xl mx-auto mt-10 text-center">
-          <h2 className="text-xl font-semibold mb-3 text-blue-600">
-            💬 ¿Qué te ha parecido SpartanOne?
-          </h2>
-
-          {enviado ? (
-            <p className="text-green-600 font-medium">
-              ✅ ¡Gracias por tu opinión!
-            </p>
-          ) : (
-            <form onSubmit={enviarEncuesta}>
-              <div className="flex justify-center space-x-2 mb-4">
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => setRating(n)}
-                    className={`text-3xl ${
-                      n <= (rating || 0)
-                        ? "text-yellow-400"
-                        : "text-gray-300 hover:text-yellow-200"
-                    }`}
-                  >
-                    ★
-                  </button>
-                ))}
-              </div>
-
-              <textarea
-                placeholder="¿Qué podríamos mejorar?"
-                value={comentario}
-                onChange={(e) => setComentario(e.target.value)}
-                className="w-full border rounded-md p-2 mb-3 text-sm"
-                rows={3}
-              />
-
-              <button
-                type="submit"
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-md"
-              >
-                Enviar opinión
-              </button>
-            </form>
-          )}
-        </section>
       </main>
     </div>
   );
