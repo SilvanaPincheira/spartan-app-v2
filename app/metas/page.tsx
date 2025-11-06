@@ -17,8 +17,8 @@ export default function MetasPage() {
     "total_quimicos",
     "no_son_equipo_venta",
     "meta_noviembre_2025",
-    "cumplimiento",
-    "cumplimiento_",
+    "cumplimiento_dinero",
+    "cumplimiento_porcentaje",
   ];
 
   // Nombres legibles para la UI
@@ -32,8 +32,8 @@ export default function MetasPage() {
     total_quimicos: "Total Químicos",
     no_son_equipo_venta: "No son Equipo Venta",
     meta_noviembre_2025: "Meta Noviembre 2025",
-    cumplimiento: "Cumplimiento $",
-    cumplimiento_: "Cumplimiento %",
+    cumplimiento_dinero: "Cumplimiento $",
+    cumplimiento_porcenatje: "Cumplimiento %",
   };
 
   useEffect(() => {
