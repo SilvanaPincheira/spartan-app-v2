@@ -7,7 +7,9 @@ import { useState, useEffect } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import AvisoFlotante from "@/app/components/AvisoFlotante";
 
-
+// 🧩 Importa los módulos de modo offline
+import { useOfflineSync } from "@/lib/hooks/useOfflineSync";
+import { dbGetAll } from "@/lib/offline/db";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -16,7 +18,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const [menuItems, setMenuItems] = useState<any[]>([]);
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // 🔹 Cargar sesión y perfil
+  // 🟢 Activa el modo offline apenas carga la app
+  useOfflineSync();
+
+  useEffect(() => {
+    // Fuerza la creación de la base IndexedDB
+    dbGetAll().then(() => console.log("🟢 IndexedDB inicializada (spartan_offline_db)"));
+  }, []);
+
+  // 🔹 Cargar sesión y perfil desde Supabase
   useEffect(() => {
     const supabase = createClientComponentClient();
 
@@ -31,9 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           .eq("id", data.session.user.id)
           .single();
 
-        if (perfilData) {
-          setPerfil(perfilData);
-        }
+        if (perfilData) setPerfil(perfilData);
       }
     }
 
@@ -52,7 +60,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       { name: "Metas", href: "/metas", icon: "🎯" },
       { name: "Facturas y NC", href: "/facturas-nc", icon: "🧾" },
       { name: "Comisiones", href: "/comisiones", icon: "💰" },
-      { name: "Herramientas", href:"/herramientas", icon:"🧰"}
+      { name: "Herramientas", href: "/herramientas", icon: "🧰" }
     ];
 
     if (perfil?.role === "gerencia" || perfil?.department?.startsWith("gerencia_")) {
@@ -192,7 +200,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 ))}
               </nav>
 
-              {/* ==== Botón login/logout (Móvil) ==== */}
               <div className="p-4 border-t">
                 {session ? (
                   <button
@@ -220,10 +227,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
         {/* ==== Contenido principal ==== */}
         <main className="flex-1 p-6 mt-14 md:mt-0 overflow-y-auto">{children}</main>
-  <AvisoFlotante />
+
+        {/* ==== Aviso flotante global ==== */}
+        <AvisoFlotante />
       </body>
     </html>
   );
 }
-
-
