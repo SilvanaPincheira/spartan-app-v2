@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent } from "@/app/components/ui/card";
 import GaugeChart from "react-gauge-chart";
 
 const LOGO_URL =
