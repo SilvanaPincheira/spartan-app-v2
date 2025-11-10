@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
-import AvisoFlotante from "@/components/AvisoFlotante";
+import AvisoFlotante from "@/app/components/AvisoFlotante";
 
 
 
