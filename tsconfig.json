@@ -1,30 +1,37 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["./*"],
-      "@/components/*": ["./app/components/*"],
-      "@/lib/*": ["./lib/*"]
-    },
+    /* ======== 🔧 CONFIGURACIÓN BASE ======== */
     "target": "ES2020",
     "lib": ["DOM", "DOM.Iterable", "ES2020"],
-    "downlevelIteration": true,
     "module": "ESNext",
     "moduleResolution": "node",
-    "strict": true,
-    "noEmit": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true,
     "jsx": "preserve",
-    "incremental": true,
     "allowJs": true,
+    "resolveJsonModule": true,
+    "incremental": true,
+    "downlevelIteration": true,
+    "noEmit": true,
+
+    /* ======== ⚙️ TYPE CHECKING ======== */
+    "strict": true,
+    "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "esModuleInterop": true,
     "isolatedModules": true,
+
+    /* ======== 🧭 ALIAS GLOBAL ======== */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["*"]
+    },
+
+    /* ======== 🧩 PLUGINS ======== */
     "plugins": [
       { "name": "next" }
     ]
   },
+
+  /* ======== 📁 INCLUDES / EXCLUDES ======== */
   "include": [
     "next-env.d.ts",
     ".next/types/**/*.ts",

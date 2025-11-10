@@ -5,7 +5,7 @@ import React from "react";
 
 /* URL por defecto: tu enlace de Google Drive */
 const DEFAULT_CATALOGO_PDF_URL =
-  "https://drive.google.com/file/d/1qrh8WT11yFtPMo2fQy3sWnN4_gsiuihh/view?usp=sharing";
+  "";
 
 /* Mini hook para persistir en localStorage */
 function useLocalStorage<T>(key: string, initial: T) {
