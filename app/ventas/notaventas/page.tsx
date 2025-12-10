@@ -680,7 +680,7 @@ function applyEspecial(row: Line): Line {
           const descCalc = base > 0 ? ((base - pv) / base) * 100 : 0;
   
           // 🚫 Si el precio ingresado genera descuento > 20%, no permitirlo
-          if (descCalc > 20) {
+          if (descCalc > 24.727) {
             alert(
               `❌ Precio inferior al 80% del precio base.\n\n` +
                 `Precio base: ${money(base)}\n` +
@@ -694,7 +694,7 @@ function applyEspecial(row: Line): Line {
             row.descuento = 0;
           } else {
             row.precioVenta = pv;
-            row.descuento = Math.round(clamp(descCalc, -20, 20) * 100) / 100;
+            row.descuento = Math.round(clamp(descCalc, -20, 24.727) * 100) / 100;
           }
         }
       }
@@ -712,7 +712,7 @@ function applyEspecial(row: Line): Line {
         // Limita descuento manual dentro del rango permitido
         row.descuento = row.isEspecial
           ? 0
-          : Math.round(clamp(num(row.descuento), -20, 20) * 100) / 100;
+          : Math.round(clamp(num(row.descuento), -20, 24.727) * 100) / 100;
   
         // Si cambia el % descuento, recalcula precio de venta
         if (field === "descuento") {
