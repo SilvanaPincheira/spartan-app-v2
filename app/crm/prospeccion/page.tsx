@@ -9,7 +9,6 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 const CSV_PIA_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vTiXecS06_-jxv0O98PUG2jMVT-8M5HpliYZZNyoG2EdrstE0ydTATYxdnih18zwGXow6hsxCtz90vi/pub?gid=0&single=true&output=csv";
 
-// Columna de control de permisos dentro del CSV (tu hoja ya la tiene)
 const PIA_OWNER_COL_NORM = "email_col"; // normalizado desde EMAIL_COL
 
 /** =========================
@@ -46,12 +45,10 @@ type FuenteDatos = "MANUAL" | "CSV_PIA";
 type PiaRow = Record<string, string>;
 
 type ProspectoForm = {
-  // automáticos
   fecha: string;
   folio: string;
   ejecutivoEmail: string;
 
-  // datos
   nombreRazonSocial: string;
   rut: string;
   telefono: string;
@@ -60,16 +57,13 @@ type ProspectoForm = {
   rubro: string;
   montoProyectado: string;
 
-  // selects fijos
   etapaId: number;
   fechaCierreId: number;
   probCierreId: number;
 
-  // comercial
   origenProspecto: string;
   observacion: string;
 
-  // trazabilidad fuente
   fuenteDatos: FuenteDatos;
   sourceId?: string;
   sourcePayload?: string;
@@ -77,19 +71,15 @@ type ProspectoForm = {
 
 /** =========================
  *  NORMALIZACIÓN HEADERS
- *  - quita BOM
- *  - minúsculas
- *  - quita tildes
- *  - espacios/guiones → _
  *  ========================= */
 function normalizeHeader(h: string) {
   return (h || "")
-    .replace(/^\uFEFF/, "") // BOM
+    .replace(/^\uFEFF/, "")
     .trim()
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // tildes
-    .replace(/[^a-z0-9]+/g, "_") // espacios, guiones → _
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_|_$/g, "");
 }
 
@@ -174,8 +164,6 @@ function normalizeEmail(s: string) {
 }
 
 function makeSourceId(row: PiaRow) {
-  // para tu sheet:
-  // nombre_o_razon_social + e_mail
   const empresa = row.nombre_o_razon_social || "";
   const email = row.e_mail || "";
   const key = `${empresa}|${normalizeEmail(email)}`.trim().toLowerCase();
@@ -183,30 +171,26 @@ function makeSourceId(row: PiaRow) {
 }
 
 function mapPiaRowToForm(row: PiaRow): Partial<ProspectoForm> {
-  // Mapeo exacto a tu BD (según screenshot)
   return {
     nombreRazonSocial: row.nombre_o_razon_social || "",
     correo: row.e_mail || "",
     telefono: row.telefono || "",
     direccion: row.direccion || "",
-    rubro: row.cargo || "", // temporal: si rubro viene de otra columna lo cambiamos
+    rubro: row.cargo || "",
     montoProyectado: row.monto_prospecto || "",
   };
 }
 
-/** =========================
- *  VALIDACIÓN MVP
- *  ========================= */
 function validateForm(f: ProspectoForm) {
   const errors: Record<string, string> = {};
   if (!f.nombreRazonSocial.trim()) errors.nombreRazonSocial = "Campo requerido";
-  if (!normalizeEmail(f.correo)) errors.correo = "Campo requerido";
-  if (
-    normalizeEmail(f.correo) &&
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(f.correo))
-  ) {
+
+  const email = normalizeEmail(f.correo);
+  if (!email) errors.correo = "Campo requerido";
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     errors.correo = "Formato de correo inválido";
   }
+
   if (!f.direccion.trim()) errors.direccion = "Campo requerido";
   if (!f.rubro.trim()) errors.rubro = "Campo requerido";
   if (!f.montoProyectado.trim()) errors.montoProyectado = "Campo requerido";
@@ -246,8 +230,11 @@ export default function ProspeccionPage() {
   const [search, setSearch] = useState("");
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
 
-  // NUEVO: mostrar 5 o todos
+  // mostrar 5 o todos
   const [showAll, setShowAll] = useState(false);
+
+  // guardado
+  const [saving, setSaving] = useState(false);
 
   // Form
   const [form, setForm] = useState<ProspectoForm>(() => ({
@@ -274,6 +261,13 @@ export default function ProspeccionPage() {
   }));
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // nombres derivados
+  const etapaNombre = CRM_ETAPAS.find((e) => e.id === form.etapaId)?.label ?? "";
+  const fechaCierreNombre =
+    CRM_FECHA_CIERRE.find((e) => e.id === form.fechaCierreId)?.label ?? "";
+  const probCierreNombre =
+    CRM_PROB_CIERRE.find((e) => e.id === form.probCierreId)?.label ?? "";
 
   /** 1) Usuario real */
   useEffect(() => {
@@ -340,11 +334,16 @@ export default function ProspeccionPage() {
     if (fuente === "CSV_PIA" && !piaAllowed) setFuente("MANUAL");
   }, [fuente, piaAllowed]);
 
-  /** 4) Al cambiar fuente, refresca metadatos del registro */
+  /** 4) Fuente -> actualiza form.fuenteDatos SIEMPRE */
+  useEffect(() => {
+    setForm((prev) => ({ ...prev, fuenteDatos: fuente }));
+  }, [fuente]);
+
+  /** 5) Al cambiar fuente, refresca metadatos del registro */
   useEffect(() => {
     setErrors({});
     setSelectedSourceId(null);
-    setShowAll(false); // por defecto: 5
+    setShowAll(false);
 
     setForm((prev) => ({
       ...prev,
@@ -359,13 +358,12 @@ export default function ProspeccionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fuente]);
 
-  /** 5) Filtrado + límite (5 por defecto, botón mostrar todos).
+  /** 6) Filtrado + límite (5 por defecto, botón mostrar todos)
    *  - sin búsqueda: 5 o todos
-   *  - con búsqueda: max 20 (para performance)
+   *  - con búsqueda: max 20
    */
   const filteredPia = useMemo(() => {
     const q = search.trim().toLowerCase();
-
     const limit = q ? 20 : showAll ? piaRows.length : 5;
 
     if (!q) return piaRows.slice(0, limit);
@@ -386,12 +384,6 @@ export default function ProspeccionPage() {
     return matches.slice(0, limit);
   }, [piaRows, search, showAll]);
 
-  const etapaNombre = CRM_ETAPAS.find((e) => e.id === form.etapaId)?.label ?? "";
-  const fechaCierreNombre =
-    CRM_FECHA_CIERRE.find((e) => e.id === form.fechaCierreId)?.label ?? "";
-  const probCierreNombre =
-    CRM_PROB_CIERRE.find((e) => e.id === form.probCierreId)?.label ?? "";
-
   function loadFromPiaRow(row: PiaRow) {
     const patch = mapPiaRowToForm(row);
     const sid = makeSourceId(row);
@@ -411,18 +403,85 @@ export default function ProspeccionPage() {
     setErrors(v);
     if (Object.keys(v).length > 0) return;
 
-    const payload = {
-      ...form,
-      correo: normalizeEmail(form.correo),
-      montoProyectado: Number(String(form.montoProyectado).replace(/[^\d]/g, "")),
-      etapaNombre,
-      fechaCierreNombre,
-      probCierreNombre,
-      estado: "PENDIENTE_ASIGNACION",
-    };
+    // ✅ GUARDAR SOLO MANUAL (por ahora)
+    if (form.fuenteDatos === "MANUAL") {
+      try {
+        setSaving(true);
 
-    console.log("✅ payload listo para guardar:", payload);
-    alert("Prospecto listo (payload en consola). Falta conectar guardado a Sheets.");
+        const resp = await fetch("/api/crm/prospectos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            created_at: new Date().toISOString(),
+            folio: form.folio,
+            fuente: "MANUAL",
+            source_id: form.sourceId || "",
+
+            nombre_razon_social: form.nombreRazonSocial,
+            rut: form.rut,
+            telefono: form.telefono,
+            correo: normalizeEmail(form.correo),
+            direccion: form.direccion,
+            rubro: form.rubro,
+            monto_proyectado: Number(String(form.montoProyectado).replace(/[^\d]/g, "")),
+
+            etapa_id: form.etapaId,
+            etapa_nombre: etapaNombre,
+            fecha_cierre_id: form.fechaCierreId,
+            fecha_cierre_nombre: fechaCierreNombre,
+            prob_cierre_id: form.probCierreId,
+            prob_cierre_nombre: probCierreNombre,
+
+            origen_prospecto: form.origenProspecto,
+            observacion: form.observacion,
+
+            ejecutivo_email: form.ejecutivoEmail,
+            estado: "PENDIENTE_ASIGNACION",
+            asignado_a: "",
+            asignado_por: "",
+            asignado_at: "",
+          }),
+        });
+
+        const data = await resp.json();
+
+        if (!data.ok) {
+          alert(`❌ Error guardando: ${data.error}`);
+          return;
+        }
+
+        alert(
+          data.duplicated
+            ? "⚠️ El prospecto ya existía (folio duplicado)."
+            : "✅ Prospecto guardado en CRM_DB"
+        );
+
+        // Limpieza
+        setForm((p) => ({
+          ...p,
+          fecha: nowCL(),
+          folio: makeFolio(),
+          nombreRazonSocial: "",
+          rut: "",
+          telefono: "",
+          correo: "",
+          direccion: "",
+          rubro: "",
+          montoProyectado: "",
+          observacion: "",
+          sourceId: undefined,
+          sourcePayload: undefined,
+        }));
+        setErrors({});
+        setSelectedSourceId(null);
+        return;
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    // Fuente distinta a MANUAL (por ahora no guardamos)
+    alert("Fuente distinta a MANUAL (por ahora no se guarda).");
   }
 
   if (authLoading) {
@@ -489,7 +548,6 @@ export default function ProspeccionPage() {
                 />
               </label>
 
-              {/* Conteo + BOTÓN mostrar */}
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <div style={{ opacity: 0.8 }}>
                   {piaLoading ? "Cargando BD..." : `${piaRows.length} registros disponibles`}
@@ -572,12 +630,7 @@ export default function ProspeccionPage() {
 
             <div style={{ marginTop: 10, fontSize: 12, opacity: 0.8 }}>
               Visible solo si <b>EMAIL_COL</b> coincide con tu login: <b>{loggedEmail}</b>.
-              {!search.trim() && (
-                <>
-                  {" "}
-                  (Mostrando {showAll ? "todos" : "5"}).
-                </>
-              )}
+              {!search.trim() && <> (Mostrando {showAll ? "todos" : "5"}).</>}
               {search.trim() && <> (Búsqueda muestra máx. 20 resultados).</>}
             </div>
           </div>
@@ -720,16 +773,18 @@ export default function ProspeccionPage() {
 
           <button
             onClick={onSubmit}
+            disabled={saving}
             style={{
               padding: "10px 12px",
               borderRadius: 10,
               border: "1px solid #111827",
-              background: "#111827",
+              background: saving ? "#6b7280" : "#111827",
               color: "white",
-              cursor: "pointer",
+              cursor: saving ? "not-allowed" : "pointer",
+              opacity: saving ? 0.9 : 1,
             }}
           >
-            Guardar (pendiente asignación)
+            {saving ? "Guardando..." : "Guardar (pendiente asignación)"}
           </button>
         </div>
       </div>
@@ -761,7 +816,9 @@ function Field(props: {
           border: `1px solid ${props.error ? "crimson" : "#d1d5db"}`,
         }}
       />
-      {props.error && <div style={{ color: "crimson", fontSize: 12, marginTop: 6 }}>{props.error}</div>}
+      {props.error && (
+        <div style={{ color: "crimson", fontSize: 12, marginTop: 6 }}>{props.error}</div>
+      )}
     </label>
   );
 }
@@ -793,7 +850,8 @@ function SelectField(props: {
           </option>
         ))}
       </select>
-      {props.error && <div style={{ color: "crimson", fontSize: 12, marginTop: 6 }}>{props.error}</div>}
+      {props.error && (
+        <div style={{ color: "crimson", fontSize: 12, marginTop: 6 }}>{props.error}</div>
+      )}
     </label>
-  );
-}
+  )}
