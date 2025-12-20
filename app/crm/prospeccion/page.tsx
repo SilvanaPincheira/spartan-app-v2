@@ -9,8 +9,8 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 const CSV_PIA_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vTiXecS06_-jxv0O98PUG2jMVT-8M5HpliYZZNyoG2EdrstE0ydTATYxdnih18zwGXow6hsxCtz90vi/pub?gid=0&single=true&output=csv";
 
-// Columna que agregarás a la BD Pía para permisos
-const PIA_OWNER_COL = "EMAIL_COL";
+// Columna de control de permisos dentro del CSV (tu hoja ya la tiene)
+const PIA_OWNER_COL_NORM = "email_col"; // normalizado desde EMAIL_COL
 
 /** =========================
  *  LISTAS FIJAS
@@ -66,7 +66,7 @@ type ProspectoForm = {
   probCierreId: number;
 
   // comercial
-  origenProspecto: string; // RRSS/Ferias/etc
+  origenProspecto: string;
   observacion: string;
 
   // trazabilidad fuente
@@ -74,6 +74,24 @@ type ProspectoForm = {
   sourceId?: string;
   sourcePayload?: string;
 };
+
+/** =========================
+ *  NORMALIZACIÓN HEADERS
+ *  - quita BOM
+ *  - minúsculas
+ *  - quita tildes
+ *  - espacios/guiones → _
+ *  ========================= */
+function normalizeHeader(h: string) {
+  return (h || "")
+    .replace(/^\uFEFF/, "") // BOM
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // tildes
+    .replace(/[^a-z0-9]+/g, "_") // espacios, guiones → _
+    .replace(/^_|_$/g, "");
+}
 
 /** =========================
  *  CSV PARSER seguro
@@ -118,16 +136,14 @@ function parseCsv(text: string): PiaRow[] {
     }
     cur += ch;
   }
-
   pushCell();
   pushRow();
 
   if (rows.length < 2) return [];
 
-  const headers = rows[0].map((h) => h.trim());
-  const data = rows.slice(1);
+  const headers = rows[0].map(normalizeHeader);
 
-  return data.map((cells) => {
+  return rows.slice(1).map((cells) => {
     const obj: PiaRow = {};
     headers.forEach((h, idx) => {
       obj[h] = (cells[idx] ?? "").trim();
@@ -158,46 +174,23 @@ function normalizeEmail(s: string) {
 }
 
 function makeSourceId(row: PiaRow) {
-  const empresa =
-    row["Empresa"] ||
-    row["RAZON SOCIAL"] ||
-    row["Razon Social"] ||
-    row["empresa"] ||
-    "";
-  const email = row["Email"] || row["Correo"] || row["correo"] || row["E-mail"] || "";
+  // para tu sheet:
+  // nombre_o_razon_social + e_mail
+  const empresa = row.nombre_o_razon_social || "";
+  const email = row.e_mail || "";
   const key = `${empresa}|${normalizeEmail(email)}`.trim().toLowerCase();
   return `pia_${key.replace(/\s+/g, "_").slice(0, 60)}_${key.length}`;
 }
 
 function mapPiaRowToForm(row: PiaRow): Partial<ProspectoForm> {
-  const empresa =
-    row["Empresa"] ||
-    row["RAZON SOCIAL"] ||
-    row["Razon Social"] ||
-    row["empresa"] ||
-    "";
-
-  const email =
-    row["Email"] || row["Correo"] || row["correo"] || row["E-mail"] || "";
-
-  const nombre = row["Nombre"] || row["NOMBRE"] || "";
-  const apellido = row["Apellido"] || row["APELLIDO"] || "";
-  const contacto = `${nombre} ${apellido}`.trim();
-
-  const telefono =
-    row["Telefono"] || row["Teléfono"] || row["Fono"] || row["fono"] || "";
-
-  const direccion =
-    row["Direccion"] || row["Dirección"] || row["direccion"] || "";
-
-  const rubro = row["Rubro"] || row["rubro"] || "";
-
+  // Mapeo exacto a tu BD (según screenshot)
   return {
-    nombreRazonSocial: empresa || contacto,
-    correo: email,
-    telefono,
-    direccion,
-    rubro,
+    nombreRazonSocial: row.nombre_o_razon_social || "",
+    correo: row.e_mail || "",
+    telefono: row.telefono || "",
+    direccion: row.direccion || "",
+    rubro: row.cargo || "", // temporal: si rubro viene de otra columna lo cambiamos
+    montoProyectado: row.monto_prospecto || "",
   };
 }
 
@@ -279,7 +272,7 @@ export default function ProspeccionPage() {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // 1) Obtener usuario real
+  /** 1) Usuario real */
   useEffect(() => {
     (async () => {
       try {
@@ -298,16 +291,16 @@ export default function ProspeccionPage() {
     })();
   }, [supabase]);
 
-  // 2) Cargar CSV y filtrar por EMAIL_COL cuando ya sabemos el email
+  /** 2) Cargar CSV y filtrar por email_col */
   useEffect(() => {
     if (authLoading) return;
+
     if (!loggedEmail) {
       setPiaAllowed(false);
       setPiaRows([]);
       return;
     }
 
-    // Cargamos CSV 1 vez y filtramos por dueño
     (async () => {
       try {
         setPiaLoading(true);
@@ -321,15 +314,8 @@ export default function ProspeccionPage() {
 
         const emailNorm = normalizeEmail(loggedEmail);
 
-        // permiso por fila: EMAIL_COL = usuario logueado
         const allowedRows = rows.filter((r) => {
-          const owner =
-            normalizeEmail(
-              r[PIA_OWNER_COL] ||
-                r[PIA_OWNER_COL.toLowerCase()] ||
-                r["email_col"] ||
-                ""
-            );
+          const owner = normalizeEmail(r[PIA_OWNER_COL_NORM] || "");
           return owner === emailNorm;
         });
 
@@ -346,43 +332,56 @@ export default function ProspeccionPage() {
     })();
   }, [authLoading, loggedEmail]);
 
-  // 3) Si el usuario intenta elegir CSV_PIA sin permiso, lo devolvemos a MANUAL
+  /** 3) Si intentan elegir CSV sin permiso, vuelve a Manual */
   useEffect(() => {
-    if (fuente === "CSV_PIA" && !piaAllowed) {
-      setFuente("MANUAL");
-    }
+    if (fuente === "CSV_PIA" && !piaAllowed) setFuente("MANUAL");
   }, [fuente, piaAllowed]);
 
-  // filtro de búsqueda en tabla BD
+  /** 4) Al cambiar fuente, refresca metadatos del registro */
+  useEffect(() => {
+    setErrors({});
+    setSelectedSourceId(null);
+
+    setForm((prev) => ({
+      ...prev,
+      fecha: nowCL(),
+      folio: makeFolio(),
+      ejecutivoEmail: loggedEmail,
+      fuenteDatos: fuente,
+      origenProspecto: fuente === "CSV_PIA" ? "RRSS" : prev.origenProspecto || "Manual",
+      sourceId: undefined,
+      sourcePayload: undefined,
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fuente]);
+
+  /** 5) Filtrado de búsqueda */
   const filteredPia = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return piaRows.slice(0, 20);
 
     const matches = piaRows.filter((r) => {
-      const empresa = (r["Empresa"] || r["Razon Social"] || r["RAZON SOCIAL"] || "").toLowerCase();
-      const email = (r["Email"] || r["Correo"] || "").toLowerCase();
-      const nombre = (r["Nombre"] || "").toLowerCase();
-      const apellido = (r["Apellido"] || "").toLowerCase();
+      const razon = (r.nombre_o_razon_social || "").toLowerCase();
+      const email = (r.e_mail || "").toLowerCase();
+      const contacto = (r.contacto || "").toLowerCase();
+      const dir = (r.direccion || "").toLowerCase();
       return (
-        empresa.includes(q) ||
+        razon.includes(q) ||
         email.includes(q) ||
-        nombre.includes(q) ||
-        apellido.includes(q)
+        contacto.includes(q) ||
+        dir.includes(q)
       );
     });
 
     return matches.slice(0, 20);
   }, [piaRows, search]);
 
-  // nombres (para guardar)
-  const etapaNombre =
-    CRM_ETAPAS.find((e) => e.id === form.etapaId)?.label ?? "";
+  const etapaNombre = CRM_ETAPAS.find((e) => e.id === form.etapaId)?.label ?? "";
   const fechaCierreNombre =
     CRM_FECHA_CIERRE.find((e) => e.id === form.fechaCierreId)?.label ?? "";
   const probCierreNombre =
     CRM_PROB_CIERRE.find((e) => e.id === form.probCierreId)?.label ?? "";
 
-  // cargar fila seleccionada al form
   function loadFromPiaRow(row: PiaRow) {
     const patch = mapPiaRowToForm(row);
     const sid = makeSourceId(row);
@@ -470,12 +469,12 @@ export default function ProspeccionPage() {
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
               <label style={{ flex: 1, minWidth: 260 }}>
                 <span style={{ display: "block", fontSize: 12, marginBottom: 6 }}>
-                  Buscar en BD (empresa, email, nombre)
+                  Buscar en BD (razón social, email, contacto, dirección)
                 </span>
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Ej: vinett / @gmail / Bakery..."
+                  placeholder="Ej: klap / @gmail / región..."
                   style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
                 />
               </label>
@@ -491,31 +490,28 @@ export default function ProspeccionPage() {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ textAlign: "left", fontSize: 12, opacity: 0.8 }}>
-                    <th style={{ padding: 8, borderBottom: "1px solid #e5e7eb" }}>Empresa</th>
+                    <th style={{ padding: 8, borderBottom: "1px solid #e5e7eb" }}>Razón Social</th>
                     <th style={{ padding: 8, borderBottom: "1px solid #e5e7eb" }}>Contacto</th>
-                    <th style={{ padding: 8, borderBottom: "1px solid #e5e7eb" }}>Email</th>
-                    <th style={{ padding: 8, borderBottom: "1px solid #e5e7eb" }}>Región</th>
+                    <th style={{ padding: 8, borderBottom: "1px solid #e5e7eb" }}>E-mail</th>
+                    <th style={{ padding: 8, borderBottom: "1px solid #e5e7eb" }}>Dirección</th>
                     <th style={{ padding: 8, borderBottom: "1px solid #e5e7eb" }}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredPia.map((r, idx) => {
-                    const empresa = r["Empresa"] || r["Razon Social"] || r["RAZON SOCIAL"] || "";
-                    const nombre = r["Nombre"] || "";
-                    const apellido = r["Apellido"] || "";
-                    const email = r["Email"] || r["Correo"] || "";
-                    const region = r["Región"] || r["Region"] || r["REGION"] || "";
+                    const razon = r.nombre_o_razon_social || "";
+                    const contacto = r.contacto || "";
+                    const email = r.e_mail || "";
+                    const direccion = r.direccion || "";
                     const sid = makeSourceId(r);
                     const isSel = selectedSourceId === sid;
 
                     return (
                       <tr key={`${sid}_${idx}`} style={{ background: isSel ? "#eef2ff" : "transparent" }}>
-                        <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{empresa}</td>
-                        <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
-                          {`${nombre} ${apellido}`.trim()}
-                        </td>
+                        <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{razon}</td>
+                        <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{contacto}</td>
                         <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{email}</td>
-                        <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{region}</td>
+                        <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{direccion}</td>
                         <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
                           <button
                             onClick={() => loadFromPiaRow(r)}
@@ -546,7 +542,7 @@ export default function ProspeccionPage() {
             </div>
 
             <div style={{ marginTop: 10, fontSize: 12, opacity: 0.8 }}>
-              Se muestran solo filas donde <b>{PIA_OWNER_COL}</b> coincide con tu correo: <b>{loggedEmail}</b>.
+              Visible solo si <b>EMAIL_COL</b> coincide con tu login: <b>{loggedEmail}</b>.
             </div>
           </div>
         )}
