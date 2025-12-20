@@ -246,6 +246,9 @@ export default function ProspeccionPage() {
   const [search, setSearch] = useState("");
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
 
+  // NUEVO: mostrar 5 o todos
+  const [showAll, setShowAll] = useState(false);
+
   // Form
   const [form, setForm] = useState<ProspectoForm>(() => ({
     fecha: nowCL(),
@@ -341,6 +344,7 @@ export default function ProspeccionPage() {
   useEffect(() => {
     setErrors({});
     setSelectedSourceId(null);
+    setShowAll(false); // por defecto: 5
 
     setForm((prev) => ({
       ...prev,
@@ -355,10 +359,16 @@ export default function ProspeccionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fuente]);
 
-  /** 5) Filtrado de búsqueda */
+  /** 5) Filtrado + límite (5 por defecto, botón mostrar todos).
+   *  - sin búsqueda: 5 o todos
+   *  - con búsqueda: max 20 (para performance)
+   */
   const filteredPia = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return piaRows.slice(0, 20);
+
+    const limit = q ? 20 : showAll ? piaRows.length : 5;
+
+    if (!q) return piaRows.slice(0, limit);
 
     const matches = piaRows.filter((r) => {
       const razon = (r.nombre_o_razon_social || "").toLowerCase();
@@ -373,8 +383,8 @@ export default function ProspeccionPage() {
       );
     });
 
-    return matches.slice(0, 20);
-  }, [piaRows, search]);
+    return matches.slice(0, limit);
+  }, [piaRows, search, showAll]);
 
   const etapaNombre = CRM_ETAPAS.find((e) => e.id === form.etapaId)?.label ?? "";
   const fechaCierreNombre =
@@ -479,8 +489,27 @@ export default function ProspeccionPage() {
                 />
               </label>
 
-              <div style={{ opacity: 0.8 }}>
-                {piaLoading ? "Cargando BD..." : `${piaRows.length} registros disponibles`}
+              {/* Conteo + BOTÓN mostrar */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ opacity: 0.8 }}>
+                  {piaLoading ? "Cargando BD..." : `${piaRows.length} registros disponibles`}
+                </div>
+
+                {!piaLoading && piaRows.length > 5 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAll((v) => !v)}
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid #d1d5db",
+                      background: "white",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {showAll ? "Mostrar menos" : "Mostrar todos"}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -543,6 +572,13 @@ export default function ProspeccionPage() {
 
             <div style={{ marginTop: 10, fontSize: 12, opacity: 0.8 }}>
               Visible solo si <b>EMAIL_COL</b> coincide con tu login: <b>{loggedEmail}</b>.
+              {!search.trim() && (
+                <>
+                  {" "}
+                  (Mostrando {showAll ? "todos" : "5"}).
+                </>
+              )}
+              {search.trim() && <> (Búsqueda muestra máx. 20 resultados).</>}
             </div>
           </div>
         )}
