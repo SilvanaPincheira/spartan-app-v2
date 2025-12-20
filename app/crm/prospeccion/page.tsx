@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 /** =========================
  *  CONFIG
@@ -8,8 +9,11 @@ import React, { useEffect, useMemo, useState } from "react";
 const CSV_PIA_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vTiXecS06_-jxv0O98PUG2jMVT-8M5HpliYZZNyoG2EdrstE0ydTATYxdnih18zwGXow6hsxCtz90vi/pub?gid=0&single=true&output=csv";
 
+// Columna que agregarás a la BD Pía para permisos
+const PIA_OWNER_COL = "EMAIL_COL";
+
 /** =========================
- *  LISTAS FIJAS (tus 3 listas)
+ *  LISTAS FIJAS
  *  ========================= */
 const CRM_ETAPAS = [
   { id: 1, label: "Contactado" },
@@ -39,7 +43,6 @@ const CRM_PROB_CIERRE = [
  *  TIPOS
  *  ========================= */
 type FuenteDatos = "MANUAL" | "CSV_PIA";
-
 type PiaRow = Record<string, string>;
 
 type ProspectoForm = {
@@ -55,15 +58,15 @@ type ProspectoForm = {
   correo: string;
   direccion: string;
   rubro: string;
-  montoProyectado: string; // string para input, convertir al guardar
+  montoProyectado: string;
 
   // selects fijos
   etapaId: number;
   fechaCierreId: number;
   probCierreId: number;
 
-  // marketing/comercial
-  origenProspecto: string; // RRSS / Ferias / Referido / Web / Manual / Otro
+  // comercial
+  origenProspecto: string; // RRSS/Ferias/etc
   observacion: string;
 
   // trazabilidad fuente
@@ -73,7 +76,7 @@ type ProspectoForm = {
 };
 
 /** =========================
- *  CSV PARSER seguro (comas dentro de comillas)
+ *  CSV PARSER seguro
  *  ========================= */
 function parseCsv(text: string): PiaRow[] {
   const rows: string[][] = [];
@@ -86,7 +89,6 @@ function parseCsv(text: string): PiaRow[] {
     cur = "";
   };
   const pushRow = () => {
-    // ignora filas totalmente vacías
     if (row.some((c) => c.trim() !== "")) rows.push(row);
     row = [];
   };
@@ -96,7 +98,6 @@ function parseCsv(text: string): PiaRow[] {
     const next = text[i + 1];
 
     if (ch === '"' && next === '"') {
-      // comillas escapadas
       cur += '"';
       i++;
       continue;
@@ -110,7 +111,6 @@ function parseCsv(text: string): PiaRow[] {
       continue;
     }
     if ((ch === "\n" || ch === "\r") && !inQuotes) {
-      // maneja CRLF
       if (ch === "\r" && next === "\n") i++;
       pushCell();
       pushRow();
@@ -118,7 +118,7 @@ function parseCsv(text: string): PiaRow[] {
     }
     cur += ch;
   }
-  // flush final
+
   pushCell();
   pushRow();
 
@@ -141,7 +141,6 @@ function parseCsv(text: string): PiaRow[] {
  *  ========================= */
 function nowCL(): string {
   const d = new Date();
-  // ISO local simple (sin libs)
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
     d.getHours()
@@ -149,7 +148,6 @@ function nowCL(): string {
 }
 
 function makeFolio(): string {
-  // MVP: timestamp. Luego puedes usar contador central.
   const d = new Date();
   const year = d.getFullYear();
   return `PROS-${year}-${String(d.getTime()).slice(-6)}`;
@@ -159,21 +157,18 @@ function normalizeEmail(s: string) {
   return (s || "").trim().toLowerCase();
 }
 
-// genera un id estable desde datos base (para trazabilidad/duplicados MVP)
 function makeSourceId(row: PiaRow) {
   const empresa =
-    row["Empresa"] || row["RAZON SOCIAL"] || row["Razon Social"] || row["empresa"] || "";
-  const email =
-    row["Email"] || row["Correo"] || row["correo"] || row["E-mail"] || "";
+    row["Empresa"] ||
+    row["RAZON SOCIAL"] ||
+    row["Razon Social"] ||
+    row["empresa"] ||
+    "";
+  const email = row["Email"] || row["Correo"] || row["correo"] || row["E-mail"] || "";
   const key = `${empresa}|${normalizeEmail(email)}`.trim().toLowerCase();
-  // hash simple sin crypto (MVP): replace espacios + length
   return `pia_${key.replace(/\s+/g, "_").slice(0, 60)}_${key.length}`;
 }
 
-/**
- * Mapea una fila de la BD Pía hacia campos del formulario.
- * Ajusta los nombres de columnas según tu sheet real (si difiere, lo corregimos).
- */
 function mapPiaRowToForm(row: PiaRow): Partial<ProspectoForm> {
   const empresa =
     row["Empresa"] ||
@@ -195,11 +190,10 @@ function mapPiaRowToForm(row: PiaRow): Partial<ProspectoForm> {
   const direccion =
     row["Direccion"] || row["Dirección"] || row["direccion"] || "";
 
-  // si en tu sheet hay Región/País lo dejamos en observación o payload
   const rubro = row["Rubro"] || row["rubro"] || "";
 
   return {
-    nombreRazonSocial: empresa || contacto, // si no hay empresa, cae a contacto
+    nombreRazonSocial: empresa || contacto,
     correo: email,
     telefono,
     direccion,
@@ -214,14 +208,21 @@ function validateForm(f: ProspectoForm) {
   const errors: Record<string, string> = {};
   if (!f.nombreRazonSocial.trim()) errors.nombreRazonSocial = "Campo requerido";
   if (!normalizeEmail(f.correo)) errors.correo = "Campo requerido";
-  if (normalizeEmail(f.correo) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(f.correo)))
+  if (
+    normalizeEmail(f.correo) &&
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(f.correo))
+  ) {
     errors.correo = "Formato de correo inválido";
+  }
   if (!f.direccion.trim()) errors.direccion = "Campo requerido";
   if (!f.rubro.trim()) errors.rubro = "Campo requerido";
   if (!f.montoProyectado.trim()) errors.montoProyectado = "Campo requerido";
+
   const montoNum = Number(String(f.montoProyectado).replace(/[^\d]/g, ""));
-  if (f.montoProyectado.trim() && (!Number.isFinite(montoNum) || montoNum <= 0))
+  if (f.montoProyectado.trim() && (!Number.isFinite(montoNum) || montoNum <= 0)) {
     errors.montoProyectado = "Monto inválido";
+  }
+
   if (!f.origenProspecto.trim()) errors.origenProspecto = "Campo requerido";
   if (!f.etapaId) errors.etapaId = "Campo requerido";
   if (!f.fechaCierreId) errors.fechaCierreId = "Campo requerido";
@@ -233,9 +234,16 @@ function validateForm(f: ProspectoForm) {
  *  PAGE
  *  ========================= */
 export default function ProspeccionPage() {
-  // Simulación de login (reemplaza por tu auth real)
-  const loggedEmail = "eduardo.rios@spartan.cl";
+  const supabase = useMemo(() => createClientComponentClient(), []);
 
+  // auth
+  const [authLoading, setAuthLoading] = useState(true);
+  const [loggedEmail, setLoggedEmail] = useState<string>("");
+
+  // permisos BD Pía
+  const [piaAllowed, setPiaAllowed] = useState(false);
+
+  // UI fuente
   const [fuente, setFuente] = useState<FuenteDatos>("MANUAL");
 
   // BD Pía
@@ -243,12 +251,13 @@ export default function ProspeccionPage() {
   const [piaError, setPiaError] = useState<string | null>(null);
   const [piaRows, setPiaRows] = useState<PiaRow[]>([]);
   const [search, setSearch] = useState("");
+  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
 
   // Form
   const [form, setForm] = useState<ProspectoForm>(() => ({
     fecha: nowCL(),
     folio: makeFolio(),
-    ejecutivoEmail: loggedEmail,
+    ejecutivoEmail: "",
 
     nombreRazonSocial: "",
     rut: "",
@@ -269,57 +278,82 @@ export default function ProspeccionPage() {
   }));
 
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
 
-  // Al cambiar fuente, resetea lo necesario
+  // 1) Obtener usuario real
   useEffect(() => {
-    setErrors({});
-    setSelectedSourceId(null);
+    (async () => {
+      try {
+        setAuthLoading(true);
+        const { data, error } = await supabase.auth.getUser();
+        if (error) throw error;
 
-    if (fuente === "MANUAL") {
-      setForm((prev) => ({
-        ...prev,
-        fecha: nowCL(),
-        folio: makeFolio(),
-        ejecutivoEmail: loggedEmail,
-        fuenteDatos: "MANUAL",
-        sourceId: undefined,
-        sourcePayload: undefined,
-        // no borro todo por si cambió de idea; si quieres limpiar completo, lo hacemos
-      }));
+        const email = data.user?.email ?? "";
+        setLoggedEmail(email);
+        setForm((prev) => ({ ...prev, ejecutivoEmail: email }));
+      } catch {
+        setLoggedEmail("");
+      } finally {
+        setAuthLoading(false);
+      }
+    })();
+  }, [supabase]);
+
+  // 2) Cargar CSV y filtrar por EMAIL_COL cuando ya sabemos el email
+  useEffect(() => {
+    if (authLoading) return;
+    if (!loggedEmail) {
+      setPiaAllowed(false);
+      setPiaRows([]);
       return;
     }
 
-    // CSV_PIA
-    setForm((prev) => ({
-      ...prev,
-      fecha: nowCL(),
-      folio: makeFolio(),
-      ejecutivoEmail: loggedEmail,
-      fuenteDatos: "CSV_PIA",
-      origenProspecto: "RRSS", // puedes dejarlo vacío si prefieres
-    }));
+    // Cargamos CSV 1 vez y filtramos por dueño
+    (async () => {
+      try {
+        setPiaLoading(true);
+        setPiaError(null);
 
-    // carga CSV si no está cargado
-    if (piaRows.length === 0) {
-      (async () => {
-        try {
-          setPiaLoading(true);
-          setPiaError(null);
-          const res = await fetch(CSV_PIA_URL, { cache: "no-store" });
-          if (!res.ok) throw new Error(`Error al cargar CSV (${res.status})`);
-          const text = await res.text();
-          const rows = parseCsv(text);
-          setPiaRows(rows);
-        } catch (e: any) {
-          setPiaError(e?.message ?? "Error desconocido");
-        } finally {
-          setPiaLoading(false);
-        }
-      })();
+        const res = await fetch(CSV_PIA_URL, { cache: "no-store" });
+        if (!res.ok) throw new Error(`Error al cargar CSV (${res.status})`);
+
+        const text = await res.text();
+        const rows = parseCsv(text);
+
+        const emailNorm = normalizeEmail(loggedEmail);
+
+        // permiso por fila: EMAIL_COL = usuario logueado
+        const allowedRows = rows.filter((r) => {
+          const owner =
+            normalizeEmail(
+              r[PIA_OWNER_COL] ||
+                r[PIA_OWNER_COL.toLowerCase()] ||
+                r["email_col"] ||
+                ""
+            );
+          return owner === emailNorm;
+        });
+
+        setPiaRows(allowedRows);
+        setPiaAllowed(allowedRows.length > 0);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Error desconocido";
+        setPiaError(msg);
+        setPiaRows([]);
+        setPiaAllowed(false);
+      } finally {
+        setPiaLoading(false);
+      }
+    })();
+  }, [authLoading, loggedEmail]);
+
+  // 3) Si el usuario intenta elegir CSV_PIA sin permiso, lo devolvemos a MANUAL
+  useEffect(() => {
+    if (fuente === "CSV_PIA" && !piaAllowed) {
+      setFuente("MANUAL");
     }
-  }, [fuente]);
+  }, [fuente, piaAllowed]);
 
+  // filtro de búsqueda en tabla BD
   const filteredPia = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return piaRows.slice(0, 20);
@@ -340,19 +374,15 @@ export default function ProspeccionPage() {
     return matches.slice(0, 20);
   }, [piaRows, search]);
 
-  const etapaNombre = useMemo(
-    () => CRM_ETAPAS.find((e) => e.id === form.etapaId)?.label ?? "",
-    [form.etapaId]
-  );
-  const fechaCierreNombre = useMemo(
-    () => CRM_FECHA_CIERRE.find((e) => e.id === form.fechaCierreId)?.label ?? "",
-    [form.fechaCierreId]
-  );
-  const probCierreNombre = useMemo(
-    () => CRM_PROB_CIERRE.find((e) => e.id === form.probCierreId)?.label ?? "",
-    [form.probCierreId]
-  );
+  // nombres (para guardar)
+  const etapaNombre =
+    CRM_ETAPAS.find((e) => e.id === form.etapaId)?.label ?? "";
+  const fechaCierreNombre =
+    CRM_FECHA_CIERRE.find((e) => e.id === form.fechaCierreId)?.label ?? "";
+  const probCierreNombre =
+    CRM_PROB_CIERRE.find((e) => e.id === form.probCierreId)?.label ?? "";
 
+  // cargar fila seleccionada al form
   function loadFromPiaRow(row: PiaRow) {
     const patch = mapPiaRowToForm(row);
     const sid = makeSourceId(row);
@@ -363,8 +393,7 @@ export default function ProspeccionPage() {
       ...patch,
       fuenteDatos: "CSV_PIA",
       sourceId: sid,
-      sourcePayload: JSON.stringify(row), // auditoría
-      // recomendación: no tocar monto/rubro si no vienen
+      sourcePayload: JSON.stringify(row),
     }));
   }
 
@@ -375,7 +404,6 @@ export default function ProspeccionPage() {
 
     const payload = {
       ...form,
-      // normalizados para guardar
       correo: normalizeEmail(form.correo),
       montoProyectado: Number(String(form.montoProyectado).replace(/[^\d]/g, "")),
       etapaNombre,
@@ -385,16 +413,18 @@ export default function ProspeccionPage() {
     };
 
     console.log("✅ payload listo para guardar:", payload);
-
-    // Aquí conectas tu endpoint (Apps Script / API):
-    // await fetch("/api/crm/prospectos", { method:"POST", headers:{...}, body: JSON.stringify(payload) })
-
-    alert("Prospecto listo (payload en consola). Conecta el endpoint de guardado y quedará 100% operativo.");
+    alert("Prospecto listo (payload en consola). Falta conectar guardado a Sheets.");
   }
 
-  /** =========================
-   *  UI simple (puedes reemplazar por tus componentes)
-   *  ========================= */
+  if (authLoading) {
+    return (
+      <div style={{ padding: 16 }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700 }}>CRM · Gestión de Prospección</h2>
+        <div style={{ marginTop: 10, opacity: 0.75 }}>Cargando usuario…</div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ padding: 16, maxWidth: 1100 }}>
       <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
@@ -404,7 +434,7 @@ export default function ProspeccionPage() {
         Registro para bandeja de asignación y gestión comercial.
       </div>
 
-      {/* Paso 1: Fuente */}
+      {/* Fuente de datos */}
       <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, marginBottom: 16 }}>
         <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>Fuente de datos</h3>
 
@@ -417,7 +447,7 @@ export default function ProspeccionPage() {
               style={{ padding: 10, borderRadius: 10, border: "1px solid #d1d5db", minWidth: 260 }}
             >
               <option value="MANUAL">Manual</option>
-              <option value="CSV_PIA">Base Google Sheets (CSV) – BD Pía</option>
+              {piaAllowed && <option value="CSV_PIA">Base Google Sheets (CSV) – BD Pía</option>}
             </select>
           </label>
 
@@ -429,13 +459,13 @@ export default function ProspeccionPage() {
               <b>Folio:</b> {form.folio}
             </div>
             <div style={{ padding: "10px 12px", borderRadius: 10, background: "#f3f4f6" }}>
-              <b>Ejecutivo:</b> {form.ejecutivoEmail}
+              <b>Ejecutivo:</b> {form.ejecutivoEmail || "—"}
             </div>
           </div>
         </div>
 
-        {/* Panel BD */}
-        {fuente === "CSV_PIA" && (
+        {/* Panel BD Pía */}
+        {fuente === "CSV_PIA" && piaAllowed && (
           <div style={{ marginTop: 14, borderTop: "1px solid #e5e7eb", paddingTop: 14 }}>
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
               <label style={{ flex: 1, minWidth: 260 }}>
@@ -451,7 +481,7 @@ export default function ProspeccionPage() {
               </label>
 
               <div style={{ opacity: 0.8 }}>
-                {piaLoading ? "Cargando BD..." : `${piaRows.length} registros cargados`}
+                {piaLoading ? "Cargando BD..." : `${piaRows.length} registros disponibles`}
               </div>
             </div>
 
@@ -481,7 +511,9 @@ export default function ProspeccionPage() {
                     return (
                       <tr key={`${sid}_${idx}`} style={{ background: isSel ? "#eef2ff" : "transparent" }}>
                         <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{empresa}</td>
-                        <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{`${nombre} ${apellido}`.trim()}</td>
+                        <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
+                          {`${nombre} ${apellido}`.trim()}
+                        </td>
                         <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{email}</td>
                         <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{region}</td>
                         <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
@@ -501,6 +533,7 @@ export default function ProspeccionPage() {
                       </tr>
                     );
                   })}
+
                   {!piaLoading && filteredPia.length === 0 && (
                     <tr>
                       <td colSpan={5} style={{ padding: 10, opacity: 0.7 }}>
@@ -513,13 +546,13 @@ export default function ProspeccionPage() {
             </div>
 
             <div style={{ marginTop: 10, fontSize: 12, opacity: 0.8 }}>
-              Tip: Si tu BD no tiene columnas “Empresa/Email/Nombre/Apellido” con esos nombres exactos, dime los encabezados y ajusto el mapeo.
+              Se muestran solo filas donde <b>{PIA_OWNER_COL}</b> coincide con tu correo: <b>{loggedEmail}</b>.
             </div>
           </div>
         )}
       </div>
 
-      {/* Paso 2: Formulario */}
+      {/* Formulario */}
       <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 16 }}>
         <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>Datos del Prospecto</h3>
 
@@ -559,7 +592,6 @@ export default function ProspeccionPage() {
             value={form.rubro}
             onChange={(v) => setForm((p) => ({ ...p, rubro: v }))}
             error={errors.rubro}
-            placeholder="Ej: Food Service / Industrial / etc."
           />
           <Field
             label="Monto proyectado (CLP) *"
@@ -628,6 +660,7 @@ export default function ProspeccionPage() {
                 ...p,
                 fecha: nowCL(),
                 folio: makeFolio(),
+                ejecutivoEmail: loggedEmail,
                 nombreRazonSocial: "",
                 rut: "",
                 telefono: "",
@@ -673,7 +706,7 @@ export default function ProspeccionPage() {
 }
 
 /** =========================
- *  UI helpers simples
+ *  UI helpers
  *  ========================= */
 function Field(props: {
   label: string;
