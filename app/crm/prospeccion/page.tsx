@@ -8,7 +8,8 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
  *  ========================= */
 const CSV_PIA_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vTiXecS06_-jxv0O98PUG2jMVT-8M5HpliYZZNyoG2EdrstE0ydTATYxdnih18zwGXow6hsxCtz90vi/pub?gid=0&single=true&output=csv";
-const CSV_CRM_DB_URL= 
+
+const CSV_CRM_DB_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vR6D9j1ZjygWJKRXLV22AMb2oMYKVQWlly1KdAIKRm9jBAOIvIxNd9jqhEi2Zc-7LnjLe2wfhKrfsEW/pub?gid=0&single=true&output=csv";
 
 const PIA_OWNER_COL_NORM = "email_col"; // normalizado desde EMAIL_COL
@@ -40,16 +41,28 @@ const CRM_PROB_CIERRE = [
   { id: 5, label: "Entre mayor a 90%" },
 ] as const;
 
+const CRM_DIVISIONES = [
+  { value: "INDUSTRIAL", label: "Industrial" },
+  { value: "FOOD", label: "Food" },
+  { value: "INSTITUCIONAL", label: "Institucional" },
+  { value: "HC", label: "HC" },
+] as const;
+
 /** =========================
  *  TIPOS
  *  ========================= */
 type FuenteDatos = "MANUAL" | "CSV_PIA";
-type PiaRow = Record<string, string>;
+type Division = (typeof CRM_DIVISIONES)[number]["value"];
+type RowAny = Record<string, string>;
+type PiaRow = RowAny;
+type CrmRow = RowAny;
 
 type ProspectoForm = {
   fecha: string;
   folio: string;
   ejecutivoEmail: string;
+
+  division: Division;
 
   nombreRazonSocial: string;
   rut: string;
@@ -88,7 +101,7 @@ function normalizeHeader(h: string) {
 /** =========================
  *  CSV PARSER seguro
  *  ========================= */
-function parseCsv(text: string): PiaRow[] {
+function parseCsv(text: string): RowAny[] {
   const rows: string[][] = [];
   let cur = "";
   let inQuotes = false;
@@ -136,7 +149,7 @@ function parseCsv(text: string): PiaRow[] {
   const headers = rows[0].map(normalizeHeader);
 
   return rows.slice(1).map((cells) => {
-    const obj: PiaRow = {};
+    const obj: RowAny = {};
     headers.forEach((h, idx) => {
       obj[h] = (cells[idx] ?? "").trim();
     });
@@ -165,11 +178,25 @@ function normalizeEmail(s: string) {
   return (s || "").trim().toLowerCase();
 }
 
+function normalizeRut(s: string) {
+  return (s || "").replace(/\./g, "").replace(/-/g, "").trim().toLowerCase();
+}
+
+function toMontoNumber(raw: string) {
+  const n = Number(String(raw || "").replace(/[^\d]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
 function makeSourceId(row: PiaRow) {
   const empresa = row.nombre_o_razon_social || "";
   const email = row.e_mail || "";
   const key = `${empresa}|${normalizeEmail(email)}`.trim().toLowerCase();
   return `pia_${key.replace(/\s+/g, "_").slice(0, 60)}_${key.length}`;
+}
+
+function makeManualSourceId(nombre: string, correo: string) {
+  const key = `${(nombre || "").trim()}|${normalizeEmail(correo)}`.trim().toLowerCase();
+  return `manual_${key.replace(/\s+/g, "_").slice(0, 80)}_${key.length}`;
 }
 
 function mapPiaRowToForm(row: PiaRow): Partial<ProspectoForm> {
@@ -185,6 +212,8 @@ function mapPiaRowToForm(row: PiaRow): Partial<ProspectoForm> {
 
 function validateForm(f: ProspectoForm) {
   const errors: Record<string, string> = {};
+
+  if (!f.division?.trim()) errors.division = "Campo requerido";
   if (!f.nombreRazonSocial.trim()) errors.nombreRazonSocial = "Campo requerido";
 
   const email = normalizeEmail(f.correo);
@@ -197,8 +226,8 @@ function validateForm(f: ProspectoForm) {
   if (!f.rubro.trim()) errors.rubro = "Campo requerido";
   if (!f.montoProyectado.trim()) errors.montoProyectado = "Campo requerido";
 
-  const montoNum = Number(String(f.montoProyectado).replace(/[^\d]/g, ""));
-  if (f.montoProyectado.trim() && (!Number.isFinite(montoNum) || montoNum <= 0)) {
+  const montoNum = toMontoNumber(f.montoProyectado);
+  if (f.montoProyectado.trim() && montoNum <= 0) {
     errors.montoProyectado = "Monto inválido";
   }
 
@@ -206,6 +235,7 @@ function validateForm(f: ProspectoForm) {
   if (!f.etapaId) errors.etapaId = "Campo requerido";
   if (!f.fechaCierreId) errors.fechaCierreId = "Campo requerido";
   if (!f.probCierreId) errors.probCierreId = "Campo requerido";
+
   return errors;
 }
 
@@ -231,9 +261,12 @@ export default function ProspeccionPage() {
   const [piaRows, setPiaRows] = useState<PiaRow[]>([]);
   const [search, setSearch] = useState("");
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
-
-  // mostrar 5 o todos
   const [showAll, setShowAll] = useState(false);
+
+  // CRM DB (lectura)
+  const [crmLoading, setCrmLoading] = useState(false);
+  const [crmError, setCrmError] = useState<string | null>(null);
+  const [crmRows, setCrmRows] = useState<CrmRow[]>([]);
 
   // guardado
   const [saving, setSaving] = useState(false);
@@ -243,6 +276,7 @@ export default function ProspeccionPage() {
     fecha: nowCL(),
     folio: makeFolio(),
     ejecutivoEmail: "",
+    division: "FOOD",
 
     nombreRazonSocial: "",
     rut: "",
@@ -290,7 +324,32 @@ export default function ProspeccionPage() {
     })();
   }, [supabase]);
 
-  /** 2) Cargar CSV y filtrar por email_col */
+  /** 2) Cargar CRM_DB (lectura) */
+  async function reloadCrmDb() {
+    try {
+      setCrmLoading(true);
+      setCrmError(null);
+      const res = await fetch(CSV_CRM_DB_URL, { cache: "no-store" });
+      if (!res.ok) throw new Error(`Error al cargar CRM_DB CSV (${res.status})`);
+      const text = await res.text();
+      const rows = parseCsv(text);
+      setCrmRows(rows);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Error desconocido";
+      setCrmError(msg);
+      setCrmRows([]);
+    } finally {
+      setCrmLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    // carga CRM_DB al entrar (sirve para evitar duplicados y validar guardado)
+    reloadCrmDb();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** 3) Cargar CSV Pía y filtrar por EMAIL_COL */
   useEffect(() => {
     if (authLoading) return;
 
@@ -331,17 +390,17 @@ export default function ProspeccionPage() {
     })();
   }, [authLoading, loggedEmail]);
 
-  /** 3) Si intentan elegir CSV sin permiso, vuelve a Manual */
+  /** 4) Si intentan elegir CSV sin permiso, vuelve a Manual */
   useEffect(() => {
     if (fuente === "CSV_PIA" && !piaAllowed) setFuente("MANUAL");
   }, [fuente, piaAllowed]);
 
-  /** 4) Fuente -> actualiza form.fuenteDatos SIEMPRE */
+  /** 5) Fuente -> actualiza form.fuenteDatos SIEMPRE */
   useEffect(() => {
     setForm((prev) => ({ ...prev, fuenteDatos: fuente }));
   }, [fuente]);
 
-  /** 5) Al cambiar fuente, refresca metadatos del registro */
+  /** 6) Al cambiar fuente, refresca metadatos del registro */
   useEffect(() => {
     setErrors({});
     setSelectedSourceId(null);
@@ -360,10 +419,7 @@ export default function ProspeccionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fuente]);
 
-  /** 6) Filtrado + límite (5 por defecto, botón mostrar todos)
-   *  - sin búsqueda: 5 o todos
-   *  - con búsqueda: max 20
-   */
+  /** 7) Filtrado Pía */
   const filteredPia = useMemo(() => {
     const q = search.trim().toLowerCase();
     const limit = q ? 20 : showAll ? piaRows.length : 5;
@@ -375,12 +431,7 @@ export default function ProspeccionPage() {
       const email = (r.e_mail || "").toLowerCase();
       const contacto = (r.contacto || "").toLowerCase();
       const dir = (r.direccion || "").toLowerCase();
-      return (
-        razon.includes(q) ||
-        email.includes(q) ||
-        contacto.includes(q) ||
-        dir.includes(q)
-      );
+      return razon.includes(q) || email.includes(q) || contacto.includes(q) || dir.includes(q);
     });
 
     return matches.slice(0, limit);
@@ -400,23 +451,65 @@ export default function ProspeccionPage() {
     }));
   }
 
-  // ✅ helper: build payload siempre igual
+  /** 8) Duplicados (CRM_DB) */
+  const duplicateInCrmDb = useMemo(() => {
+    if (!crmRows.length) return null;
+
+    const correo = normalizeEmail(form.correo);
+    const razon = (form.nombreRazonSocial || "").trim().toLowerCase();
+    const rut = normalizeRut(form.rut);
+
+    if (!correo && !razon && !rut) return null;
+
+    // match por rut (si existe)
+    if (rut) {
+      const hit = crmRows.find((r) => normalizeRut(r.rut || "") === rut);
+      if (hit) return { by: "RUT", row: hit };
+    }
+
+    // match por (correo + razon)
+    if (correo && razon) {
+      const hit = crmRows.find((r) => {
+        const c = normalizeEmail(r.correo || "");
+        const n = (r.nombre_razon_social || "").trim().toLowerCase();
+        return c === correo && n === razon;
+      });
+      if (hit) return { by: "Correo+Razón social", row: hit };
+    }
+
+    // match por correo solo (más laxo)
+    if (correo) {
+      const hit = crmRows.find((r) => normalizeEmail(r.correo || "") === correo);
+      if (hit) return { by: "Correo", row: hit };
+    }
+
+    return null;
+  }, [crmRows, form.correo, form.nombreRazonSocial, form.rut]);
+
+  /** 9) Payload */
   function buildPayload() {
-    const monto = Number(String(form.montoProyectado).replace(/[^\d]/g, ""));
+    const monto = toMontoNumber(form.montoProyectado);
+
+    const source_id =
+      form.fuenteDatos === "CSV_PIA"
+        ? form.sourceId || ""
+        : makeManualSourceId(form.nombreRazonSocial, form.correo);
+
     return {
       created_at: new Date().toISOString(),
       folio: form.folio,
-      fuente: form.fuenteDatos, // ✅ MANUAL o CSV_PIA
-      source_id: form.sourceId || "",
-      source_payload: form.sourcePayload || "", // ✅ (no está en headers, pero no molesta)
+      fuente: form.fuenteDatos,
+      source_id,
 
       nombre_razon_social: form.nombreRazonSocial,
-      rut: form.rut,
-      telefono: form.telefono,
+      rut: form.rut || "",
+      telefono: form.telefono || "",
       correo: normalizeEmail(form.correo),
       direccion: form.direccion,
       rubro: form.rubro,
       monto_proyectado: monto,
+
+      division: form.division,
 
       etapa_id: form.etapaId,
       etapa_nombre: etapaNombre,
@@ -426,7 +519,7 @@ export default function ProspeccionPage() {
       prob_cierre_nombre: probCierreNombre,
 
       origen_prospecto: form.origenProspecto,
-      observacion: form.observacion,
+      observacion: form.observacion || "",
 
       ejecutivo_email: form.ejecutivoEmail,
       estado: "PENDIENTE_ASIGNACION",
@@ -441,10 +534,21 @@ export default function ProspeccionPage() {
     setErrors(v);
     if (Object.keys(v).length > 0) return;
 
+    // ⚠️ aviso de duplicado (no bloquea; tú decides si bloquear)
+    if (duplicateInCrmDb) {
+      const folioPrev = duplicateInCrmDb.row.folio || "(sin folio)";
+      const estadoPrev = duplicateInCrmDb.row.estado || "(sin estado)";
+      const ok = window.confirm(
+        `⚠️ Posible duplicado en CRM_DB (match por ${duplicateInCrmDb.by}).\n` +
+          `Folio existente: ${folioPrev}\nEstado: ${estadoPrev}\n\n` +
+          `¿Quieres guardar de todas formas?`
+      );
+      if (!ok) return;
+    }
+
     try {
       setSaving(true);
 
-      // ✅ SIEMPRE guardamos por el API interno (evita CORS)
       const payload = buildPayload();
 
       const resp = await fetch("/api/crm/prospectos", {
@@ -453,7 +557,6 @@ export default function ProspeccionPage() {
         body: JSON.stringify(payload),
       });
 
-      // ✅ Manejo robusto de respuesta (puede venir texto)
       const text = await resp.text();
       let data: any = null;
       try {
@@ -463,9 +566,7 @@ export default function ProspeccionPage() {
       }
 
       if (!resp.ok || !data?.ok) {
-        alert(
-          `❌ Error guardando:\nstatus=${resp.status}\n${JSON.stringify(data, null, 2)}`
-        );
+        alert(`❌ Error guardando:\nstatus=${resp.status}\n${JSON.stringify(data, null, 2)}`);
         return;
       }
 
@@ -475,7 +576,10 @@ export default function ProspeccionPage() {
           : "✅ Prospecto guardado en CRM_DB"
       );
 
-      // ✅ Limpieza: mantiene fuente y ejecutivo
+      // refrescar CRM_DB para ver lo recién guardado
+      reloadCrmDb();
+
+      // Limpieza: mantiene fuente, ejecutivo y división
       setForm((p) => ({
         ...p,
         fecha: nowCL(),
@@ -502,6 +606,17 @@ export default function ProspeccionPage() {
     }
   }
 
+  /** 10) Vista: últimos 5 creados por mi (desde CRM_DB) */
+  const myLast5 = useMemo(() => {
+    const email = normalizeEmail(loggedEmail);
+    if (!email || !crmRows.length) return [];
+    const mine = crmRows
+      .filter((r) => normalizeEmail(r.ejecutivo_email || "") === email)
+      .slice()
+      .reverse(); // asumiendo que viene en orden de creación
+    return mine.slice(0, 5);
+  }, [crmRows, loggedEmail]);
+
   if (authLoading) {
     return (
       <div style={{ padding: 16 }}>
@@ -520,38 +635,58 @@ export default function ProspeccionPage() {
         Registro para bandeja de asignación y gestión comercial.
       </div>
 
+      {/* CRM_DB status */}
+      <div style={{ marginBottom: 12, fontSize: 12, opacity: 0.85 }}>
+        <b>CRM_DB:</b>{" "}
+        {crmLoading ? "Cargando..." : crmError ? `Error: ${crmError}` : `${crmRows.length} registros`}
+        <button
+          type="button"
+          onClick={reloadCrmDb}
+          style={{
+            marginLeft: 10,
+            padding: "6px 10px",
+            borderRadius: 10,
+            border: "1px solid #d1d5db",
+            background: "white",
+            cursor: "pointer",
+          }}
+        >
+          Recargar CRM_DB
+        </button>
+      </div>
+
+      {/* Aviso duplicado */}
+      {duplicateInCrmDb && (
+        <div
+          style={{
+            border: "1px solid #f59e0b",
+            background: "#fffbeb",
+            padding: 12,
+            borderRadius: 12,
+            marginBottom: 12,
+            fontSize: 13,
+          }}
+        >
+          <b>⚠️ Posible duplicado detectado</b> (match por <b>{duplicateInCrmDb.by}</b>)<br />
+          Folio existente: <b>{duplicateInCrmDb.row.folio || "—"}</b> · Estado:{" "}
+          <b>{duplicateInCrmDb.row.estado || "—"}</b>
+        </div>
+      )}
+
       {/* Fuente de datos */}
-      <div
-        style={{
-          border: "1px solid #e5e7eb",
-          borderRadius: 12,
-          padding: 16,
-          marginBottom: 16,
-        }}
-      >
-        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>
-          Fuente de datos
-        </h3>
+      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, marginBottom: 16 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>Fuente de datos</h3>
 
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <label>
-            <span style={{ display: "block", fontSize: 12, marginBottom: 6 }}>
-              Seleccionar
-            </span>
+            <span style={{ display: "block", fontSize: 12, marginBottom: 6 }}>Seleccionar</span>
             <select
               value={fuente}
               onChange={(e) => setFuente(e.target.value as FuenteDatos)}
-              style={{
-                padding: 10,
-                borderRadius: 10,
-                border: "1px solid #d1d5db",
-                minWidth: 260,
-              }}
+              style={{ padding: 10, borderRadius: 10, border: "1px solid #d1d5db", minWidth: 260 }}
             >
               <option value="MANUAL">Manual</option>
-              {piaAllowed && (
-                <option value="CSV_PIA">Base Google Sheets (CSV) – BD Pía</option>
-              )}
+              {piaAllowed && <option value="CSV_PIA">Base Google Sheets (CSV) – BD Pía</option>}
             </select>
           </label>
 
@@ -580,12 +715,7 @@ export default function ProspeccionPage() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Ej: klap / @gmail / región..."
-                  style={{
-                    width: "100%",
-                    padding: 10,
-                    borderRadius: 10,
-                    border: "1px solid #d1d5db",
-                  }}
+                  style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
                 />
               </label>
 
@@ -684,23 +814,26 @@ export default function ProspeccionPage() {
         <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>Datos del Prospecto</h3>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <SelectField
+            label="División *"
+            value={form.division}
+            onChange={(v) => setForm((p) => ({ ...p, division: v as Division }))}
+            error={errors.division}
+            options={CRM_DIVISIONES.map((d) => ({ value: d.value, label: d.label }))}
+          />
+
           <Field
             label="Nombre o Razón Social *"
             value={form.nombreRazonSocial}
             onChange={(v) => setForm((p) => ({ ...p, nombreRazonSocial: v }))}
             error={errors.nombreRazonSocial}
           />
-          <Field
-            label="RUT (opcional)"
-            value={form.rut}
-            onChange={(v) => setForm((p) => ({ ...p, rut: v }))}
-            placeholder="12.345.678-9"
-          />
+
+          <Field label="RUT (opcional)" value={form.rut} onChange={(v) => setForm((p) => ({ ...p, rut: v }))} />
           <Field
             label="Teléfono (opcional)"
             value={form.telefono}
             onChange={(v) => setForm((p) => ({ ...p, telefono: v }))}
-            placeholder="+56 9 xxxx xxxx"
           />
           <Field
             label="Correo *"
@@ -725,7 +858,6 @@ export default function ProspeccionPage() {
             value={form.montoProyectado}
             onChange={(v) => setForm((p) => ({ ...p, montoProyectado: v }))}
             error={errors.montoProyectado}
-            placeholder="Ej: 1500000"
           />
 
           <SelectField
@@ -832,6 +964,41 @@ export default function ProspeccionPage() {
             {saving ? "Guardando..." : "Guardar (pendiente asignación)"}
           </button>
         </div>
+      </div>
+
+      {/* Últimos 5 creados por mí */}
+      <div style={{ marginTop: 16, border: "1px solid #e5e7eb", borderRadius: 12, padding: 16 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Mis últimos 5 prospectos (CRM_DB)</h3>
+        {crmLoading ? (
+          <div style={{ opacity: 0.8 }}>Cargando…</div>
+        ) : myLast5.length === 0 ? (
+          <div style={{ opacity: 0.8 }}>Sin registros.</div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ textAlign: "left", fontSize: 12, opacity: 0.8 }}>
+                  <th style={{ padding: 8, borderBottom: "1px solid #e5e7eb" }}>Folio</th>
+                  <th style={{ padding: 8, borderBottom: "1px solid #e5e7eb" }}>Razón Social</th>
+                  <th style={{ padding: 8, borderBottom: "1px solid #e5e7eb" }}>División</th>
+                  <th style={{ padding: 8, borderBottom: "1px solid #e5e7eb" }}>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {myLast5.map((r, idx) => (
+                  <tr key={`${r.folio || idx}_${idx}`}>
+                    <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{r.folio || "—"}</td>
+                    <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
+                      {r.nombre_razon_social || "—"}
+                    </td>
+                    <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{r.division || "—"}</td>
+                    <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{r.estado || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
