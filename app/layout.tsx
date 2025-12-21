@@ -51,6 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   // 🔹 Recalcular menú cuando el perfil esté listo
   useEffect(() => {
     const baseMenu = [
+      { name: "CRM", href: "/crm", icon: "📈"},
       { name: "Gestión de Comodatos", href: "/comodatos", icon: "🧪" },
       { name: "Gestión de Ventas", href: "/ventas", icon: "📈" },
       { name: "Logística", href: "/logistica/seguimiento", icon: "🚚" },

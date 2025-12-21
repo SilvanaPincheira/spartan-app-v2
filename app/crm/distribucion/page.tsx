@@ -9,7 +9,7 @@ const CSV_CRM_DB_URL =
 /** Jefaturas que asignan */
 const JEFATURAS = new Set(
   [
-    "claudia.borquez@dpsrtan.cl", // (ojo: en tu texto venía con typo dpsrtan.cl)
+    "claudia.borquez@spartan.cl", // (ojo: en tu texto venía con typo dpsrtan.cl)
     "jorge.beltran@spartan.cl",
     "alberto.damm@spartan.cl",
     "nelson.norambuena@spartan.cl",
