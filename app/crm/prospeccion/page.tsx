@@ -398,90 +398,106 @@ export default function ProspeccionPage() {
     }));
   }
 
+  // ✅ helper: build payload siempre igual
+  function buildPayload() {
+    const monto = Number(String(form.montoProyectado).replace(/[^\d]/g, ""));
+    return {
+      created_at: new Date().toISOString(),
+      folio: form.folio,
+      fuente: form.fuenteDatos, // ✅ MANUAL o CSV_PIA
+      source_id: form.sourceId || "",
+      source_payload: form.sourcePayload || "", // ✅ (no está en headers, pero no molesta)
+
+      nombre_razon_social: form.nombreRazonSocial,
+      rut: form.rut,
+      telefono: form.telefono,
+      correo: normalizeEmail(form.correo),
+      direccion: form.direccion,
+      rubro: form.rubro,
+      monto_proyectado: monto,
+
+      etapa_id: form.etapaId,
+      etapa_nombre: etapaNombre,
+      fecha_cierre_id: form.fechaCierreId,
+      fecha_cierre_nombre: fechaCierreNombre,
+      prob_cierre_id: form.probCierreId,
+      prob_cierre_nombre: probCierreNombre,
+
+      origen_prospecto: form.origenProspecto,
+      observacion: form.observacion,
+
+      ejecutivo_email: form.ejecutivoEmail,
+      estado: "PENDIENTE_ASIGNACION",
+      asignado_a: "",
+      asignado_por: "",
+      asignado_at: "",
+    };
+  }
+
   async function onSubmit() {
     const v = validateForm(form);
     setErrors(v);
     if (Object.keys(v).length > 0) return;
 
-    // ✅ GUARDAR SOLO MANUAL (por ahora)
-    if (form.fuenteDatos === "MANUAL") {
+    try {
+      setSaving(true);
+
+      // ✅ SIEMPRE guardamos por el API interno (evita CORS)
+      const payload = buildPayload();
+
+      const resp = await fetch("/api/crm/prospectos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      // ✅ Manejo robusto de respuesta (puede venir texto)
+      const text = await resp.text();
+      let data: any = null;
       try {
-        setSaving(true);
-
-        const resp = await fetch("/api/crm/prospectos", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            created_at: new Date().toISOString(),
-            folio: form.folio,
-            fuente: "MANUAL",
-            source_id: form.sourceId || "",
-
-            nombre_razon_social: form.nombreRazonSocial,
-            rut: form.rut,
-            telefono: form.telefono,
-            correo: normalizeEmail(form.correo),
-            direccion: form.direccion,
-            rubro: form.rubro,
-            monto_proyectado: Number(String(form.montoProyectado).replace(/[^\d]/g, "")),
-
-            etapa_id: form.etapaId,
-            etapa_nombre: etapaNombre,
-            fecha_cierre_id: form.fechaCierreId,
-            fecha_cierre_nombre: fechaCierreNombre,
-            prob_cierre_id: form.probCierreId,
-            prob_cierre_nombre: probCierreNombre,
-
-            origen_prospecto: form.origenProspecto,
-            observacion: form.observacion,
-
-            ejecutivo_email: form.ejecutivoEmail,
-            estado: "PENDIENTE_ASIGNACION",
-            asignado_a: "",
-            asignado_por: "",
-            asignado_at: "",
-          }),
-        });
-
-        const data = await resp.json();
-
-        if (!data.ok) {
-          alert(`❌ Error guardando: ${data.error}`);
-          return;
-        }
-
-        alert(
-          data.duplicated
-            ? "⚠️ El prospecto ya existía (folio duplicado)."
-            : "✅ Prospecto guardado en CRM_DB"
-        );
-
-        // Limpieza
-        setForm((p) => ({
-          ...p,
-          fecha: nowCL(),
-          folio: makeFolio(),
-          nombreRazonSocial: "",
-          rut: "",
-          telefono: "",
-          correo: "",
-          direccion: "",
-          rubro: "",
-          montoProyectado: "",
-          observacion: "",
-          sourceId: undefined,
-          sourcePayload: undefined,
-        }));
-        setErrors({});
-        setSelectedSourceId(null);
-        return;
-      } finally {
-        setSaving(false);
+        data = JSON.parse(text);
+      } catch {
+        data = { ok: false, error: "Respuesta no JSON", raw: text.slice(0, 300) };
       }
-    }
 
-    // Fuente distinta a MANUAL (por ahora no guardamos)
-    alert("Fuente distinta a MANUAL (por ahora no se guarda).");
+      if (!resp.ok || !data?.ok) {
+        alert(
+          `❌ Error guardando:\nstatus=${resp.status}\n${JSON.stringify(data, null, 2)}`
+        );
+        return;
+      }
+
+      alert(
+        data.duplicated
+          ? "⚠️ El prospecto ya existía (folio duplicado)."
+          : "✅ Prospecto guardado en CRM_DB"
+      );
+
+      // ✅ Limpieza: mantiene fuente y ejecutivo
+      setForm((p) => ({
+        ...p,
+        fecha: nowCL(),
+        folio: makeFolio(),
+        ejecutivoEmail: loggedEmail,
+
+        nombreRazonSocial: "",
+        rut: "",
+        telefono: "",
+        correo: "",
+        direccion: "",
+        rubro: "",
+        montoProyectado: "",
+
+        observacion: "",
+        sourceId: undefined,
+        sourcePayload: undefined,
+      }));
+      setErrors({});
+      setSelectedSourceId(null);
+      setShowAll(false);
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (authLoading) {
@@ -503,19 +519,37 @@ export default function ProspeccionPage() {
       </div>
 
       {/* Fuente de datos */}
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, marginBottom: 16 }}>
-        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>Fuente de datos</h3>
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 12,
+          padding: 16,
+          marginBottom: 16,
+        }}
+      >
+        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>
+          Fuente de datos
+        </h3>
 
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <label>
-            <span style={{ display: "block", fontSize: 12, marginBottom: 6 }}>Seleccionar</span>
+            <span style={{ display: "block", fontSize: 12, marginBottom: 6 }}>
+              Seleccionar
+            </span>
             <select
               value={fuente}
               onChange={(e) => setFuente(e.target.value as FuenteDatos)}
-              style={{ padding: 10, borderRadius: 10, border: "1px solid #d1d5db", minWidth: 260 }}
+              style={{
+                padding: 10,
+                borderRadius: 10,
+                border: "1px solid #d1d5db",
+                minWidth: 260,
+              }}
             >
               <option value="MANUAL">Manual</option>
-              {piaAllowed && <option value="CSV_PIA">Base Google Sheets (CSV) – BD Pía</option>}
+              {piaAllowed && (
+                <option value="CSV_PIA">Base Google Sheets (CSV) – BD Pía</option>
+              )}
             </select>
           </label>
 
@@ -544,7 +578,12 @@ export default function ProspeccionPage() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Ej: klap / @gmail / región..."
-                  style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
+                  style={{
+                    width: "100%",
+                    padding: 10,
+                    borderRadius: 10,
+                    border: "1px solid #d1d5db",
+                  }}
                 />
               </label>
 
@@ -601,6 +640,7 @@ export default function ProspeccionPage() {
                         <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{direccion}</td>
                         <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
                           <button
+                            type="button"
                             onClick={() => loadFromPiaRow(r)}
                             style={{
                               padding: "8px 10px",
@@ -740,6 +780,7 @@ export default function ProspeccionPage() {
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
           <button
+            type="button"
             onClick={() => {
               setForm((p) => ({
                 ...p,
@@ -759,6 +800,7 @@ export default function ProspeccionPage() {
               }));
               setErrors({});
               setSelectedSourceId(null);
+              setShowAll(false);
             }}
             style={{
               padding: "10px 12px",
@@ -772,6 +814,7 @@ export default function ProspeccionPage() {
           </button>
 
           <button
+            type="button"
             onClick={onSubmit}
             disabled={saving}
             style={{
@@ -816,9 +859,7 @@ function Field(props: {
           border: `1px solid ${props.error ? "crimson" : "#d1d5db"}`,
         }}
       />
-      {props.error && (
-        <div style={{ color: "crimson", fontSize: 12, marginTop: 6 }}>{props.error}</div>
-      )}
+      {props.error && <div style={{ color: "crimson", fontSize: 12, marginTop: 6 }}>{props.error}</div>}
     </label>
   );
 }
@@ -850,8 +891,7 @@ function SelectField(props: {
           </option>
         ))}
       </select>
-      {props.error && (
-        <div style={{ color: "crimson", fontSize: 12, marginTop: 6 }}>{props.error}</div>
-      )}
+      {props.error && <div style={{ color: "crimson", fontSize: 12, marginTop: 6 }}>{props.error}</div>}
     </label>
-  )}
+  );
+}
