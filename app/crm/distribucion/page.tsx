@@ -16,6 +16,9 @@ const JEFATURAS = new Set(
   ].map((x) => x.trim().toLowerCase())
 );
 
+/** Solo estos orígenes pasan por distribución */
+const ALLOWED_ORIGINS = new Set(["rrss", "web"]);
+
 type Row = Record<string, string>;
 
 function normalizeHeader(h: string) {
@@ -86,6 +89,10 @@ function normalizeEmail(s: string) {
   return (s || "").trim().toLowerCase();
 }
 
+function norm(s: string) {
+  return (s || "").trim().toLowerCase();
+}
+
 export default function CRMDistribucionPage() {
   const supabase = useMemo(() => createClientComponentClient(), []);
   const [authLoading, setAuthLoading] = useState(true);
@@ -99,7 +106,10 @@ export default function CRMDistribucionPage() {
   const [assigningFolio, setAssigningFolio] = useState<string | null>(null);
   const [targetEmail, setTargetEmail] = useState<Record<string, string>>({});
 
-  const isJefatura = useMemo(() => JEFATURAS.has(normalizeEmail(loggedEmail)), [loggedEmail]);
+  const isJefatura = useMemo(
+    () => JEFATURAS.has(normalizeEmail(loggedEmail)),
+    [loggedEmail]
+  );
 
   useEffect(() => {
     (async () => {
@@ -140,7 +150,21 @@ export default function CRMDistribucionPage() {
 
   const pendientes = useMemo(() => {
     const query = q.trim().toLowerCase();
-    const base = rows.filter((r) => (r.estado || "").toUpperCase() === "PENDIENTE_ASIGNACION");
+
+    const base = rows.filter((r) => {
+      const estado = (r.estado || "").toUpperCase();
+      if (estado !== "PENDIENTE_ASIGNACION") return false;
+
+      // ✅ SOLO RRSS o Web pasan por distribución
+      const origen = norm(r.origen_prospecto || "");
+      if (!ALLOWED_ORIGINS.has(origen)) return false;
+
+      // ✅ Asegura que no esté asignado (por si quedó un dato sucio)
+      const asignadoA = norm(r.asignado_a || "");
+      if (asignadoA) return false;
+
+      return true;
+    });
 
     if (!query) return base;
 
@@ -148,7 +172,13 @@ export default function CRMDistribucionPage() {
       const folio = (r.folio || "").toLowerCase();
       const nombre = (r.nombre_razon_social || "").toLowerCase();
       const correo = (r.correo || "").toLowerCase();
-      return folio.includes(query) || nombre.includes(query) || correo.includes(query);
+      const origen = (r.origen_prospecto || "").toLowerCase();
+      return (
+        folio.includes(query) ||
+        nombre.includes(query) ||
+        correo.includes(query) ||
+        origen.includes(query)
+      );
     });
   }, [rows, q]);
 
@@ -228,7 +258,7 @@ export default function CRMDistribucionPage() {
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar pendientes por folio / razón social / correo…"
+          placeholder="Buscar pendientes RRSS/Web por folio / razón social / correo…"
           style={{
             flex: 1,
             minWidth: 260,
@@ -295,9 +325,7 @@ export default function CRMDistribucionPage() {
                   <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
                     <input
                       value={targetEmail[folio] || ""}
-                      onChange={(e) =>
-                        setTargetEmail((p) => ({ ...p, [folio]: e.target.value }))
-                      }
+                      onChange={(e) => setTargetEmail((p) => ({ ...p, [folio]: e.target.value }))}
                       placeholder="ej: pia.ramirez@spartan.cl"
                       style={{
                         width: "100%",
@@ -332,7 +360,7 @@ export default function CRMDistribucionPage() {
             {!loading && pendientes.length === 0 && (
               <tr>
                 <td colSpan={7} style={{ padding: 12, opacity: 0.7 }}>
-                  No hay prospectos pendientes de asignación.
+                  No hay prospectos RRSS/Web pendientes de asignación.
                 </td>
               </tr>
             )}
