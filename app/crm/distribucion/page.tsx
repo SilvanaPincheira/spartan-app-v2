@@ -194,7 +194,7 @@ export default function CRMDistribucionPage() {
     try {
       setAssigningFolio(folio);
 
-      const resp = await fetch("/api/crm/asignar", {
+      const resp = await fetch("/api/crm/prospectos/asignar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ folio, asignado_a, asignado_por }),
