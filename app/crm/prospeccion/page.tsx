@@ -12,7 +12,7 @@ const CSV_PIA_URL =
 const CSV_CRM_DB_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vR6D9j1ZjygWJKRXLV22AMb2oMYKVQWlly1KdAIKRm9jBAOIvIxNd9jqhEi2Zc-7LnjLe2wfhKrfsEW/pub?gid=0&single=true&output=csv";
 
-const PIA_OWNER_COL_NORM = "email_col"; // normalizado desde EMAIL_COL
+const PIA_OWNER_COL_NORM = "email_col";
 
 /** =========================
  *  LISTAS FIJAS
@@ -145,7 +145,6 @@ function parseCsv(text: string): RowAny[] {
   pushRow();
 
   if (rows.length < 2) return [];
-
   const headers = rows[0].map(normalizeHeader);
 
   return rows.slice(1).map((cells) => {
@@ -185,6 +184,11 @@ function normalizeRut(s: string) {
 function toMontoNumber(raw: string) {
   const n = Number(String(raw || "").replace(/[^\d]/g, ""));
   return Number.isFinite(n) ? n : 0;
+}
+
+function needsAssignment(origen: string) {
+  const o = (origen || "").trim().toLowerCase();
+  return o === "rrss" || o === "web";
 }
 
 function makeSourceId(row: PiaRow) {
@@ -344,7 +348,6 @@ export default function ProspeccionPage() {
   }
 
   useEffect(() => {
-    // carga CRM_DB al entrar (sirve para evitar duplicados y validar guardado)
     reloadCrmDb();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -417,7 +420,7 @@ export default function ProspeccionPage() {
       sourcePayload: undefined,
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fuente]);
+  }, [fuente, loggedEmail]);
 
   /** 7) Filtrado Pía */
   const filteredPia = useMemo(() => {
@@ -448,6 +451,7 @@ export default function ProspeccionPage() {
       fuenteDatos: "CSV_PIA",
       sourceId: sid,
       sourcePayload: JSON.stringify(row),
+      origenProspecto: "RRSS", // 👈 consistencia
     }));
   }
 
@@ -461,13 +465,11 @@ export default function ProspeccionPage() {
 
     if (!correo && !razon && !rut) return null;
 
-    // match por rut (si existe)
     if (rut) {
       const hit = crmRows.find((r) => normalizeRut(r.rut || "") === rut);
       if (hit) return { by: "RUT", row: hit };
     }
 
-    // match por (correo + razon)
     if (correo && razon) {
       const hit = crmRows.find((r) => {
         const c = normalizeEmail(r.correo || "");
@@ -477,7 +479,6 @@ export default function ProspeccionPage() {
       if (hit) return { by: "Correo+Razón social", row: hit };
     }
 
-    // match por correo solo (más laxo)
     if (correo) {
       const hit = crmRows.find((r) => normalizeEmail(r.correo || "") === correo);
       if (hit) return { by: "Correo", row: hit };
@@ -486,7 +487,7 @@ export default function ProspeccionPage() {
     return null;
   }, [crmRows, form.correo, form.nombreRazonSocial, form.rut]);
 
-  /** 9) Payload */
+  /** 9) Payload (✅ regla RRSS/Web -> Pendiente; resto -> autoasignado) */
   function buildPayload() {
     const monto = toMontoNumber(form.montoProyectado);
 
@@ -494,6 +495,8 @@ export default function ProspeccionPage() {
       form.fuenteDatos === "CSV_PIA"
         ? form.sourceId || ""
         : makeManualSourceId(form.nombreRazonSocial, form.correo);
+
+    const requiere = needsAssignment(form.origenProspecto);
 
     return {
       created_at: new Date().toISOString(),
@@ -522,10 +525,12 @@ export default function ProspeccionPage() {
       observacion: form.observacion || "",
 
       ejecutivo_email: form.ejecutivoEmail,
-      estado: "PENDIENTE_ASIGNACION",
-      asignado_a: "",
-      asignado_por: "",
-      asignado_at: "",
+
+      // 👇 REGLA
+      estado: requiere ? "PENDIENTE_ASIGNACION" : "ASIGNADO",
+      asignado_a: requiere ? "" : form.ejecutivoEmail,
+      asignado_por: requiere ? "" : form.ejecutivoEmail,
+      asignado_at: requiere ? "" : new Date().toISOString(),
     };
   }
 
@@ -534,7 +539,6 @@ export default function ProspeccionPage() {
     setErrors(v);
     if (Object.keys(v).length > 0) return;
 
-    // ⚠️ aviso de duplicado (no bloquea; tú decides si bloquear)
     if (duplicateInCrmDb) {
       const folioPrev = duplicateInCrmDb.row.folio || "(sin folio)";
       const estadoPrev = duplicateInCrmDb.row.estado || "(sin estado)";
@@ -576,10 +580,8 @@ export default function ProspeccionPage() {
           : "✅ Prospecto guardado en CRM_DB"
       );
 
-      // refrescar CRM_DB para ver lo recién guardado
       reloadCrmDb();
 
-      // Limpieza: mantiene fuente, ejecutivo y división
       setForm((p) => ({
         ...p,
         fecha: nowCL(),
@@ -597,6 +599,9 @@ export default function ProspeccionPage() {
         observacion: "",
         sourceId: undefined,
         sourcePayload: undefined,
+
+        // 👉 si vienes de CSV_PIA, mantenemos RRSS (suele ser lo correcto)
+        origenProspecto: fuente === "CSV_PIA" ? "RRSS" : p.origenProspecto,
       }));
       setErrors({});
       setSelectedSourceId(null);
@@ -606,15 +611,22 @@ export default function ProspeccionPage() {
     }
   }
 
-  /** 10) Vista: últimos 5 creados por mi (desde CRM_DB) */
+  /** 10) Vista: últimos 5 creados por mí (desde CRM_DB)
+   *  Nota: el CSV no siempre viene ordenado. Ordenamos por created_at si existe.
+   */
   const myLast5 = useMemo(() => {
     const email = normalizeEmail(loggedEmail);
     if (!email || !crmRows.length) return [];
-    const mine = crmRows
-      .filter((r) => normalizeEmail(r.ejecutivo_email || "") === email)
-      .slice()
-      .reverse(); // asumiendo que viene en orden de creación
-    return mine.slice(0, 5);
+
+    const mine = crmRows.filter((r) => normalizeEmail(r.ejecutivo_email || "") === email);
+
+    const sorted = mine.slice().sort((a, b) => {
+      const ta = Date.parse(a.created_at || "") || 0;
+      const tb = Date.parse(b.created_at || "") || 0;
+      return tb - ta;
+    });
+
+    return sorted.slice(0, 5);
   }, [crmRows, loggedEmail]);
 
   if (authLoading) {
@@ -625,6 +637,8 @@ export default function ProspeccionPage() {
       </div>
     );
   }
+
+  const requiereAsign = needsAssignment(form.origenProspecto);
 
   return (
     <div style={{ padding: 16, maxWidth: 1100 }}>
@@ -667,7 +681,8 @@ export default function ProspeccionPage() {
             fontSize: 13,
           }}
         >
-          <b>⚠️ Posible duplicado detectado</b> (match por <b>{duplicateInCrmDb.by}</b>)<br />
+          <b>⚠️ Posible duplicado detectado</b> (match por <b>{duplicateInCrmDb.by}</b>)
+          <br />
           Folio existente: <b>{duplicateInCrmDb.row.folio || "—"}</b> · Estado:{" "}
           <b>{duplicateInCrmDb.row.estado || "—"}</b>
         </div>
@@ -806,6 +821,22 @@ export default function ProspeccionPage() {
               {search.trim() && <> (Búsqueda muestra máx. 20 resultados).</>}
             </div>
           </div>
+        )}
+      </div>
+
+      {/* Info asignación */}
+      <div style={{ marginBottom: 12, fontSize: 12, opacity: 0.85 }}>
+        <b>Asignación:</b>{" "}
+        {requiereAsign ? (
+          <>
+            Este prospecto quedará en <b>PENDIENTE_ASIGNACION</b> (solo RRSS/Web) para que jefatura lo
+            derive.
+          </>
+        ) : (
+          <>
+            Este prospecto quedará <b>ASIGNADO</b> automáticamente a <b>{loggedEmail || "tu usuario"}</b>{" "}
+            (Manual / Ferias / Referido / Otro).
+          </>
         )}
       </div>
 
@@ -961,7 +992,7 @@ export default function ProspeccionPage() {
               opacity: saving ? 0.9 : 1,
             }}
           >
-            {saving ? "Guardando..." : "Guardar (pendiente asignación)"}
+            {saving ? "Guardando..." : "Guardar"}
           </button>
         </div>
       </div>
@@ -982,6 +1013,7 @@ export default function ProspeccionPage() {
                   <th style={{ padding: 8, borderBottom: "1px solid #e5e7eb" }}>Razón Social</th>
                   <th style={{ padding: 8, borderBottom: "1px solid #e5e7eb" }}>División</th>
                   <th style={{ padding: 8, borderBottom: "1px solid #e5e7eb" }}>Estado</th>
+                  <th style={{ padding: 8, borderBottom: "1px solid #e5e7eb" }}>Asignado a</th>
                 </tr>
               </thead>
               <tbody>
@@ -993,6 +1025,7 @@ export default function ProspeccionPage() {
                     </td>
                     <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{r.division || "—"}</td>
                     <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{r.estado || "—"}</td>
+                    <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{r.asignado_a || "—"}</td>
                   </tr>
                 ))}
               </tbody>
