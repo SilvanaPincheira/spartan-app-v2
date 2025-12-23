@@ -3,13 +3,27 @@
 import "./globals.css";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import AvisoFlotante from "@/app/components/AvisoFlotante";
 
 // 🧩 Importa los módulos de modo offline
 import { useOfflineSync } from "@/lib/hooks/useOfflineSync";
 import { dbGetAll } from "@/lib/offline/db";
+
+/** ✅ Jefaturas con acceso a Distribución */
+const CRM_JEFATURAS = new Set(
+  [
+    "claudia.borquez@spartan.cl",
+    "jorge.beltran@spartan.cl",
+    "alberto.damm@spartan.cl",
+    "nelson.norambuena@spartan.cl",
+  ].map((x) => x.trim().toLowerCase())
+);
+
+function normalizeEmail(s: string) {
+  return (s || "").trim().toLowerCase();
+}
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -18,11 +32,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const [menuItems, setMenuItems] = useState<any[]>([]);
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  // ✅ Control del acordeón CRM
+  const [crmOpen, setCrmOpen] = useState(false);
+
   // 🟢 Activa el modo offline apenas carga la app
   useOfflineSync();
 
   useEffect(() => {
-    // Fuerza la creación de la base IndexedDB
     dbGetAll().then(() => console.log("🟢 IndexedDB inicializada (spartan_offline_db)"));
   }, []);
 
@@ -48,10 +64,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     cargarDatos();
   }, []);
 
+  const loggedEmail = useMemo(() => normalizeEmail(perfil?.email || session?.user?.email || ""), [perfil, session]);
+  const isCrmJefatura = useMemo(() => CRM_JEFATURAS.has(loggedEmail), [loggedEmail]);
+
+  // ✅ Abrir CRM automáticamente si estás dentro de /crm
+  useEffect(() => {
+    if (pathname.startsWith("/crm")) setCrmOpen(true);
+  }, [pathname]);
+
   // 🔹 Recalcular menú cuando el perfil esté listo
   useEffect(() => {
     const baseMenu = [
-      { name: "CRM", href: "/crm", icon: "📈"},
+      // 👇 CRM se renderiza aparte como acordeón, así que NO lo metemos aquí
       { name: "Gestión de Comodatos", href: "/comodatos", icon: "🧪" },
       { name: "Gestión de Ventas", href: "/ventas", icon: "📈" },
       { name: "Logística", href: "/logistica/seguimiento", icon: "🚚" },
@@ -61,7 +85,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       { name: "Metas", href: "/metas", icon: "🎯" },
       { name: "Facturas y NC", href: "/facturas-nc", icon: "🧾" },
       { name: "Comisiones", href: "/comisiones", icon: "💰" },
-      { name: "Herramientas", href: "/herramientas", icon: "🧰" }
+      { name: "Herramientas", href: "/herramientas", icon: "🧰" },
     ];
 
     if (perfil?.role === "gerencia" || perfil?.department?.startsWith("gerencia_")) {
@@ -75,6 +99,29 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     const supabase = createClientComponentClient();
     await supabase.auth.signOut();
     window.location.href = "/login";
+  }
+
+  // ✅ Submenú CRM (ordenado)
+  const crmSubItems = useMemo(() => {
+    const items = [
+      { name: "Prospección (Nuevo)", href: "/crm/prospeccion" },
+      { name: "Bandeja", href: "/crm/bandeja" },
+      { name: "RRSS (Importar)", href: "/crm/bandeja/rrss" },
+      { name: "Mis asignados", href: "/crm/bandeja/asignados" },
+      { name: "Histórico", href: "/crm/bandeja/historico" },
+    ];
+
+    // Solo jefaturas
+    if (isCrmJefatura) items.push({ name: "Distribución (Jefaturas)", href: "/crm/distribucion" });
+
+    // Si después creas reporteria:
+    items.push({ name: "Reportería", href: "/crm/reporteria" });
+
+    return items;
+  }, [isCrmJefatura]);
+
+  function isActive(href: string) {
+    return pathname === href || pathname.startsWith(href + "/");
   }
 
   return (
@@ -110,7 +157,44 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </Link>
           </div>
 
+          {/* ✅ MENÚ: CRM acordeón + resto */}
           <nav className="flex-1 px-2 py-3 space-y-1">
+            {/* --- CRM (acordeón) --- */}
+            <button
+              type="button"
+              onClick={() => setCrmOpen((v) => !v)}
+              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition
+                ${
+                  pathname.startsWith("/crm")
+                    ? "bg-[#1f4ed8] text-white"
+                    : "text-gray-700 hover:bg-blue-50 hover:text-[#1f4ed8]"
+                }`}
+            >
+              <span>📈</span>
+              <span className="flex-1 text-left">CRM</span>
+              <span className="text-xs opacity-80">{crmOpen ? "▲" : "▼"}</span>
+            </button>
+
+            {crmOpen && (
+              <div className="ml-7 mt-1 space-y-1">
+                {crmSubItems.map((sub) => (
+                  <Link
+                    key={sub.href}
+                    href={sub.href}
+                    className={`block px-3 py-2 rounded-md text-sm transition
+                      ${
+                        isActive(sub.href)
+                          ? "bg-blue-50 text-[#1f4ed8] font-semibold"
+                          : "text-gray-700 hover:bg-blue-50 hover:text-[#1f4ed8]"
+                      }`}
+                  >
+                    {sub.name}
+                  </Link>
+                ))}
+              </div>
+            )}
+
+            {/* --- resto módulos --- */}
             {menuItems.map((item) => (
               <Link
                 key={item.href}
@@ -150,10 +234,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* ==== Barra superior móvil ==== */}
         <div className="md:hidden fixed top-0 left-0 right-0 bg-white border-b flex items-center justify-between px-4 py-3 shadow-sm z-20">
           <h1 className="text-lg font-bold text-[#1f4ed8]">Panel Spartan</h1>
-          <button
-            onClick={() => setMobileOpen(!mobileOpen)}
-            className="p-2 rounded-md border text-gray-700"
-          >
+          <button onClick={() => setMobileOpen(!mobileOpen)} className="p-2 rounded-md border text-gray-700">
             {mobileOpen ? "✖️" : "☰"}
           </button>
         </div>
@@ -184,6 +265,42 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
 
               <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto">
+                {/* CRM acordeón en móvil */}
+                <button
+                  type="button"
+                  onClick={() => setCrmOpen((v) => !v)}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition
+                    ${
+                      pathname.startsWith("/crm")
+                        ? "bg-[#1f4ed8] text-white"
+                        : "text-gray-700 hover:bg-blue-50 hover:text-[#1f4ed8]"
+                    }`}
+                >
+                  <span>📈</span>
+                  <span className="flex-1 text-left">CRM</span>
+                  <span className="text-xs opacity-80">{crmOpen ? "▲" : "▼"}</span>
+                </button>
+
+                {crmOpen && (
+                  <div className="ml-7 mt-1 space-y-1">
+                    {crmSubItems.map((sub) => (
+                      <Link
+                        key={sub.href}
+                        href={sub.href}
+                        onClick={() => setMobileOpen(false)}
+                        className={`block px-3 py-2 rounded-md text-sm transition
+                          ${
+                            isActive(sub.href)
+                              ? "bg-blue-50 text-[#1f4ed8] font-semibold"
+                              : "text-gray-700 hover:bg-blue-50 hover:text-[#1f4ed8]"
+                          }`}
+                      >
+                        {sub.name}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+
                 {menuItems.map((item) => (
                   <Link
                     key={item.href}
