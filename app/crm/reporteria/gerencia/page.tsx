@@ -24,7 +24,7 @@ const JEFATURAS = new Set(
 
 const JEFATURA_SCOPE_PREFIJOS: Record<string, string[]> = {
   "claudia.borquez@spartan.cl": ["IN", "FB"],
-  "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND"], // gerente general: scope visual, pero API puede ignorar division si viewerEmail=jorge
+  "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND"], // gerente general
   "alberto.damm@spartan.cl": ["IND"],
   "nelson.norambuena@spartan.cl": ["HC"],
 };
@@ -36,7 +36,11 @@ function normalizeEmail(s: string) {
 function moneyCLP(n: number) {
   if (!n) return "—";
   try {
-    return n.toLocaleString("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
+    return n.toLocaleString("es-CL", {
+      style: "currency",
+      currency: "CLP",
+      maximumFractionDigits: 0,
+    });
   } catch {
     return String(n);
   }
@@ -101,12 +105,12 @@ type ApiData = {
     fechaCierre?: { name: string; value: number }[];
     probCierre?: { name: string; value: number }[];
     pendientesWebPorDivision?: { name: string; value: number }[];
+    estados?: { key: string; name: string; value: number }[]; // ✅ NUEVO: para tabla mini
   };
 };
 
 function formatLabel(s: string) {
   if (!s) return "—";
-  // intenta acortar mails largos
   if (s.includes("@")) return s;
   return s;
 }
@@ -117,7 +121,7 @@ function TablePro({
   rows,
   valueLabel = "Cantidad",
   valueSuffix,
-  accent = "rgba(37,99,235,0.12)", // azul rey suave
+  accent = "rgba(37,99,235,0.12)",
 }: {
   title: string;
   subtitle: string;
@@ -130,14 +134,22 @@ function TablePro({
 
   return (
     <div style={cardStyle()}>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "space-between",
+          gap: 10,
+        }}
+      >
         <div style={{ fontWeight: 900, fontSize: 16 }}>{title}</div>
         <div style={{ fontSize: 12, opacity: 0.7 }}>{subtitle}</div>
       </div>
 
       {(rows || []).length === 0 ? (
         <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-          Sin datos para mostrar (falta que la API devuelva este bloque o no hay registros con ese filtro).
+          Sin datos para mostrar (falta que la API devuelva este bloque o no hay
+          registros con ese filtro).
         </div>
       ) : (
         <div style={{ marginTop: 10, overflowX: "auto" }}>
@@ -145,8 +157,12 @@ function TablePro({
             <thead>
               <tr style={{ textAlign: "left", opacity: 0.75 }}>
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Categoría</th>
-                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb", width: 140 }}>{valueLabel}</th>
-                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb", width: 220 }}>Peso</th>
+                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb", width: 140 }}>
+                  {valueLabel}
+                </th>
+                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb", width: 220 }}>
+                  Peso
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -199,6 +215,88 @@ function TablePro({
   );
 }
 TablePro.displayName = "TablePro";
+
+/** ✅ Tabla compacta de etapas (para el espacio en blanco) */
+function EtapasMiniTable({
+  rows,
+}: {
+  rows: { key: string; name: string; value: number }[];
+}) {
+  const colorByKey: Record<string, string> = {
+    PENDIENTE_ASIGNACION: "rgba(148,163,184,0.25)",
+    ASIGNADO: "rgba(37,99,235,0.18)",
+    EN_GESTION: "rgba(59,130,246,0.18)",
+    CONTACTADO: "rgba(16,185,129,0.18)",
+    REUNION: "rgba(14,165,233,0.18)",
+    LEVANTAMIENTO: "rgba(168,85,247,0.18)",
+    PROPUESTA: "rgba(245,158,11,0.22)",
+    INSTALADO_1_O_C: "rgba(34,197,94,0.22)",
+    CERRADO_GANADO: "rgba(34,197,94,0.35)",
+    NO_GANADO: "rgba(239,68,68,0.25)",
+  };
+
+  const filtered = (rows || []).filter((r) => (r?.value ?? 0) > 0);
+
+  return (
+    <div style={cardStyle()}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+        <div style={{ fontWeight: 900, fontSize: 16 }}>Etapas del pipeline</div>
+        <div style={{ fontSize: 12, opacity: 0.7 }}>Snapshot</div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>Sin datos para mostrar.</div>
+      ) : (
+        <div style={{ marginTop: 10, overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ textAlign: "left", opacity: 0.75 }}>
+                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Etapa</th>
+                <th
+                  style={{
+                    padding: 10,
+                    borderBottom: "1px solid #e5e7eb",
+                    width: 120,
+                    textAlign: "right",
+                  }}
+                >
+                  Cantidad
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.slice(0, 10).map((r, idx) => (
+                <tr key={`${r.key}_${idx}`} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                  <td style={{ padding: 10, fontWeight: 900 }}>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        padding: "4px 10px",
+                        borderRadius: 999,
+                        fontWeight: 900,
+                        background: colorByKey[r.key] || "rgba(203,213,225,0.25)",
+                        border: "1px solid rgba(17,24,39,0.08)",
+                      }}
+                    >
+                      {r.name}
+                    </span>
+                  </td>
+                  <td style={{ padding: 10, textAlign: "right", fontWeight: 900 }}>{r.value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filtered.length > 10 && (
+            <div style={{ marginTop: 8, fontSize: 11, opacity: 0.65 }}>
+              Mostrando 10 de {filtered.length} etapas.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+EtapasMiniTable.displayName = "EtapasMiniTable";
 
 export default function CRMReporteriaGerenciaPage() {
   const supabase = useMemo(() => createClientComponentClient(), []);
@@ -266,7 +364,7 @@ export default function CRMReporteriaGerenciaPage() {
 
       qs.set("includeAssigned", "1");
 
-      // ✅ para que la API permita "Jorge ve todo"
+      // ✅ Jorge ve todo
       qs.set("viewerEmail", loggedEmail);
 
       const resp = await fetch(`/api/crm/reporteria/gerencia?${qs.toString()}`, { cache: "no-store" });
@@ -302,6 +400,9 @@ export default function CRMReporteriaGerenciaPage() {
   const pendientesWebByDiv = useMemo(() => data?.charts?.pendientesWebPorDivision || [], [data]);
   const fechaCierre = useMemo(() => data?.charts?.fechaCierre || [], [data]);
   const probCierre = useMemo(() => data?.charts?.probCierre || [], [data]);
+
+  // ✅ para la tabla mini
+  const etapas = useMemo(() => data?.charts?.estados || [], [data]);
 
   if (authLoading) {
     return (
@@ -536,6 +637,11 @@ export default function CRMReporteriaGerenciaPage() {
             rows={probCierre}
             accent="rgba(245,158,11,0.16)"
           />
+        </div>
+
+        {/* ✅ NUEVO: ocupa el espacio en blanco */}
+        <div style={{ gridColumn: "span 6" }}>
+          <EtapasMiniTable rows={etapas} />
         </div>
       </div>
 
