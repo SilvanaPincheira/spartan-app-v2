@@ -199,10 +199,21 @@ function moneyCLP(raw: string) {
   const n = toMontoNumber(raw);
   if (!n) return "—";
   try {
-    return n.toLocaleString("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
+    return n.toLocaleString("es-CL", {
+      style: "currency",
+      currency: "CLP",
+      maximumFractionDigits: 0,
+    });
   } catch {
     return String(n);
   }
+}
+
+/** ✅ estado local “asignado” (optimista) */
+function isAssignedLocal(r: Row) {
+  const asignadoA = (r.asignado_a || "").trim();
+  const estado = normUpper(r.estado || "");
+  return !!asignadoA && estado !== "PENDIENTE_ASIGNACION";
 }
 
 /** =========================
@@ -368,6 +379,21 @@ export default function CRMDistribucionPage() {
         return;
       }
 
+      // ✅ optimistic UI: deja visible “Asignado” y bloqueado inmediatamente
+      setRows((prev) =>
+        prev.map((r) =>
+          (r.folio || "").trim() === folio
+            ? {
+                ...r,
+                estado: "ASIGNADO",
+                asignado_a,
+                asignado_por,
+                asignado_at: new Date().toISOString(),
+              }
+            : r
+        )
+      );
+
       // ✅ refrescar, y como ya estará ASIGNADO en CRM_DB, desaparecerá del listado
       await reload();
     } finally {
@@ -480,20 +506,20 @@ export default function CRMDistribucionPage() {
               const folio = r.folio || "";
               const busy = assigningFolio === folio;
 
+              // ✅ si ya fue asignado (optimista), bloquea UI
+              const assignedNow = isAssignedLocal(r);
+              const assignedEmail = (r.asignado_a || "").trim();
+
               return (
                 <tr key={`${folio}_${i}`} style={{ borderBottom: "1px solid #f3f4f6" }}>
                   <td style={{ padding: 12, verticalAlign: "top" }}>
                     <div style={{ fontWeight: 800 }}>{folio || "—"}</div>
-                    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
-                      {r.created_at || "—"}
-                    </div>
+                    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>{r.created_at || "—"}</div>
                   </td>
 
                   <td style={{ padding: 12, verticalAlign: "top" }}>
                     <div style={{ fontWeight: 800 }}>{r.nombre_razon_social || "—"}</div>
-                    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
-                      {r.correo || "—"}
-                    </div>
+                    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>{r.correo || "—"}</div>
                   </td>
 
                   <td style={{ padding: 12, verticalAlign: "top" }}>
@@ -530,38 +556,59 @@ export default function CRMDistribucionPage() {
                     <div style={{ fontWeight: 800 }}>{moneyCLP(r.monto_proyectado || "")}</div>
                   </td>
 
+                  {/* ✅ AQUÍ: “Asignar a” -> “Asignado” read-only */}
                   <td style={{ padding: 12, verticalAlign: "top" }}>
-                    <input
-                      value={targetEmail[folio] || ""}
-                      onChange={(e) => setTargetEmail((p) => ({ ...p, [folio]: e.target.value }))}
-                      placeholder="ej: pia.ramirez@spartan.cl"
-                      style={{
-                        width: "100%",
-                        minWidth: 240,
-                        padding: 10,
-                        borderRadius: 12,
-                        border: "1px solid #e5e7eb",
-                      }}
-                    />
+                    {assignedNow ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>Asignado</div>
+                        <div
+                          style={{
+                            width: "100%",
+                            minWidth: 240,
+                            padding: "10px 12px",
+                            borderRadius: 12,
+                            border: "1px solid #e5e7eb",
+                            background: "#f9fafb",
+                            fontWeight: 800,
+                            color: "#111827",
+                          }}
+                        >
+                          {assignedEmail || "—"}
+                        </div>
+                      </div>
+                    ) : (
+                      <input
+                        value={targetEmail[folio] || ""}
+                        onChange={(e) => setTargetEmail((p) => ({ ...p, [folio]: e.target.value }))}
+                        placeholder="ej: pia.ramirez@spartan.cl"
+                        style={{
+                          width: "100%",
+                          minWidth: 240,
+                          padding: 10,
+                          borderRadius: 12,
+                          border: "1px solid #e5e7eb",
+                        }}
+                      />
+                    )}
                   </td>
 
                   <td style={{ padding: 12, verticalAlign: "top" }}>
                     <button
                       type="button"
                       onClick={() => asignar(folio, r)}
-                      disabled={busy}
+                      disabled={busy || assignedNow}
                       style={{
                         padding: "10px 14px",
                         borderRadius: 12,
                         border: "1px solid #111827",
-                        background: busy ? "#6b7280" : "#111827",
-                        color: "white",
+                        background: assignedNow ? "#f3f4f6" : busy ? "#6b7280" : "#111827",
+                        color: assignedNow ? "#6b7280" : "white",
                         fontWeight: 800,
-                        cursor: busy ? "not-allowed" : "pointer",
+                        cursor: busy || assignedNow ? "not-allowed" : "pointer",
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {busy ? "Asignando…" : "Asignar"}
+                      {assignedNow ? "Asignado" : busy ? "Asignando…" : "Asignar"}
                     </button>
                   </td>
                 </tr>
@@ -609,7 +656,15 @@ export default function CRMDistribucionPage() {
               overflow: "hidden",
             }}
           >
-            <div style={{ padding: 14, borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", gap: 12 }}>
+            <div
+              style={{
+                padding: 14,
+                borderBottom: "1px solid #e5e7eb",
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
               <div style={{ fontWeight: 900 }}>{openMsg.title}</div>
               <button
                 type="button"
@@ -626,9 +681,7 @@ export default function CRMDistribucionPage() {
                 Cerrar
               </button>
             </div>
-            <div style={{ padding: 14, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
-              {openMsg.body}
-            </div>
+            <div style={{ padding: 14, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{openMsg.body}</div>
           </div>
         </div>
       )}
