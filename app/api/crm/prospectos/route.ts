@@ -14,6 +14,10 @@ function lowerEmail(s: string) {
   return (s || "").trim().toLowerCase();
 }
 
+function upper(s: string) {
+  return (s || "").trim().toUpperCase();
+}
+
 export async function POST(req: Request) {
   try {
     if (!APPS_SCRIPT_URL) {
@@ -31,33 +35,49 @@ export async function POST(req: Request) {
     const lead = body?.lead && typeof body.lead === "object" ? body.lead : body;
 
     const folio = pick(lead, "folio");
-    if (!folio)
+    if (!folio) {
       return NextResponse.json({ ok: false, error: "Folio requerido" }, { status: 400 });
+    }
 
     const nowIso = new Date().toISOString();
 
     // ✅ fuente correcta (evita que quede "BD")
-    // page manda "MANUAL" o "CSV_PIA"
     const fuente = pick(lead, "fuente") || "MANUAL";
 
-    // ✅ estado: respeta lo que mande el front
-    // (ej: PENDIENTE_ASIGNACION / ASIGNADO / etc.)
-    const estado = pick(lead, "estado") || "ASIGNADO";
+    // ✅ emails base
+    const ejecutivo_email = lowerEmail(pick(lead, "ejecutivo_email"));
+    const asignado_a_in = lowerEmail(pick(lead, "asignado_a"));
 
-    // ✅ asignación:
-    // - si es PENDIENTE_ASIGNACION, permitimos vacío
-    // - si NO, exigimos asignado_a y asignado_por
-    const asignado_a = lowerEmail(pick(lead, "asignado_a"));
-    const asignado_por = lowerEmail(pick(lead, "asignado_por"));
+    // ✅ Regla CLAVE:
+    // si viene ejecutivo_email (BD_PIA) y no viene asignado_a, entonces asignado_a = ejecutivo_email
+    const asignado_a_final = asignado_a_in || ejecutivo_email;
 
-    const requiereAsignacion = estado !== "PENDIENTE_ASIGNACION";
+    // ✅ estado:
+    // - si hay asignado_a_final => ASIGNADO (aunque venga PENDIENTE_ASIGNACION desde PIA)
+    // - si NO hay asignado => PENDIENTE_ASIGNACION
+    const estado_in = upper(pick(lead, "estado"));
+    const estado_final = asignado_a_final
+      ? "ASIGNADO"
+      : (estado_in || "PENDIENTE_ASIGNACION");
 
-    if (requiereAsignacion && !asignado_a)
+    const requiereAsignacion = estado_final !== "PENDIENTE_ASIGNACION";
+
+    // ✅ asignado_por:
+    // - respeta el payload si viene
+    // - si no viene y está asignado:
+    //   - para imports, usamos ejecutivo_email o asignado_a_final
+    const asignado_por_in = lowerEmail(pick(lead, "asignado_por"));
+    const asignado_por_final = requiereAsignacion
+      ? (asignado_por_in || ejecutivo_email || asignado_a_final)
+      : "";
+
+    if (requiereAsignacion && !asignado_a_final) {
       return NextResponse.json({ ok: false, error: "asignado_a requerido" }, { status: 400 });
-    if (requiereAsignacion && !asignado_por)
+    }
+    if (requiereAsignacion && !asignado_por_final) {
       return NextResponse.json({ ok: false, error: "asignado_por requerido" }, { status: 400 });
+    }
 
-    // ✅ CREATE (si existe -> duplicated true)
     const createPayload = {
       action: "CREATE",
       created_at: pick(lead, "created_at") || nowIso,
@@ -66,7 +86,6 @@ export async function POST(req: Request) {
       fuente,
       source_id: pick(lead, "source_id") || pick(lead, "lead_key") || "",
 
-      // ✅ datos del prospecto (ahora sí vienen del payload plano)
       nombre_razon_social: pick(lead, "nombre_razon_social"),
       rut: pick(lead, "rut"),
       contacto: pick(lead, "contacto"),
@@ -90,16 +109,14 @@ export async function POST(req: Request) {
       origen_prospecto: pick(lead, "origen_prospecto"),
       observacion: pick(lead, "observacion"),
 
-      ejecutivo_email: lowerEmail(pick(lead, "ejecutivo_email")),
+      ejecutivo_email,
 
-      // ✅ NO forzar ASIGNADO
-      estado,
+      // ✅ estado corregido
+      estado: estado_final,
 
-      // ✅ asignación (solo si corresponde)
-      asignado_a: requiereAsignacion ? asignado_a : "",
-      asignado_por: requiereAsignacion ? asignado_por : "",
-      // ✅ OJO: si tu hoja no tiene header "asignado_at", esto puede romper en Apps Script.
-      // Si tu sheet NO tiene la columna, deja esto como "" o elimina el campo.
+      // ✅ asignación corregida
+      asignado_a: requiereAsignacion ? asignado_a_final : "",
+      asignado_por: requiereAsignacion ? asignado_por_final : "",
       asignado_at: requiereAsignacion ? (pick(lead, "asignado_at") || nowIso) : "",
     };
 
@@ -126,13 +143,19 @@ export async function POST(req: Request) {
           error: dataCreate?.error || `Sheets error (CREATE ${respCreate.status})`,
           raw: dataCreate?.raw,
           debug: dataCreate?.debug_idx || dataCreate?.debug_cols || null,
+          sent: {
+            folio,
+            fuente,
+            ejecutivo_email,
+            estado_final,
+            asignado_a_final,
+            asignado_por_final,
+          },
         },
         { status: 500 }
       );
     }
 
-    // ✅ Eliminamos el paso ASIGNAR: ya estás mandando asignado_a/asignado_por en CREATE
-    // y este paso fue el que te arrojó el error de headers (asignado_at).
     return NextResponse.json({ ok: true, duplicated: !!dataCreate?.duplicated });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Error desconocido";
