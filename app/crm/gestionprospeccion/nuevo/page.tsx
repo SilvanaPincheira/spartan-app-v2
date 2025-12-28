@@ -240,6 +240,16 @@ function mapPiaRowToForm(row: PiaRow): Partial<ProspectoForm> {
   };
 }
 
+/** ✅ Sanitiza textos para que no rompan guardado (quotes/newlines) */
+function safeText(v: any) {
+  return String(v ?? "")
+    .replace(/\r?\n/g, " ")
+    .replace(/\t/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .replace(/"/g, "”")
+    .trim();
+}
+
 function validateForm(f: ProspectoForm) {
   const errors: Record<string, string> = {};
 
@@ -528,54 +538,62 @@ export default function ProspeccionPage() {
 
   /** 9) Payload */
   function buildPayload() {
-    const monto = toMontoNumber(form.montoProyectado);
+    const montoNum = toMontoNumber(form.montoProyectado);
+
+    // ✅ fuerza fuente correcta para Sheet (evita que backend recategorice por strings raros)
+    const fuenteFinal = form.fuenteDatos === "CSV_PIA" ? "CSV_PIA" : "MANUAL";
 
     const source_id =
       form.fuenteDatos === "CSV_PIA"
-        ? form.sourceId || ""
+        ? safeText(form.sourceId || "")
         : makeManualSourceId(form.nombreRazonSocial, form.correo);
 
     const requiere = needsAssignment(form.origenProspecto);
 
     // ✅ si requiere asignación por jefatura, forzamos pendiente
-    const estadoFinal = requiere ? "PENDIENTE_ASIGNACION" : (form.estado || "ASIGNADO");
+    const estadoFinal = requiere ? "PENDIENTE_ASIGNACION" : (safeText(form.estado) || "ASIGNADO");
 
-    return {
+    const payload = {
       created_at: new Date().toISOString(),
-      folio: form.folio,
-      fuente: form.fuenteDatos,
+      folio: safeText(form.folio),
+      fuente: fuenteFinal,
       source_id,
 
-      nombre_razon_social: form.nombreRazonSocial,
-      rut: form.rut || "",
-      contacto: form.contacto || "",
-      telefono: form.telefono || "",
-      correo: normalizeEmail(form.correo),
-      direccion: form.direccion,
-      rubro: form.rubro,
-      monto_proyectado: monto,
+      nombre_razon_social: safeText(form.nombreRazonSocial),
+      rut: safeText(form.rut || ""),
+      contacto: safeText(form.contacto || ""),
+      telefono: safeText(form.telefono || ""),
+      correo: safeText(normalizeEmail(form.correo)),
+      direccion: safeText(form.direccion),
+      rubro: safeText(form.rubro),
 
-      division: form.division,
+      // ✅ manda como string numérico para evitar parse/locale
+      monto_proyectado: montoNum ? String(montoNum) : "",
 
-      etapa_id: form.etapaId,
-      etapa_nombre: etapaNombre,
-      fecha_cierre_id: form.fechaCierreId,
-      fecha_cierre_nombre: fechaCierreNombre,
-      prob_cierre_id: form.probCierreId,
-      prob_cierre_nombre: probCierreNombre,
+      division: safeText(form.division),
 
-      origen_prospecto: form.origenProspecto,
-      observacion: form.observacion || "",
+      etapa_id: String(form.etapaId ?? ""),
+      etapa_nombre: safeText(etapaNombre),
+      fecha_cierre_id: String(form.fechaCierreId ?? ""),
+      fecha_cierre_nombre: safeText(fechaCierreNombre),
+      prob_cierre_id: String(form.probCierreId ?? ""),
+      prob_cierre_nombre: safeText(probCierreNombre),
 
-      ejecutivo_email: form.ejecutivoEmail,
+      origen_prospecto: safeText(form.origenProspecto),
+      observacion: safeText(form.observacion || ""),
+
+      ejecutivo_email: safeText(form.ejecutivoEmail),
 
       estado: estadoFinal,
 
       // ✅ asignación: si es pendiente, sin asignar
-      asignado_a: requiere ? "" : form.ejecutivoEmail,
-      asignado_por: requiere ? "" : form.ejecutivoEmail,
+      asignado_a: requiere ? "" : safeText(form.ejecutivoEmail),
+      asignado_por: requiere ? "" : safeText(form.ejecutivoEmail),
       asignado_at: requiere ? "" : new Date().toISOString(),
     };
+
+    console.log("PAYLOAD NUEVO PROSPECTO =>", payload);
+    return payload;
   }
 
   async function onSubmit() {
@@ -746,16 +764,99 @@ export default function ProspeccionPage() {
           </div>
         </div>
 
-        {/* Panel BD Pía (tu panel igual; lo dejé tal cual, solo cambia origenProspecto=WEB cuando carga) */}
+        {/* Panel BD Pía (NO eliminado: placeholder para tu bloque real) */}
         {fuente === "CSV_PIA" && piaAllowed && (
           <div style={{ marginTop: 14, borderTop: "1px solid #e5e7eb", paddingTop: 14 }}>
-            {/* ... (TU MISMO CÓDIGO DE TABLA BD PÍA) ... */}
-            {/* Para mantener la respuesta corta, no repetí el bloque completo aquí,
-                pero puedes dejar exactamente tu bloque igual.
-                Lo único importante ya está en loadFromPiaRow() y origenProspecto default. */}
-            <div style={{ fontSize: 12, opacity: 0.8 }}>
-              (Tu panel BD Pía va acá tal cual lo tienes)
+            <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 8 }}>
+              Selecciona un registro desde BD Pía para precargar datos.
             </div>
+
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar (razón social, email, contacto, dirección)…"
+                style={{
+                  flex: 1,
+                  minWidth: 260,
+                  padding: 10,
+                  borderRadius: 10,
+                  border: "1px solid #d1d5db",
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowAll((p) => !p)}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid #d1d5db",
+                  background: "white",
+                  cursor: "pointer",
+                }}
+              >
+                {showAll ? "Ver menos" : "Ver más"}
+              </button>
+            </div>
+
+            {piaLoading ? (
+              <div style={{ marginTop: 10, opacity: 0.8 }}>Cargando BD Pía…</div>
+            ) : piaError ? (
+              <div style={{ marginTop: 10, color: "crimson" }}>Error: {piaError}</div>
+            ) : filteredPia.length === 0 ? (
+              <div style={{ marginTop: 10, opacity: 0.8 }}>No hay resultados.</div>
+            ) : (
+              <div style={{ marginTop: 10, border: "1px solid #e5e7eb", borderRadius: 12, overflow: "hidden" }}>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ textAlign: "left", fontSize: 12, opacity: 0.8 }}>
+                        <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Razón social</th>
+                        <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Contacto</th>
+                        <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Email</th>
+                        <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredPia.map((r, idx) => {
+                        const sid = makeSourceId(r);
+                        const picked = selectedSourceId === sid;
+                        return (
+                          <tr key={`${sid}_${idx}`} style={{ background: picked ? "#FEF3C7" : "transparent" }}>
+                            <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                              {r.nombre_o_razon_social || "—"}
+                            </td>
+                            <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                              {r.contacto || "—"}
+                            </td>
+                            <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                              {r.e_mail || "—"}
+                            </td>
+                            <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                              <button
+                                type="button"
+                                onClick={() => loadFromPiaRow(r)}
+                                style={{
+                                  padding: "8px 10px",
+                                  borderRadius: 10,
+                                  border: "1px solid #111827",
+                                  background: picked ? "#111827" : "white",
+                                  color: picked ? "white" : "#111827",
+                                  cursor: "pointer",
+                                  fontWeight: 800,
+                                }}
+                              >
+                                {picked ? "Seleccionado" : "Usar"}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -801,11 +902,7 @@ export default function ProspeccionPage() {
             error={errors.contacto}
           />
 
-          <Field
-            label="RUT (opcional)"
-            value={form.rut}
-            onChange={(v) => setForm((p) => ({ ...p, rut: v }))}
-          />
+          <Field label="RUT (opcional)" value={form.rut} onChange={(v) => setForm((p) => ({ ...p, rut: v }))} />
 
           <Field
             label="Teléfono (opcional)"
@@ -849,7 +946,11 @@ export default function ProspeccionPage() {
             error={errors.estado}
             options={CRM_ESTADOS.map((o) => ({ value: o.value, label: o.label }))}
             disabled={requiereAsign}
-            hint={requiereAsign ? "Se fuerza a PENDIENTE_ASIGNACION porque requiere derivación de jefatura." : undefined}
+            hint={
+              requiereAsign
+                ? "Se fuerza a PENDIENTE_ASIGNACION porque requiere derivación de jefatura."
+                : undefined
+            }
           />
 
           {/* ✅ Etapa comercial */}
@@ -901,7 +1002,12 @@ export default function ProspeccionPage() {
               value={form.observacion}
               onChange={(e) => setForm((p) => ({ ...p, observacion: e.target.value }))}
               rows={4}
-              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
+              style={{
+                width: "100%",
+                padding: 10,
+                borderRadius: 10,
+                border: "1px solid #d1d5db",
+              }}
             />
           </label>
         </div>
@@ -915,6 +1021,7 @@ export default function ProspeccionPage() {
                 fecha: nowCL(),
                 folio: makeFolio(),
                 ejecutivoEmail: loggedEmail,
+
                 nombreRazonSocial: "",
                 rut: "",
                 contacto: "",
@@ -923,9 +1030,11 @@ export default function ProspeccionPage() {
                 direccion: "",
                 rubro: "",
                 montoProyectado: "",
+
                 observacion: "",
                 sourceId: undefined,
                 sourcePayload: undefined,
+
                 estado: "ASIGNADO",
                 etapaId: 1,
                 fechaCierreId: 2,
@@ -988,7 +1097,9 @@ export default function ProspeccionPage() {
                 {myLast5.map((r, idx) => (
                   <tr key={`${r.folio || idx}_${idx}`}>
                     <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{r.folio || "—"}</td>
-                    <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{r.nombre_razon_social || "—"}</td>
+                    <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
+                      {r.nombre_razon_social || "—"}
+                    </td>
                     <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{r.division || "—"}</td>
                     <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{r.estado || "—"}</td>
                     <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{r.asignado_a || "—"}</td>
@@ -1027,9 +1138,7 @@ function Field(props: {
           border: `1px solid ${props.error ? "crimson" : "#d1d5db"}`,
         }}
       />
-      {props.error && (
-        <div style={{ color: "crimson", fontSize: 12, marginTop: 6 }}>{props.error}</div>
-      )}
+      {props.error && <div style={{ color: "crimson", fontSize: 12, marginTop: 6 }}>{props.error}</div>}
     </label>
   );
 }
