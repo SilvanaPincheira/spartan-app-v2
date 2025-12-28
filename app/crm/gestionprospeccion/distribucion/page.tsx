@@ -16,6 +16,7 @@ function sheetCsvUrl(gid: string) {
   return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${gid}`;
 }
 
+/** Jefaturas que asignan */
 const JEFATURAS = new Set(
   [
     "claudia.borquez@spartan.cl",
@@ -25,9 +26,19 @@ const JEFATURAS = new Set(
   ].map((x) => x.trim().toLowerCase())
 );
 
-type Row = Record<string, string>;
-type ScopeRow = { email: string; prefijo: string };
+/** ✅ Scope fijo por jefatura (SIN Supabase) */
+const JEFATURA_SCOPE_PREFIJOS: Record<string, string[]> = {
+  "claudia.borquez@spartan.cl": ["IN", "FB"],
+  "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND"], // ajusta
+  "alberto.damm@spartan.cl": ["IND"],
+  "nelson.norambuena@spartan.cl": ["HC"], // ajusta
+};
 
+type Row = Record<string, string>;
+
+/** =========================
+ *  CSV helpers
+ *  ========================= */
 function normalizeHeader(h: string) {
   return (h || "")
     .replace(/^\uFEFF/, "")
@@ -101,6 +112,7 @@ function normUpper(s: string) {
 function normLower(s: string) {
   return (s || "").trim().toLowerCase();
 }
+
 function pick(r: Row, ...keys: string[]) {
   for (const k of keys) {
     const v = r[k];
@@ -108,60 +120,53 @@ function pick(r: Row, ...keys: string[]) {
   }
   return "";
 }
+
 function toMontoNumber(raw: string) {
   const n = Number(String(raw || "").replace(/[^\d]/g, ""));
   return Number.isFinite(n) ? n : 0;
 }
 
-// folio “lindo” estable
 function makeFolio(origen: string, razon: string, mail: string, fecha: string) {
-  const base = `${origen}|${razon}|${mail}|${fecha}`.toLowerCase().replace(/\s+/g, "_");
-  // hash simple pero estable (no crypt): largo+slice
-  const hash = base.length.toString(36) + "-" + base.slice(0, 30);
-  return `LEAD-${origen.replace(/\s+/g, "")}-${hash}`;
+  // folio determinístico “bonito” (no muestra leadKey crudo)
+  const base = `${origen}|${razon}|${mail}|${fecha}`.toLowerCase();
+  let hash = 0;
+  for (let i = 0; i < base.length; i++) hash = (hash * 31 + base.charCodeAt(i)) >>> 0;
+  const short = hash.toString(36).slice(0, 8);
+  return `LEAD-${origen.replace(/\s+/g, "")}-${short}`;
 }
 
 function normalizeLeadRow(origen: string, r: Row): Row {
-  // Cabeceras reales tuyas (normalizadas):
-  // razon_social, contacto, mail, telefono, industria, mensaje, fecha_contacto, division, etapa, monto
-
   const razon = pick(r, "razon_social", "razon", "empresa", "nombre_razon_social");
-  const contacto = pick(r, "contacto");
-  const mail = pick(r, "mail", "correo", "email");
-  const telefono = pick(r, "telefono");
+  const contacto = pick(r, "contacto", "nombre_contacto");
+  const mail = pick(r, "mail", "correo", "email", "e_mail");
+  const telefono = pick(r, "telefono", "phone");
   const industria = pick(r, "industria", "rubro");
   const mensaje = pick(r, "mensaje", "observacion", "comentario");
   const fechaContacto = pick(r, "fecha_contacto", "fecha", "created_at");
-  const division = pick(r, "division", "prefijo"); // IN / FB / HC / IND
+  const division = pick(r, "division", "prefijo");
   const etapa = pick(r, "etapa", "etapa_nombre");
   const montoRaw = pick(r, "monto", "monto_proyectado");
 
   const folio = pick(r, "folio") || makeFolio(origen, razon, mail, fechaContacto);
 
   return {
-    // Interno:
-    lead_key: folio,
-
-    // Campos “CRM_DB-like”:
     folio,
     created_at: fechaContacto,
     origen_prospecto: origen,
 
     nombre_razon_social: razon,
     correo: mail,
+    contacto,
     telefono,
-    rubro: industria,
 
-    // este mensaje lo enviaremos a CRM_DB como observacion
+    rubro: industria,
     observacion: mensaje,
 
-    division: division,
+    division,
 
-    etapa_nombre: etapa || "",
-
+    etapa_nombre: etapa,
     monto_proyectado: String(toMontoNumber(montoRaw) || montoRaw || ""),
 
-    // distribución
     estado: "PENDIENTE_ASIGNACION",
     asignado_a: "",
     asignado_por: "",
@@ -178,29 +183,24 @@ export default function CRMDistribucionPage() {
   const [err, setErr] = useState<string | null>(null);
 
   const [rows, setRows] = useState<Row[]>([]);
-  const [q, setQ] = useState("");
 
+  const [q, setQ] = useState("");
   const [assigningFolio, setAssigningFolio] = useState<string | null>(null);
   const [targetEmail, setTargetEmail] = useState<Record<string, string>>({});
-
-  const [allowedPrefijos, setAllowedPrefijos] = useState<string[]>([]);
-  const [scopeErr, setScopeErr] = useState<string | null>(null);
-
-  // Modal mensaje
-  const [openMsg, setOpenMsg] = useState<{ title: string; body: string } | null>(null);
 
   const isJefatura = useMemo(
     () => JEFATURAS.has(normalizeEmail(loggedEmail)),
     [loggedEmail]
   );
 
-  // ✅ fallback si supabase scope falla (para no “romper” el módulo)
-  const FALLBACK_SCOPE: Record<string, string[]> = {
-    "claudia.borquez@spartan.cl": ["IN", "FB"],
-    "jorge.beltran@spartan.cl": ["IN", "FB", "HC", "IND"],
-    "alberto.damm@spartan.cl": ["IND"],
-    "nelson.norambuena@spartan.cl": ["HC"],
-  };
+  /** ✅ scope fijo por email */
+  const allowedPrefijos = useMemo(() => {
+    const email = normalizeEmail(loggedEmail);
+    const p = JEFATURA_SCOPE_PREFIJOS[email] || [];
+    return p.map(normUpper);
+  }, [loggedEmail]);
+
+  const allowedPrefijosSet = useMemo(() => new Set(allowedPrefijos), [allowedPrefijos]);
 
   useEffect(() => {
     (async () => {
@@ -217,41 +217,6 @@ export default function CRMDistribucionPage() {
     })();
   }, [supabase]);
 
-  // Scope desde Supabase
-  useEffect(() => {
-    if (authLoading) return;
-    if (!loggedEmail) return;
-
-    (async () => {
-      try {
-        setScopeErr(null);
-
-        // 👇 CAMBIA ESTE NOMBRE por tu tabla real.
-        // En tu screenshot se ve una tabla con columnas: id, email, prefijo
-        // Si se llama distinto (ej: "jefatura_prefijos"), ponlo aquí.
-        const SCOPE_TABLE = "jefatura_prefijos"; // <-- AJUSTA
-
-        const { data, error } = await supabase
-          .from(SCOPE_TABLE)
-          .select("email,prefijo")
-          .eq("email", normalizeEmail(loggedEmail));
-
-        if (error) throw error;
-
-        const prefijos = (data as ScopeRow[] | null)?.map((r) => normUpper(r.prefijo)) ?? [];
-        setAllowedPrefijos(prefijos.length ? prefijos : FALLBACK_SCOPE[normalizeEmail(loggedEmail)] || []);
-      } catch (e: any) {
-        setScopeErr(e?.message || "Error leyendo prefijos (scope) en Supabase");
-        setAllowedPrefijos(FALLBACK_SCOPE[normalizeEmail(loggedEmail)] || []);
-      }
-    })();
-  }, [authLoading, loggedEmail, supabase]);
-
-  const allowedPrefijosSet = useMemo(
-    () => new Set(allowedPrefijos.map((p) => normUpper(p))),
-    [allowedPrefijos]
-  );
-
   async function reload() {
     try {
       setLoading(true);
@@ -261,17 +226,15 @@ export default function CRMDistribucionPage() {
         ORIGIN_SOURCES.map(async (src) => {
           const url = sheetCsvUrl(src.gid);
           const res = await fetch(url, { cache: "no-store" });
-          if (!res.ok) throw new Error(`No se pudo leer ${src.origen} (gid=${src.gid}) status=${res.status}`);
-          const text = await res.text();
-
-          if (text.trim().startsWith("<")) {
-            throw new Error(
-              `La hoja ${src.origen} no está publicada como CSV (Google devolvió HTML). ` +
-                `En Google Sheets: Archivo → Publicar en la web`
-            );
+          if (!res.ok) {
+            throw new Error(`No se pudo leer ${src.origen} (gid=${src.gid}) status=${res.status}`);
           }
-
-          return parseCsv(text).map((r) => normalizeLeadRow(src.origen, r));
+          const text = await res.text();
+          if (text.trim().startsWith("<")) {
+            throw new Error(`La hoja ${src.origen} no está publicada para CSV (Google devolvió HTML).`);
+          }
+          const parsed = parseCsv(text);
+          return parsed.map((r) => normalizeLeadRow(src.origen, r));
         })
       );
 
@@ -292,48 +255,34 @@ export default function CRMDistribucionPage() {
   const pendientes = useMemo(() => {
     const query = q.trim().toLowerCase();
 
-    const base = rows
-      .filter((r) => {
-        const estado = normUpper(r.estado || "");
-        if (estado !== "PENDIENTE_ASIGNACION") return false;
+    const base = rows.filter((r) => {
+      const estado = normUpper(r.estado || "");
+      if (estado !== "PENDIENTE_ASIGNACION") return false;
 
-        const asignadoA = normLower(r.asignado_a || "");
-        if (asignadoA) return false;
+      const asignadoA = normLower(r.asignado_a || "");
+      if (asignadoA) return false;
 
-        const pref = normUpper(r.division || "");
-        if (allowedPrefijosSet.size > 0 && pref && !allowedPrefijosSet.has(pref)) return false;
+      const pref = normUpper(r.division || r.prefijo || "");
+      // ✅ si hay scope definido, filtra; si no, deja pasar todo (jefatura sin scope)
+      if (allowedPrefijosSet.size > 0 && !allowedPrefijosSet.has(pref)) return false;
 
-        return true;
-      })
-      // ordena por fecha (si viene)
-      .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+      return true;
+    });
 
     if (!query) return base;
 
     return base.filter((r) => {
-      const haystack = [
-        r.folio,
-        r.nombre_razon_social,
-        r.correo,
-        r.origen_prospecto,
-        r.division,
-        r.observacion,
-      ]
+      const haystack = [r.folio, r.nombre_razon_social, r.correo, r.origen_prospecto, r.division]
         .join(" ")
         .toLowerCase();
       return haystack.includes(query);
     });
   }, [rows, q, allowedPrefijosSet]);
 
-  async function asignar(row: Row) {
-    const folio = String(row.folio || "").trim();
+  async function asignar(folio: string, lead: Row) {
     const asignado_a = normalizeEmail(targetEmail[folio] || "");
     const asignado_por = normalizeEmail(loggedEmail);
 
-    if (!folio) {
-      alert("❌ No se puede asignar: falta folio en el lead.");
-      return;
-    }
     if (!asignado_a) {
       alert("Debes ingresar el correo/login del ejecutivo a asignar.");
       return;
@@ -345,13 +294,7 @@ export default function CRMDistribucionPage() {
       const resp = await fetch("/api/crm/prospectos/asignar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // ✅ mandamos el lead completo para que el backend haga CREATE en CRM_DB
-        body: JSON.stringify({
-          lead: row,
-          folio,
-          asignado_a,
-          asignado_por,
-        }),
+        body: JSON.stringify({ folio, asignado_a, asignado_por, lead }),
       });
 
       const text = await resp.text();
@@ -367,7 +310,7 @@ export default function CRMDistribucionPage() {
         return;
       }
 
-      alert("✅ Prospecto asignado y creado en CRM_DB.");
+      alert("✅ Prospecto asignado.");
       await reload();
     } finally {
       setAssigningFolio(null);
@@ -376,21 +319,19 @@ export default function CRMDistribucionPage() {
 
   if (authLoading) {
     return (
-      <div style={{ padding: 18 }}>
-        <div style={{ fontSize: 20, fontWeight: 800 }}>CRM · Distribución</div>
-        <div style={{ marginTop: 10, opacity: 0.7 }}>Cargando usuario…</div>
+      <div style={{ padding: 16 }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700 }}>CRM · Distribución</h2>
+        <div style={{ marginTop: 10, opacity: 0.75 }}>Cargando usuario…</div>
       </div>
     );
   }
 
   if (!isJefatura) {
     return (
-      <div style={{ padding: 18, maxWidth: 900 }}>
-        <div style={{ fontSize: 22, fontWeight: 900 }}>CRM · Prospección · Distribución</div>
-        <div style={{ marginTop: 10, color: "crimson" }}>
-          No tienes permisos para este módulo (solo jefaturas).
-        </div>
-        <div style={{ marginTop: 8, opacity: 0.85 }}>
+      <div style={{ padding: 16, maxWidth: 900 }}>
+        <h2 style={{ fontSize: 22, fontWeight: 800 }}>CRM · Prospección · Distribución</h2>
+        <div style={{ marginTop: 10, color: "crimson" }}>No tienes permisos para este módulo (solo jefaturas).</div>
+        <div style={{ marginTop: 8, opacity: 0.8 }}>
           Login detectado: <b>{loggedEmail || "—"}</b>
         </div>
       </div>
@@ -398,162 +339,110 @@ export default function CRMDistribucionPage() {
   }
 
   return (
-    <div style={{ padding: 18, maxWidth: 1250 }}>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <div>
-          <div style={{ fontSize: 24, fontWeight: 900, letterSpacing: -0.2 }}>
-            CRM · Prospección · Distribución de carga (Jefaturas)
-          </div>
-          <div style={{ marginTop: 6, fontSize: 13, opacity: 0.8 }}>
-            Jefatura: <b>{loggedEmail || "—"}</b>
-            {" · "}Fuentes: <b>WEB · INOFOOD · FOOD SERVICE · REFERIDO</b>
-            {" · "}Scope prefijos: <b>{allowedPrefijos.length ? allowedPrefijos.join(", ") : "—"}</b>
-          </div>
-          {scopeErr && (
-            <div style={{ marginTop: 8, color: "crimson", fontSize: 13 }}>
-              Error scope: {scopeErr} (usando fallback)
-            </div>
-          )}
+    <div style={{ padding: 16, maxWidth: 1200 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+        <h2 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>
+          CRM · Prospección · Distribución de carga (Jefaturas)
+        </h2>
+        <div style={{ opacity: 0.75 }}>
+          Jefatura: <b>{loggedEmail || "—"}</b>
         </div>
+      </div>
 
+      <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
+        Fuentes: <b>WEB · INOFOOD · FOOD SERVICE · REFERIDO</b>
+        {" · "}
+        Scope prefijos: <b>{allowedPrefijos.length ? allowedPrefijos.join(", ") : "TODOS"}</b>
+      </div>
+
+      <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Buscar pendientes por folio / razón social / correo…"
+          style={{
+            flex: 1,
+            minWidth: 260,
+            padding: 10,
+            borderRadius: 10,
+            border: "1px solid #d1d5db",
+          }}
+        />
         <button
           type="button"
           onClick={reload}
           disabled={loading}
           style={{
-            padding: "10px 14px",
-            borderRadius: 12,
-            border: "1px solid #e5e7eb",
+            padding: "10px 12px",
+            borderRadius: 10,
+            border: "1px solid #d1d5db",
             background: "white",
             cursor: loading ? "not-allowed" : "pointer",
-            boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
-            fontWeight: 700,
           }}
         >
           {loading ? "Actualizando…" : "Actualizar"}
         </button>
       </div>
 
-      <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar por razón social / correo / división / mensaje…"
-          style={{
-            flex: 1,
-            minWidth: 320,
-            padding: "12px 14px",
-            borderRadius: 14,
-            border: "1px solid #e5e7eb",
-            outline: "none",
-          }}
-        />
-      </div>
-
       {err && <div style={{ marginTop: 10, color: "crimson" }}>Error: {err}</div>}
 
-      <div
-        style={{
-          marginTop: 14,
-          border: "1px solid #e5e7eb",
-          borderRadius: 16,
-          overflow: "hidden",
-          background: "white",
-          boxShadow: "0 6px 20px rgba(0,0,0,0.06)",
-        }}
-      >
-        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+      <div style={{ marginTop: 12, border: "1px solid #e5e7eb", borderRadius: 12, overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
-            <tr style={{ textAlign: "left", fontSize: 12, opacity: 0.75, background: "#fafafa" }}>
-              <th style={{ padding: 12, borderBottom: "1px solid #eee" }}>#</th>
-              <th style={{ padding: 12, borderBottom: "1px solid #eee" }}>Razón Social</th>
-              <th style={{ padding: 12, borderBottom: "1px solid #eee" }}>Origen</th>
-              <th style={{ padding: 12, borderBottom: "1px solid #eee" }}>División</th>
-              <th style={{ padding: 12, borderBottom: "1px solid #eee" }}>Mensaje</th>
-              <th style={{ padding: 12, borderBottom: "1px solid #eee" }}>Monto</th>
-              <th style={{ padding: 12, borderBottom: "1px solid #eee" }}>Asignar a</th>
-              <th style={{ padding: 12, borderBottom: "1px solid #eee" }} />
+            <tr style={{ textAlign: "left", fontSize: 12, opacity: 0.8 }}>
+              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Folio</th>
+              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Razón Social</th>
+              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Origen</th>
+              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>División</th>
+              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Monto</th>
+              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Asignar a</th>
+              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}></th>
             </tr>
           </thead>
           <tbody>
-            {pendientes.map((r, idx) => {
+            {pendientes.map((r, i) => {
               const folio = r.folio || "";
               const busy = assigningFolio === folio;
 
               return (
-                <tr key={`${folio}_${idx}`} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                  <td style={{ padding: 12, borderBottom: "1px solid #f3f4f6", width: 40, fontWeight: 800 }}>
-                    {idx + 1}
+                <tr key={`${folio}_${i}`}>
+                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                    <b>{folio || "—"}</b>
+                    <div style={{ fontSize: 12, opacity: 0.7 }}>{r.created_at || ""}</div>
                   </td>
-
-                  <td style={{ padding: 12, borderBottom: "1px solid #f3f4f6" }}>
-                    <div style={{ fontWeight: 900 }}>{r.nombre_razon_social || "—"}</div>
+                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                    {r.nombre_razon_social || "—"}
                     <div style={{ fontSize: 12, opacity: 0.7 }}>{r.correo || ""}</div>
-                    <div style={{ fontSize: 12, opacity: 0.6 }}>{r.created_at || ""}</div>
                   </td>
-
-                  <td style={{ padding: 12, borderBottom: "1px solid #f3f4f6", fontWeight: 800 }}>
-                    {r.origen_prospecto || "—"}
-                  </td>
-
-                  <td style={{ padding: 12, borderBottom: "1px solid #f3f4f6", fontWeight: 800 }}>
-                    {r.division || "—"}
-                  </td>
-
-                  <td style={{ padding: 12, borderBottom: "1px solid #f3f4f6" }}>
-                    <button
-                      type="button"
-                      onClick={() => setOpenMsg({ title: r.nombre_razon_social || "Mensaje", body: r.observacion || "—" })}
-                      style={{
-                        padding: "8px 10px",
-                        borderRadius: 12,
-                        border: "1px solid #e5e7eb",
-                        background: "white",
-                        cursor: "pointer",
-                        fontWeight: 700,
-                      }}
-                    >
-                      Ver mensaje
-                    </button>
-                  </td>
-
-                  <td style={{ padding: 12, borderBottom: "1px solid #f3f4f6" }}>
-                    {r.monto_proyectado ? (
-                      <span style={{ fontWeight: 900 }}>{r.monto_proyectado}</span>
-                    ) : (
-                      <span style={{ opacity: 0.6 }}>—</span>
-                    )}
-                  </td>
-
-                  <td style={{ padding: 12, borderBottom: "1px solid #f3f4f6" }}>
+                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>{r.origen_prospecto || "—"}</td>
+                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>{r.division || "—"}</td>
+                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>{r.monto_proyectado || "—"}</td>
+                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
                     <input
                       value={targetEmail[folio] || ""}
                       onChange={(e) => setTargetEmail((p) => ({ ...p, [folio]: e.target.value }))}
                       placeholder="ej: pia.ramirez@spartan.cl"
                       style={{
                         width: "100%",
-                        minWidth: 220,
-                        padding: "10px 12px",
-                        borderRadius: 14,
-                        border: "1px solid #e5e7eb",
-                        outline: "none",
+                        minWidth: 240,
+                        padding: 10,
+                        borderRadius: 10,
+                        border: "1px solid #d1d5db",
                       }}
                     />
                   </td>
-
-                  <td style={{ padding: 12, borderBottom: "1px solid #f3f4f6" }}>
+                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
                     <button
                       type="button"
-                      onClick={() => asignar(r)}
+                      onClick={() => asignar(folio, r)}
                       disabled={busy}
                       style={{
-                        padding: "10px 14px",
-                        borderRadius: 14,
+                        padding: "10px 12px",
+                        borderRadius: 10,
                         border: "1px solid #111827",
                         background: busy ? "#6b7280" : "#111827",
                         color: "white",
                         cursor: busy ? "not-allowed" : "pointer",
-                        fontWeight: 900,
                       }}
                     >
                       {busy ? "Asignando…" : "Asignar"}
@@ -565,8 +454,8 @@ export default function CRMDistribucionPage() {
 
             {!loading && pendientes.length === 0 && (
               <tr>
-                <td colSpan={8} style={{ padding: 14, opacity: 0.7 }}>
-                  No hay prospectos pendientes para tu scope.
+                <td colSpan={7} style={{ padding: 12, opacity: 0.7 }}>
+                  No hay prospectos pendientes de asignación.
                 </td>
               </tr>
             )}
@@ -577,56 +466,6 @@ export default function CRMDistribucionPage() {
       <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
         Pendientes: <b>{pendientes.length}</b>
       </div>
-
-      {/* Modal mensaje */}
-      {openMsg && (
-        <div
-          onClick={() => setOpenMsg(null)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(17,24,39,0.55)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 16,
-            zIndex: 50,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: "min(720px, 100%)",
-              background: "white",
-              borderRadius: 18,
-              border: "1px solid #e5e7eb",
-              boxShadow: "0 18px 60px rgba(0,0,0,0.25)",
-              padding: 16,
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-              <div style={{ fontSize: 16, fontWeight: 900 }}>{openMsg.title}</div>
-              <button
-                type="button"
-                onClick={() => setOpenMsg(null)}
-                style={{
-                  padding: "6px 10px",
-                  borderRadius: 12,
-                  border: "1px solid #e5e7eb",
-                  background: "white",
-                  cursor: "pointer",
-                  fontWeight: 800,
-                }}
-              >
-                Cerrar
-              </button>
-            </div>
-            <div style={{ marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.45, fontSize: 14, opacity: 0.95 }}>
-              {openMsg.body || "—"}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
