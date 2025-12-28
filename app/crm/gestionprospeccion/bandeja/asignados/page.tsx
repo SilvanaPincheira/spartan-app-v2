@@ -10,9 +10,6 @@ import { useSearchParams } from "next/navigation";
 const CSV_CRM_DB_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vR6D9j1ZjygWJKRXLV22AMb2oMYKVQWlly1KdAIKRm9jBAOIvIxNd9jqhEi2Zc-7LnjLe2wfhKrfsEW/pub?gid=0&single=true&output=csv";
 
-/** =========================
- *  Estados disponibles para gestión
- *  ========================= */
 const ESTADOS_GESTION = [
   { value: "ASIGNADO", label: "Asignado" },
   { value: "EN_GESTION", label: "En gestión" },
@@ -23,6 +20,26 @@ const ESTADOS_GESTION = [
   { value: "CERRADO_GANADO", label: "Cerrado ganado" },
   { value: "INSTALADO_1OC", label: "Instalado, 1° O/C" },
   { value: "NO_GANADO", label: "No ganado" },
+] as const;
+
+/** Si prefieres que los combos vengan de una “tabla maestra”, después lo movemos a Sheet */
+const ETAPAS = [
+  { id: "1", nombre: "Contactado" },
+  { id: "2", nombre: "Reunión" },
+  { id: "3", nombre: "Levantamiento" },
+  { id: "4", nombre: "Propuesta" },
+] as const;
+
+const FECHA_CIERRE = [
+  { id: "1", nombre: "Antes 30 días" },
+  { id: "2", nombre: "Entre 30 y 90 días" },
+  { id: "3", nombre: "Más de 90 días" },
+] as const;
+
+const PROB_CIERRE = [
+  { id: "1", nombre: "Menor a 30%" },
+  { id: "2", nombre: "Entre 30% y 50%" },
+  { id: "3", nombre: "Entre 75% a 90%" },
 ] as const;
 
 /** =========================
@@ -95,7 +112,7 @@ function parseCsv(text: string): RowAny[] {
 }
 
 /** =========================
- *  Helpers
+ *  Helpers UI
  *  ========================= */
 function norm(s: string) {
   return (s || "").trim().toLowerCase();
@@ -144,12 +161,39 @@ function chipStyle() {
     fontWeight: 800 as const,
     border: "1px solid #e5e7eb",
     whiteSpace: "nowrap" as const,
-    lineHeight: "16px",
   };
 }
 
-function oneLine(text: string) {
-  return String(text || "").replace(/\s+/g, " ").trim();
+/** =========================
+ *  Validación: mínimos para CONTACTADO
+ *  ========================= */
+const REQUIRED_CONTACTADO: Array<{ key: string; label: string }> = [
+  { key: "nombre_razon_social", label: "Razón social" },
+  { key: "rut", label: "RUT" },
+  { key: "telefono", label: "Teléfono" },
+  { key: "correo", label: "Correo" },
+  { key: "direccion", label: "Dirección" },
+  { key: "rubro", label: "Rubro" },
+  { key: "monto_proyectado", label: "Monto proyectado" },
+  { key: "etapa_id", label: "Etapa (ID)" },
+  { key: "etapa_nombre", label: "Etapa (Nombre)" },
+  { key: "fecha_cierre_id", label: "Fecha cierre (ID)" },
+  { key: "fecha_cierre_nombre", label: "Fecha cierre (Nombre)" },
+  { key: "prob_cierre_id", label: "Prob. cierre (ID)" },
+  { key: "prob_cierre_nombre", label: "Prob. cierre (Nombre)" },
+  { key: "origen_prospecto", label: "Origen prospecto" },
+  { key: "ejecutivo_email", label: "Ejecutivo email" },
+  { key: "asignado_a", label: "Asignado a" },
+  { key: "asignado_por", label: "Asignado por" },
+];
+
+function missingContactadoFields(r: RowAny) {
+  const missing: Array<{ key: string; label: string }> = [];
+  for (const f of REQUIRED_CONTACTADO) {
+    const v = (r?.[f.key] ?? "").trim();
+    if (!v) missing.push(f);
+  }
+  return missing;
 }
 
 /** =========================
@@ -170,12 +214,18 @@ export default function BandejaAsignadosPage() {
 
   // drafts por folio
   const [draftEstado, setDraftEstado] = useState<Record<string, string>>({});
-  const [draftNota, setDraftNota] = useState<Record<string, string>>({});
   const [savingFolio, setSavingFolio] = useState<string | null>(null);
 
-  // modal gestión
-  const [openGestion, setOpenGestion] = useState(false);
-  const [gestionRow, setGestionRow] = useState<RowAny | null>(null);
+  // modal gestión (observación)
+  const [openObs, setOpenObs] = useState(false);
+  const [obsFolio, setObsFolio] = useState<string | null>(null);
+  const [obsText, setObsText] = useState("");
+
+  // modal completar ficha
+  const [openFicha, setOpenFicha] = useState(false);
+  const [fichaFolio, setFichaFolio] = useState<string | null>(null);
+  const [ficha, setFicha] = useState<Record<string, string>>({});
+  const [fichaMissing, setFichaMissing] = useState<Array<{ key: string; label: string }>>([]);
 
   // ✅ scroll/highlight
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
@@ -215,14 +265,14 @@ export default function BandejaAsignadosPage() {
     })();
   }, [supabase]);
 
-  /** 2) Cargar datos SOLO cuando ya sepamos quién está logueado */
+  /** 2) Cargar datos */
   useEffect(() => {
     if (authLoading) return;
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading]);
 
-  /** ✅ ASIGNADOS = todo lo que está asignado_a = yo (sin filtrar por estado) */
+  /** Vista: solo asignados al ejecutivo */
   const assignedToMe = useMemo(() => {
     const me = norm(loggedEmail);
     if (!me) return [];
@@ -240,23 +290,16 @@ export default function BandejaAsignadosPage() {
         " " +
         norm(r.telefono || "") +
         " " +
-        norm(r.division || "") +
-        " " +
         norm(r.rubro || "") +
-        " " +
-        norm(r.origen_prospecto || "") +
-        " " +
-        norm(r.estado || "") +
         " " +
         norm(r.observacion || "");
       return blob.includes(s);
     });
   }, [rows, loggedEmail, q]);
 
-  // inicializa draftEstado con el estado actual cuando entra a la lista
+  // init draftEstado
   useEffect(() => {
     if (!assignedToMe.length) return;
-
     setDraftEstado((prev) => {
       const next = { ...prev };
       for (const r of assignedToMe) {
@@ -268,7 +311,7 @@ export default function BandejaAsignadosPage() {
     });
   }, [assignedToMe]);
 
-  // ✅ Scroll + highlight cuando viene ?folio=
+  // Scroll highlight ?folio=
   useEffect(() => {
     if (!folioParam) return;
     if (loading) return;
@@ -278,94 +321,194 @@ export default function BandejaAsignadosPage() {
       if (el) {
         setHighlightFolio(folioParam);
         el.scrollIntoView({ behavior: "smooth", block: "center" });
-
         window.setTimeout(() => {
           setHighlightFolio((cur) => (cur === folioParam ? null : cur));
         }, 4500);
       }
-    }, 60);
+    }, 50);
 
     return () => window.clearTimeout(t);
   }, [folioParam, loading, assignedToMe.length]);
+
+  function openGestionObs(r: RowAny) {
+    const folio = (r.folio || "").trim();
+    setObsFolio(folio);
+    setObsText("");
+    setOpenObs(true);
+  }
+
+  function openCompletarFicha(r: RowAny) {
+    const folio = (r.folio || "").trim();
+    const missing = missingContactadoFields({
+      ...r,
+      ejecutivo_email: (r.ejecutivo_email || "").trim() || loggedEmail,
+    });
+
+    setFichaFolio(folio);
+    setFichaMissing(missing);
+
+    // precarga con lo existente
+    setFicha({
+      rut: r.rut || "",
+      telefono: r.telefono || "",
+      correo: r.correo || "",
+      direccion: r.direccion || "",
+      rubro: r.rubro || "",
+      monto_proyectado: r.monto_proyectado || "",
+      etapa_id: r.etapa_id || "1",
+      etapa_nombre: r.etapa_nombre || "Contactado",
+      fecha_cierre_id: r.fecha_cierre_id || "1",
+      fecha_cierre_nombre: r.fecha_cierre_nombre || "Antes 30 días",
+      prob_cierre_id: r.prob_cierre_id || "1",
+      prob_cierre_nombre: r.prob_cierre_nombre || "Menor a 30%",
+      origen_prospecto: r.origen_prospecto || r.fuente || "",
+      ejecutivo_email: (r.ejecutivo_email || "").trim() || loggedEmail,
+      asignado_a: r.asignado_a || loggedEmail,
+      asignado_por: r.asignado_por || "",
+      nombre_razon_social: r.nombre_razon_social || "",
+    });
+
+    setOpenFicha(true);
+  }
+
+  async function postUpdate(payload: any) {
+    const resp = await fetch("/api/crm/prospectos/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify(payload),
+    });
+
+    const text = await resp.text();
+    let data: any = null;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { ok: false, error: "Respuesta no JSON", raw: text.slice(0, 400) };
+    }
+
+    if (!resp.ok || !data?.ok) {
+      throw new Error(`status=${resp.status}\n${JSON.stringify(data, null, 2)}`);
+    }
+    return data;
+  }
 
   async function guardarEstado(folio: string) {
     const estado = normU(draftEstado[folio] || "");
     if (!folio) return;
 
-    try {
-      setSavingFolio(folio);
+    const row = assignedToMe.find((r) => (r.folio || "").trim() === folio);
+    if (!row) return;
 
-      const resp = await fetch("/api/crm/prospectos/update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({
-          folio,
-          estado,
-        }),
-      });
+    if (estado === "CONTACTADO") {
+      const merged = {
+        ...row,
+        ejecutivo_email: (row.ejecutivo_email || "").trim() || loggedEmail,
+        estado: "CONTACTADO",
+      };
+      const missing = missingContactadoFields(merged);
 
-      const text = await resp.text();
-      let data: any = null;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = { ok: false, error: "Respuesta no JSON", raw: text.slice(0, 400) };
-      }
-
-      if (!resp.ok || !data?.ok) {
-        alert(`❌ Error guardando\nstatus=${resp.status}\n${JSON.stringify(data, null, 2)}`);
+      if (missing.length) {
+        openCompletarFicha(merged);
         return;
       }
+    }
 
+    try {
+      setSavingFolio(folio);
+      await postUpdate({
+        folio,
+        estado,
+        updated_by: loggedEmail,
+      });
       await reload();
+    } catch (e: any) {
+      alert(`❌ Error guardando\n${e?.message || e}`);
     } finally {
       setSavingFolio(null);
     }
   }
 
-  async function guardarNota(folio: string) {
-    const nota = (draftNota[folio] || "").trim();
-    if (!folio || !nota) return;
+  async function guardarObs() {
+    if (!obsFolio) return;
+    const nota = obsText.trim();
+    if (!nota) {
+      setOpenObs(false);
+      return;
+    }
 
     try {
-      setSavingFolio(folio);
-
-      const resp = await fetch("/api/crm/prospectos/update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({
-          folio,
-          observacion: nota, // append con timestamp (Apps Script)
-        }),
+      setSavingFolio(obsFolio);
+      await postUpdate({
+        folio: obsFolio,
+        observacion: nota, // Apps Script append
+        updated_by: loggedEmail,
       });
-
-      const text = await resp.text();
-      let data: any = null;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = { ok: false, error: "Respuesta no JSON", raw: text.slice(0, 400) };
-      }
-
-      if (!resp.ok || !data?.ok) {
-        alert(`❌ Error guardando gestión\nstatus=${resp.status}\n${JSON.stringify(data, null, 2)}`);
-        return;
-      }
-
-      setDraftNota((p) => ({ ...p, [folio]: "" }));
+      setOpenObs(false);
+      setObsFolio(null);
+      setObsText("");
       await reload();
+    } catch (e: any) {
+      alert(`❌ Error guardando gestión\n${e?.message || e}`);
     } finally {
       setSavingFolio(null);
     }
   }
 
-  function openGestionModal(r: RowAny) {
-    setGestionRow(r);
-    const folio = (r.folio || "").trim();
-    if (folio) setDraftNota((p) => ({ ...p, [folio]: p[folio] ?? "" }));
-    setOpenGestion(true);
+  async function guardarFichaYContactado() {
+    if (!fichaFolio) return;
+
+    const etapa = ETAPAS.find((x) => x.id === (ficha.etapa_id || "1"));
+    const fecha = FECHA_CIERRE.find((x) => x.id === (ficha.fecha_cierre_id || "1"));
+    const prob = PROB_CIERRE.find((x) => x.id === (ficha.prob_cierre_id || "1"));
+
+    const payload = {
+      folio: fichaFolio,
+      estado: "CONTACTADO",
+      updated_by: loggedEmail,
+
+      nombre_razon_social: ficha.nombre_razon_social,
+      rut: ficha.rut,
+      telefono: ficha.telefono,
+      correo: ficha.correo,
+      direccion: ficha.direccion,
+      rubro: ficha.rubro,
+      monto_proyectado: ficha.monto_proyectado,
+
+      etapa_id: ficha.etapa_id,
+      etapa_nombre: etapa?.nombre || ficha.etapa_nombre,
+
+      fecha_cierre_id: ficha.fecha_cierre_id,
+      fecha_cierre_nombre: fecha?.nombre || ficha.fecha_cierre_nombre,
+
+      prob_cierre_id: ficha.prob_cierre_id,
+      prob_cierre_nombre: prob?.nombre || ficha.prob_cierre_nombre,
+
+      origen_prospecto: ficha.origen_prospecto,
+      ejecutivo_email: (ficha.ejecutivo_email || "").trim() || loggedEmail,
+      asignado_a: ficha.asignado_a || loggedEmail,
+      asignado_por: ficha.asignado_por || "",
+    };
+
+    const missing = missingContactadoFields(payload as any);
+    if (missing.length) {
+      alert(`Faltan campos: ${missing.map((m) => m.label).join(", ")}`);
+      return;
+    }
+
+    try {
+      setSavingFolio(fichaFolio);
+      await postUpdate(payload);
+      setOpenFicha(false);
+      setFichaFolio(null);
+      setFicha({});
+      setFichaMissing([]);
+      await reload();
+    } catch (e: any) {
+      alert(`❌ Error guardando ficha\n${e?.message || e}`);
+    } finally {
+      setSavingFolio(null);
+    }
   }
 
   if (authLoading) {
@@ -378,7 +521,7 @@ export default function BandejaAsignadosPage() {
   }
 
   return (
-    <div style={{ padding: 16, maxWidth: 1500 }}>
+    <div style={{ padding: 16, maxWidth: 1400 }}>
       <h2 style={{ fontSize: 22, fontWeight: 900, marginBottom: 6 }}>CRM · Asignados</h2>
       <div style={{ opacity: 0.8, marginBottom: 12 }}>
         Usuario: <b>{loggedEmail || "—"}</b>
@@ -443,6 +586,7 @@ export default function BandejaAsignadosPage() {
         </div>
       )}
 
+      {/* Tabla compacta */}
       <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -454,7 +598,7 @@ export default function BandejaAsignadosPage() {
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Estado</th>
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Monto</th>
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Asignación</th>
-                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }} />
+                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Acciones</th>
               </tr>
             </thead>
 
@@ -473,25 +617,21 @@ export default function BandejaAsignadosPage() {
                 </tr>
               ) : (
                 assignedToMe.map((r, i) => {
-                  const folio = (r.folio || "").trim(); // se usa para update pero NO se muestra
-                  const est = r.estado || "—";
-                  const st = estadoBadgeStyle(est);
+                  const folio = (r.folio || "").trim();
                   const busy = savingFolio === folio;
 
-                  const currentDraftEstado = normU(draftEstado[folio] || normU(est) || "ASIGNADO");
-                  const changedEstado = currentDraftEstado !== normU(est);
+                  const est = r.estado || "—";
+                  const st = estadoBadgeStyle(est);
+
+                  const draft = normU(draftEstado[folio] || normU(est) || "ASIGNADO");
+                  const changed = draft !== normU(est);
+
+                  const missing = missingContactadoFields({
+                    ...r,
+                    ejecutivo_email: (r.ejecutivo_email || "").trim() || loggedEmail,
+                  });
 
                   const isHighlighted = !!folio && highlightFolio === folio;
-
-                  const razon = oneLine(r.nombre_razon_social || "—");
-                  const rubro = oneLine(r.rubro || "");
-                  const origen = oneLine(r.origen_prospecto || "");
-
-                  const correo = oneLine(r.correo || "");
-                  const tel = oneLine(r.telefono || "");
-
-                  const asignadoAt = fmtDate(r.asignado_at || "");
-                  const asignadoPor = oneLine(r.asignado_por || "");
 
                   return (
                     <tr
@@ -502,134 +642,141 @@ export default function BandejaAsignadosPage() {
                       style={{
                         background: isHighlighted ? "#FEF3C7" : "transparent",
                         transition: "background 250ms ease",
-                        height: 56,
                       }}
                     >
-                      {/* Razón social (1 línea compacta) */}
-                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6", whiteSpace: "nowrap" }}>
-                        <span style={{ fontWeight: 800 }}>{razon}</span>
-                        <span style={{ marginLeft: 8, fontSize: 12, opacity: 0.75 }}>
-                          {rubro ? `· ${rubro}` : ""} {origen ? `· ${origen}` : ""}
-                        </span>
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                        <div style={{ fontWeight: 900, fontSize: 16 }}>{r.nombre_razon_social || "—"}</div>
+                        <div style={{ fontSize: 12, opacity: 0.75 }}>
+                          {(r.rubro || "—") + " · " + (r.origen_prospecto || r.fuente || "—")}
+                        </div>
                       </td>
 
-                      {/* Contacto */}
-                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6", whiteSpace: "nowrap" }}>
-                        <span style={{ fontWeight: 600 }}>{correo || "—"}</span>
-                        <span style={{ marginLeft: 8, fontSize: 12, opacity: 0.75 }}>
-                          {tel ? `· ${tel}` : ""}
-                        </span>
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                        <div style={{ fontWeight: 700 }}>{r.correo || "—"}</div>
+                        <div style={{ fontSize: 12, opacity: 0.75 }}>{r.telefono || "—"}</div>
                       </td>
 
-                      {/* División */}
-                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6", whiteSpace: "nowrap" }}>
-                        <span style={{ ...chipStyle(), background: "#F3F4F6" }}>
-                          {oneLine(r.division || "—")}
-                        </span>
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                        <span style={{ ...chipStyle(), background: "#F3F4F6" }}>{r.division || "—"}</span>
                       </td>
 
-                      {/* Estado (badge + select + botones compactos) */}
-                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6", whiteSpace: "nowrap" }}>
-                        <span
-                          style={{
-                            ...chipStyle(),
-                            background: st.bg,
-                            color: st.color,
-                            border: `1px solid ${st.border}`,
-                            marginRight: 10,
-                          }}
-                        >
-                          {normU(est) || "—"}
-                        </span>
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6", minWidth: 260 }}>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <span
+                            style={{
+                              ...chipStyle(),
+                              background: st.bg,
+                              color: st.color,
+                              border: `1px solid ${st.border}`,
+                            }}
+                          >
+                            {normU(est) || "—"}
+                          </span>
 
-                        <select
-                          value={currentDraftEstado}
-                          onChange={(e) =>
-                            setDraftEstado((p) => ({ ...p, [folio]: e.target.value }))
-                          }
-                          style={{
-                            padding: "8px 10px",
-                            borderRadius: 10,
-                            border: `1px solid ${changedEstado ? "#111827" : "#d1d5db"}`,
-                            background: "white",
-                            minWidth: 190,
-                          }}
-                        >
-                          {ESTADOS_GESTION.map((o) => (
-                            <option key={o.value} value={o.value}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
+                          <select
+                            value={draft}
+                            onChange={(e) => setDraftEstado((p) => ({ ...p, [folio]: e.target.value }))}
+                            style={{
+                              padding: 10,
+                              borderRadius: 10,
+                              border: `1px solid ${changed ? "#111827" : "#d1d5db"}`,
+                              background: "white",
+                              minWidth: 180,
+                            }}
+                          >
+                            {ESTADOS_GESTION.map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
 
-                        <button
-                          type="button"
-                          onClick={() => guardarEstado(folio)}
-                          disabled={!folio || busy}
-                          style={{
-                            marginLeft: 8,
-                            padding: "8px 12px",
-                            borderRadius: 10,
-                            border: "1px solid #111827",
-                            background: busy ? "#6b7280" : "#111827",
-                            color: "white",
-                            cursor: busy ? "not-allowed" : "pointer",
-                          }}
-                        >
-                          {busy ? "..." : "Guardar"}
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setDraftEstado((p) => ({ ...p, [folio]: normU(est) }))}
-                          disabled={!folio || busy}
-                          style={{
-                            marginLeft: 8,
-                            padding: "8px 12px",
-                            borderRadius: 10,
-                            border: "1px solid #d1d5db",
-                            background: "white",
-                            cursor: busy ? "not-allowed" : "pointer",
-                          }}
-                        >
-                          Deshacer
-                        </button>
+                        <div style={{ marginTop: 6, fontSize: 11, opacity: 0.75 }}>
+                          {normU(draft) === "CONTACTADO" && missing.length ? (
+                            <span style={{ color: "#b45309", fontWeight: 800 }}>
+                              Incompleto para CONTACTADO ({missing.length})
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
 
-                      {/* Monto */}
-                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6", whiteSpace: "nowrap" }}>
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
                         {fmtCLP(r.monto_proyectado || "")}
                       </td>
 
-                      {/* Asignación (fecha + por) */}
-                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6", whiteSpace: "nowrap" }}>
-                        <div style={{ fontSize: 12 }}>
-                          <b>{oneLine(r.asignado_a || "—")}</b>
-                          <span style={{ marginLeft: 8, opacity: 0.75 }}>
-                            Asignado: <b>{asignadoAt}</b>
-                          </span>
-                        </div>
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                        <div style={{ fontSize: 12, fontWeight: 800 }}>{r.asignado_a || "—"}</div>
                         <div style={{ fontSize: 11, opacity: 0.7 }}>
-                          por {asignadoPor || "—"}
+                          Asignado: <b>{fmtDate(r.asignado_at)}</b>
                         </div>
+                        <div style={{ fontSize: 11, opacity: 0.7 }}>por {r.asignado_por || "—"}</div>
                       </td>
 
-                      {/* Gestión (botón abre modal) */}
-                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6", whiteSpace: "nowrap" }}>
-                        <button
-                          type="button"
-                          onClick={() => openGestionModal(r)}
-                          disabled={!folio || busy}
-                          style={{
-                            padding: "8px 12px",
-                            borderRadius: 10,
-                            border: "1px solid #d1d5db",
-                            background: "white",
-                            cursor: busy ? "not-allowed" : "pointer",
-                          }}
-                        >
-                          Ver / Agregar gestión
-                        </button>
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6", minWidth: 320 }}>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                          <button
+                            type="button"
+                            onClick={() => guardarEstado(folio)}
+                            disabled={!folio || busy}
+                            style={{
+                              padding: "10px 12px",
+                              borderRadius: 10,
+                              border: "1px solid #111827",
+                              background: busy ? "#6b7280" : "#111827",
+                              color: "white",
+                              cursor: busy ? "not-allowed" : "pointer",
+                            }}
+                          >
+                            {busy ? "Guardando…" : "Guardar"}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setDraftEstado((p) => ({ ...p, [folio]: normU(est) }))}
+                            disabled={!folio || busy}
+                            style={{
+                              padding: "10px 12px",
+                              borderRadius: 10,
+                              border: "1px solid #d1d5db",
+                              background: "white",
+                              cursor: busy ? "not-allowed" : "pointer",
+                            }}
+                          >
+                            Deshacer
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => openGestionObs(r)}
+                            disabled={!folio || busy}
+                            style={{
+                              padding: "10px 12px",
+                              borderRadius: 10,
+                              border: "1px solid #d1d5db",
+                              background: "white",
+                              cursor: busy ? "not-allowed" : "pointer",
+                            }}
+                          >
+                            Ver / Agregar gestión
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => openCompletarFicha(r)}
+                            disabled={!folio || busy}
+                            style={{
+                              padding: "10px 12px",
+                              borderRadius: 10,
+                              border: "1px solid #d1d5db",
+                              background: missing.length ? "#FEF3C7" : "white",
+                              cursor: busy ? "not-allowed" : "pointer",
+                              fontWeight: 800,
+                            }}
+                          >
+                            Completar ficha
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -640,8 +787,8 @@ export default function BandejaAsignadosPage() {
         </div>
       </div>
 
-      {/* MODAL: Observación + agregar nota */}
-      {openGestion && gestionRow && (
+      {/* Modal Observación */}
+      {openObs && (
         <div
           style={{
             position: "fixed",
@@ -653,11 +800,11 @@ export default function BandejaAsignadosPage() {
             padding: 16,
             zIndex: 50,
           }}
-          onClick={() => (savingFolio ? null : setOpenGestion(false))}
+          onClick={() => setOpenObs(false)}
         >
           <div
             style={{
-              width: "min(820px, 100%)",
+              width: "min(720px, 100%)",
               background: "white",
               borderRadius: 14,
               border: "1px solid #e5e7eb",
@@ -667,50 +814,28 @@ export default function BandejaAsignadosPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>
-              <div style={{ fontSize: 16, fontWeight: 900 }}>Gestión / Observaciones</div>
+              <div style={{ fontSize: 16, fontWeight: 900 }}>Gestión / Observación</div>
               <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
-                <b>{gestionRow.nombre_razon_social || "—"}</b> · {gestionRow.correo || "—"} · Asignado:{" "}
-                <b>{fmtDate(gestionRow.asignado_at || "")}</b>
+                Folio: <b>{obsFolio}</b>
               </div>
             </div>
 
-            <div style={{ padding: 14, display: "grid", gap: 12 }}>
-              <div style={{ display: "grid", gap: 6 }}>
-                <label style={{ fontSize: 12, opacity: 0.8 }}>Historial (CRM_DB · observación)</label>
-                <textarea
-                  value={gestionRow.observacion || ""}
-                  readOnly
-                  rows={8}
-                  style={{
-                    width: "100%",
-                    padding: 10,
-                    borderRadius: 10,
-                    border: "1px solid #e5e7eb",
-                    background: "#f9fafb",
-                    resize: "vertical",
-                    fontFamily: "inherit",
-                  }}
-                />
-              </div>
-
-              <div style={{ display: "grid", gap: 6 }}>
-                <label style={{ fontSize: 12, opacity: 0.8 }}>Agregar nueva gestión (se appendea con timestamp)</label>
-                <textarea
-                  value={draftNota[(gestionRow.folio || "").trim()] || ""}
-                  onChange={(e) =>
-                    setDraftNota((p) => ({ ...p, [(gestionRow.folio || "").trim()]: e.target.value }))
-                  }
-                  rows={4}
-                  placeholder="Escribe la gestión realizada, acuerdos, próxima acción..."
-                  style={{
-                    width: "100%",
-                    padding: 10,
-                    borderRadius: 10,
-                    border: "1px solid #d1d5db",
-                    resize: "vertical",
-                    fontFamily: "inherit",
-                  }}
-                />
+            <div style={{ padding: 14, display: "grid", gap: 10 }}>
+              <textarea
+                value={obsText}
+                onChange={(e) => setObsText(e.target.value)}
+                rows={6}
+                placeholder="Escribe una nueva gestión (se agrega al historial)…"
+                style={{
+                  width: "100%",
+                  padding: 10,
+                  borderRadius: 10,
+                  border: "1px solid #d1d5db",
+                  resize: "vertical",
+                }}
+              />
+              <div style={{ fontSize: 12, opacity: 0.7 }}>
+                *No se sobreescribe el historial: Apps Script hace <b>append</b> con timestamp.
               </div>
             </div>
 
@@ -725,40 +850,285 @@ export default function BandejaAsignadosPage() {
             >
               <button
                 type="button"
-                onClick={() => setOpenGestion(false)}
-                disabled={!!savingFolio}
+                onClick={() => setOpenObs(false)}
                 style={{
                   padding: "10px 12px",
                   borderRadius: 10,
                   border: "1px solid #d1d5db",
                   background: "white",
-                  cursor: savingFolio ? "not-allowed" : "pointer",
+                  cursor: "pointer",
                 }}
               >
-                Cerrar
+                Cancelar
               </button>
 
               <button
                 type="button"
-                onClick={async () => {
-                  const folio = (gestionRow.folio || "").trim();
-                  if (!folio) return;
-                  await guardarNota(folio);
-                  // recarga modal con datos nuevos
-                  const updated = rows.find((x) => String(x.folio || "").trim() === folio);
-                  if (updated) setGestionRow(updated);
-                }}
-                disabled={!!savingFolio || !((draftNota[(gestionRow.folio || "").trim()] || "").trim())}
+                onClick={guardarObs}
                 style={{
                   padding: "10px 12px",
                   borderRadius: 10,
                   border: "1px solid #111827",
-                  background: savingFolio ? "#6b7280" : "#111827",
+                  background: "#111827",
                   color: "white",
-                  cursor: savingFolio ? "not-allowed" : "pointer",
+                  cursor: "pointer",
                 }}
               >
-                {savingFolio ? "Guardando…" : "Guardar gestión"}
+                Guardar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Completar ficha */}
+      {openFicha && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            zIndex: 50,
+          }}
+          onClick={() => setOpenFicha(false)}
+        >
+          <div
+            style={{
+              width: "min(860px, 100%)",
+              background: "white",
+              borderRadius: 14,
+              border: "1px solid #e5e7eb",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
+              overflow: "hidden",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>
+              <div style={{ fontSize: 16, fontWeight: 900 }}>Completar ficha (para CONTACTADO)</div>
+              <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
+                Folio: <b>{fichaFolio}</b>{" "}
+                {fichaMissing.length ? (
+                  <span style={{ marginLeft: 8, color: "#b45309", fontWeight: 900 }}>
+                    Faltan {fichaMissing.length} campos
+                  </span>
+                ) : null}
+              </div>
+            </div>
+
+            <div style={{ padding: 14, display: "grid", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={{ fontSize: 12, opacity: 0.8 }}>Razón social</label>
+                  <input
+                    value={ficha.nombre_razon_social || ""}
+                    onChange={(e) => setFicha((p) => ({ ...p, nombre_razon_social: e.target.value }))}
+                    style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: 12, opacity: 0.8 }}>RUT</label>
+                  <input
+                    value={ficha.rut || ""}
+                    onChange={(e) => setFicha((p) => ({ ...p, rut: e.target.value }))}
+                    style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: 12, opacity: 0.8 }}>Teléfono</label>
+                  <input
+                    value={ficha.telefono || ""}
+                    onChange={(e) => setFicha((p) => ({ ...p, telefono: e.target.value }))}
+                    style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: 12, opacity: 0.8 }}>Correo</label>
+                  <input
+                    value={ficha.correo || ""}
+                    onChange={(e) => setFicha((p) => ({ ...p, correo: e.target.value }))}
+                    style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
+                  />
+                </div>
+
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label style={{ fontSize: 12, opacity: 0.8 }}>Dirección</label>
+                  <input
+                    value={ficha.direccion || ""}
+                    onChange={(e) => setFicha((p) => ({ ...p, direccion: e.target.value }))}
+                    style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: 12, opacity: 0.8 }}>Rubro</label>
+                  <input
+                    value={ficha.rubro || ""}
+                    onChange={(e) => setFicha((p) => ({ ...p, rubro: e.target.value }))}
+                    style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: 12, opacity: 0.8 }}>Monto proyectado</label>
+                  <input
+                    value={ficha.monto_proyectado || ""}
+                    onChange={(e) => setFicha((p) => ({ ...p, monto_proyectado: e.target.value }))}
+                    style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: 12, opacity: 0.8 }}>Etapa</label>
+                  <select
+                    value={ficha.etapa_id || "1"}
+                    onChange={(e) => setFicha((p) => ({ ...p, etapa_id: e.target.value }))}
+                    style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
+                  >
+                    {ETAPAS.map((x) => (
+                      <option key={x.id} value={x.id}>
+                        {x.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: 12, opacity: 0.8 }}>Fecha cierre</label>
+                  <select
+                    value={ficha.fecha_cierre_id || "1"}
+                    onChange={(e) => setFicha((p) => ({ ...p, fecha_cierre_id: e.target.value }))}
+                    style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
+                  >
+                    {FECHA_CIERRE.map((x) => (
+                      <option key={x.id} value={x.id}>
+                        {x.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: 12, opacity: 0.8 }}>Prob. cierre</label>
+                  <select
+                    value={ficha.prob_cierre_id || "1"}
+                    onChange={(e) => setFicha((p) => ({ ...p, prob_cierre_id: e.target.value }))}
+                    style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
+                  >
+                    {PROB_CIERRE.map((x) => (
+                      <option key={x.id} value={x.id}>
+                        {x.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label style={{ fontSize: 12, opacity: 0.8 }}>Origen prospecto</label>
+                  <input
+                    value={ficha.origen_prospecto || ""}
+                    onChange={(e) => setFicha((p) => ({ ...p, origen_prospecto: e.target.value }))}
+                    placeholder="Ej: Referido, Web, Llamado, etc."
+                    style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: 12, opacity: 0.8 }}>Ejecutivo email</label>
+                  <input
+                    value={ficha.ejecutivo_email || ""}
+                    onChange={(e) => setFicha((p) => ({ ...p, ejecutivo_email: e.target.value }))}
+                    style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: 12, opacity: 0.8 }}>Asignado a</label>
+                  <input
+                    value={ficha.asignado_a || ""}
+                    onChange={(e) => setFicha((p) => ({ ...p, asignado_a: e.target.value }))}
+                    style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
+                  />
+                </div>
+
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label style={{ fontSize: 12, opacity: 0.8 }}>Asignado por</label>
+                  <input
+                    value={ficha.asignado_por || ""}
+                    onChange={(e) => setFicha((p) => ({ ...p, asignado_por: e.target.value }))}
+                    style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
+                  />
+                </div>
+              </div>
+
+              {fichaMissing.length ? (
+                <div
+                  style={{
+                    border: "1px solid #fed7aa",
+                    background: "#fff7ed",
+                    padding: 12,
+                    borderRadius: 12,
+                    fontSize: 12,
+                  }}
+                >
+                  <div style={{ fontWeight: 900, marginBottom: 6, color: "#9a3412" }}>
+                    Campos faltantes para CONTACTADO
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {fichaMissing.map((m) => (
+                      <span key={m.key} style={{ ...chipStyle(), background: "#ffedd5", border: "1px solid #fed7aa" }}>
+                        {m.label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div
+              style={{
+                padding: 14,
+                borderTop: "1px solid #e5e7eb",
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 10,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setOpenFicha(false)}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid #d1d5db",
+                  background: "white",
+                  cursor: "pointer",
+                }}
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                onClick={guardarFichaYContactado}
+                disabled={!fichaFolio || savingFolio === fichaFolio}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid #111827",
+                  background: savingFolio === fichaFolio ? "#6b7280" : "#111827",
+                  color: "white",
+                  cursor: savingFolio === fichaFolio ? "not-allowed" : "pointer",
+                  fontWeight: 900,
+                }}
+              >
+                {savingFolio === fichaFolio ? "Guardando…" : "Guardar y pasar a CONTACTADO"}
               </button>
             </div>
           </div>
