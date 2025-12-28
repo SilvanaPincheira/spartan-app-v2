@@ -65,7 +65,7 @@ export default function CrmHome() {
         <Card
           title="Reportería"
           desc="KPIs del CRM: conversiones, tiempos de respuesta, estados y rendimiento."
-          href="/crm/reporteria"
+          href="/crm/reporteria/gerencia"
           icon="📊"
           cta="Ver KPIs →"
         />
