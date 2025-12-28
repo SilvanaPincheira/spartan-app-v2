@@ -22,7 +22,6 @@ const ESTADOS_GESTION = [
   { value: "NO_GANADO", label: "No ganado" },
 ] as const;
 
-/** Si prefieres que los combos vengan de una “tabla maestra”, después lo movemos a Sheet */
 const ETAPAS = [
   { id: "1", nombre: "Contactado" },
   { id: "2", nombre: "Reunión" },
@@ -119,22 +118,6 @@ function norm(s: string) {
 }
 function normU(s: string) {
   return (s || "").trim().toUpperCase().replace(/\s+/g, "_");
-}
-
-function fmtCLP(n: string) {
-  const x = Number(String(n || "").replace(/[^\d]/g, ""));
-  if (!Number.isFinite(x)) return n || "—";
-  return x.toLocaleString("es-CL");
-}
-
-function fmtDate(s?: string) {
-  if (!s) return "—";
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return s;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
-    d.getHours()
-  )}:${pad(d.getMinutes())}`;
 }
 
 function estadoBadgeStyle(estadoRaw: string) {
@@ -283,16 +266,7 @@ export default function BandejaAsignadosPage() {
     if (!s) return base;
 
     return base.filter((r) => {
-      const blob =
-        norm(r.nombre_razon_social || "") +
-        " " +
-        norm(r.correo || "") +
-        " " +
-        norm(r.telefono || "") +
-        " " +
-        norm(r.rubro || "") +
-        " " +
-        norm(r.observacion || "");
+      const blob = norm(r.nombre_razon_social || "") + " " + norm(r.correo || "") + " " + norm(r.rubro || "") + " " + norm(r.observacion || "");
       return blob.includes(s);
     });
   }, [rows, loggedEmail, q]);
@@ -347,7 +321,6 @@ export default function BandejaAsignadosPage() {
     setFichaFolio(folio);
     setFichaMissing(missing);
 
-    // precarga con lo existente
     setFicha({
       rut: r.rut || "",
       telefono: r.telefono || "",
@@ -416,11 +389,7 @@ export default function BandejaAsignadosPage() {
 
     try {
       setSavingFolio(folio);
-      await postUpdate({
-        folio,
-        estado,
-        updated_by: loggedEmail,
-      });
+      await postUpdate({ folio, estado, updated_by: loggedEmail });
       await reload();
     } catch (e: any) {
       alert(`❌ Error guardando\n${e?.message || e}`);
@@ -439,11 +408,7 @@ export default function BandejaAsignadosPage() {
 
     try {
       setSavingFolio(obsFolio);
-      await postUpdate({
-        folio: obsFolio,
-        observacion: nota, // Apps Script append
-        updated_by: loggedEmail,
-      });
+      await postUpdate({ folio: obsFolio, observacion: nota, updated_by: loggedEmail });
       setOpenObs(false);
       setObsFolio(null);
       setObsText("");
@@ -521,7 +486,7 @@ export default function BandejaAsignadosPage() {
   }
 
   return (
-    <div style={{ padding: 16, maxWidth: 1400 }}>
+    <div style={{ padding: 16, maxWidth: 1200 }}>
       <h2 style={{ fontSize: 22, fontWeight: 900, marginBottom: 6 }}>CRM · Asignados</h2>
       <div style={{ opacity: 0.8, marginBottom: 12 }}>
         Usuario: <b>{loggedEmail || "—"}</b>
@@ -586,7 +551,7 @@ export default function BandejaAsignadosPage() {
         </div>
       )}
 
-      {/* Tabla compacta */}
+      {/* Tabla ultra compacta */}
       <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -594,24 +559,21 @@ export default function BandejaAsignadosPage() {
               <tr style={{ textAlign: "left", fontSize: 12, opacity: 0.85 }}>
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Razón social</th>
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Contacto</th>
-                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>División</th>
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Estado</th>
-                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Monto</th>
-                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Asignación</th>
-                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Acciones</th>
+                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb", textAlign: "right" }}>Acciones</th>
               </tr>
             </thead>
 
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} style={{ padding: 12, opacity: 0.8 }}>
+                  <td colSpan={4} style={{ padding: 12, opacity: 0.8 }}>
                     Cargando…
                   </td>
                 </tr>
               ) : assignedToMe.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ padding: 12, opacity: 0.8 }}>
+                  <td colSpan={4} style={{ padding: 12, opacity: 0.8 }}>
                     Sin registros.
                   </td>
                 </tr>
@@ -625,11 +587,6 @@ export default function BandejaAsignadosPage() {
 
                   const draft = normU(draftEstado[folio] || normU(est) || "ASIGNADO");
                   const changed = draft !== normU(est);
-
-                  const missing = missingContactadoFields({
-                    ...r,
-                    ejecutivo_email: (r.ejecutivo_email || "").trim() || loggedEmail,
-                  });
 
                   const isHighlighted = !!folio && highlightFolio === folio;
 
@@ -645,23 +602,17 @@ export default function BandejaAsignadosPage() {
                       }}
                     >
                       <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                        <div style={{ fontWeight: 900, fontSize: 16 }}>{r.nombre_razon_social || "—"}</div>
-                        <div style={{ fontSize: 12, opacity: 0.75 }}>
-                          {(r.rubro || "—") + " · " + (r.origen_prospecto || r.fuente || "—")}
+                        <div style={{ fontWeight: 900, fontSize: 15, lineHeight: "18px" }}>
+                          {r.nombre_razon_social || "—"}
                         </div>
                       </td>
 
                       <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                        <div style={{ fontWeight: 700 }}>{r.correo || "—"}</div>
-                        <div style={{ fontSize: 12, opacity: 0.75 }}>{r.telefono || "—"}</div>
+                        <div style={{ fontWeight: 700, fontSize: 13 }}>{r.correo || "—"}</div>
                       </td>
 
-                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                        <span style={{ ...chipStyle(), background: "#F3F4F6" }}>{r.division || "—"}</span>
-                      </td>
-
-                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6", minWidth: 260 }}>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6", minWidth: 360 }}>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "nowrap" }}>
                           <span
                             style={{
                               ...chipStyle(),
@@ -677,11 +628,12 @@ export default function BandejaAsignadosPage() {
                             value={draft}
                             onChange={(e) => setDraftEstado((p) => ({ ...p, [folio]: e.target.value }))}
                             style={{
-                              padding: 10,
+                              padding: "8px 10px",
                               borderRadius: 10,
                               border: `1px solid ${changed ? "#111827" : "#d1d5db"}`,
                               background: "white",
-                              minWidth: 180,
+                              minWidth: 200,
+                              height: 36,
                             }}
                           >
                             {ESTADOS_GESTION.map((o) => (
@@ -691,41 +643,22 @@ export default function BandejaAsignadosPage() {
                             ))}
                           </select>
                         </div>
-
-                        <div style={{ marginTop: 6, fontSize: 11, opacity: 0.75 }}>
-                          {normU(draft) === "CONTACTADO" && missing.length ? (
-                            <span style={{ color: "#b45309", fontWeight: 800 }}>
-                              Incompleto para CONTACTADO ({missing.length})
-                            </span>
-                          ) : null}
-                        </div>
                       </td>
 
                       <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                        {fmtCLP(r.monto_proyectado || "")}
-                      </td>
-
-                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                        <div style={{ fontSize: 12, fontWeight: 800 }}>{r.asignado_a || "—"}</div>
-                        <div style={{ fontSize: 11, opacity: 0.7 }}>
-                          Asignado: <b>{fmtDate(r.asignado_at)}</b>
-                        </div>
-                        <div style={{ fontSize: 11, opacity: 0.7 }}>por {r.asignado_por || "—"}</div>
-                      </td>
-
-                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6", minWidth: 320 }}>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
                           <button
                             type="button"
                             onClick={() => guardarEstado(folio)}
                             disabled={!folio || busy}
                             style={{
-                              padding: "10px 12px",
+                              padding: "8px 10px",
                               borderRadius: 10,
                               border: "1px solid #111827",
                               background: busy ? "#6b7280" : "#111827",
                               color: "white",
                               cursor: busy ? "not-allowed" : "pointer",
+                              height: 36,
                             }}
                           >
                             {busy ? "Guardando…" : "Guardar"}
@@ -736,11 +669,12 @@ export default function BandejaAsignadosPage() {
                             onClick={() => setDraftEstado((p) => ({ ...p, [folio]: normU(est) }))}
                             disabled={!folio || busy}
                             style={{
-                              padding: "10px 12px",
+                              padding: "8px 10px",
                               borderRadius: 10,
                               border: "1px solid #d1d5db",
                               background: "white",
                               cursor: busy ? "not-allowed" : "pointer",
+                              height: 36,
                             }}
                           >
                             Deshacer
@@ -751,14 +685,15 @@ export default function BandejaAsignadosPage() {
                             onClick={() => openGestionObs(r)}
                             disabled={!folio || busy}
                             style={{
-                              padding: "10px 12px",
+                              padding: "8px 10px",
                               borderRadius: 10,
                               border: "1px solid #d1d5db",
                               background: "white",
                               cursor: busy ? "not-allowed" : "pointer",
+                              height: 36,
                             }}
                           >
-                            Ver / Agregar gestión
+                            Ver gestión
                           </button>
 
                           <button
@@ -766,12 +701,13 @@ export default function BandejaAsignadosPage() {
                             onClick={() => openCompletarFicha(r)}
                             disabled={!folio || busy}
                             style={{
-                              padding: "10px 12px",
+                              padding: "8px 10px",
                               borderRadius: 10,
                               border: "1px solid #d1d5db",
-                              background: missing.length ? "#FEF3C7" : "white",
+                              background: "white",
                               cursor: busy ? "not-allowed" : "pointer",
-                              fontWeight: 800,
+                              fontWeight: 900,
+                              height: 36,
                             }}
                           >
                             Completar ficha
@@ -881,7 +817,7 @@ export default function BandejaAsignadosPage() {
         </div>
       )}
 
-      {/* Modal Completar ficha */}
+      {/* Modal Completar ficha (sin bloque "faltantes") */}
       {openFicha && (
         <div
           style={{
@@ -910,12 +846,7 @@ export default function BandejaAsignadosPage() {
             <div style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>
               <div style={{ fontSize: 16, fontWeight: 900 }}>Completar ficha (para CONTACTADO)</div>
               <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
-                Folio: <b>{fichaFolio}</b>{" "}
-                {fichaMissing.length ? (
-                  <span style={{ marginLeft: 8, color: "#b45309", fontWeight: 900 }}>
-                    Faltan {fichaMissing.length} campos
-                  </span>
-                ) : null}
+                Folio: <b>{fichaFolio}</b>
               </div>
             </div>
 
@@ -1034,7 +965,6 @@ export default function BandejaAsignadosPage() {
                   <input
                     value={ficha.origen_prospecto || ""}
                     onChange={(e) => setFicha((p) => ({ ...p, origen_prospecto: e.target.value }))}
-                    placeholder="Ej: Referido, Web, Llamado, etc."
                     style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db" }}
                   />
                 </div>
@@ -1066,29 +996,6 @@ export default function BandejaAsignadosPage() {
                   />
                 </div>
               </div>
-
-              {fichaMissing.length ? (
-                <div
-                  style={{
-                    border: "1px solid #fed7aa",
-                    background: "#fff7ed",
-                    padding: 12,
-                    borderRadius: 12,
-                    fontSize: 12,
-                  }}
-                >
-                  <div style={{ fontWeight: 900, marginBottom: 6, color: "#9a3412" }}>
-                    Campos faltantes para CONTACTADO
-                  </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {fichaMissing.map((m) => (
-                      <span key={m.key} style={{ ...chipStyle(), background: "#ffedd5", border: "1px solid #fed7aa" }}>
-                        {m.label}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
             </div>
 
             <div
