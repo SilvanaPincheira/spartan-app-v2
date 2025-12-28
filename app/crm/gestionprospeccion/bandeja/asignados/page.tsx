@@ -203,6 +203,8 @@ export default function BandejaAsignadosPage() {
   const [openObs, setOpenObs] = useState(false);
   const [obsFolio, setObsFolio] = useState<string | null>(null);
   const [obsText, setObsText] = useState("");
+  const [obsHistory, setObsHistory] = useState("");
+
 
   // modal completar ficha
   const [openFicha, setOpenFicha] = useState(false);
@@ -307,9 +309,11 @@ export default function BandejaAsignadosPage() {
   function openGestionObs(r: RowAny) {
     const folio = (r.folio || "").trim();
     setObsFolio(folio);
-    setObsText("");
+    setObsHistory(r.observacion || ""); // 👈 muestra historial existente
+    setObsText("");                     // 👈 nueva nota para agregar
     setOpenObs(true);
   }
+  
 
   function openCompletarFicha(r: RowAny) {
     const folio = (r.folio || "").trim();
@@ -697,21 +701,22 @@ export default function BandejaAsignadosPage() {
                           </button>
 
                           <button
-                            type="button"
-                            onClick={() => openCompletarFicha(r)}
-                            disabled={!folio || busy}
-                            style={{
-                              padding: "8px 10px",
-                              borderRadius: 10,
-                              border: "1px solid #d1d5db",
-                              background: "white",
-                              cursor: busy ? "not-allowed" : "pointer",
-                              fontWeight: 900,
-                              height: 36,
-                            }}
-                          >
-                            Completar ficha
-                          </button>
+  type="button"
+  onClick={() => openCompletarFicha(r)}
+  disabled={!folio || busy}
+  style={{
+    padding: "8px 10px",
+    borderRadius: 10,
+    border: "1px solid #f59e0b",
+    background: "#FEF3C7",
+    cursor: busy ? "not-allowed" : "pointer",
+    fontWeight: 900,
+    height: 36,
+  }}
+>
+  Completar ficha
+</button>
+
                         </div>
                       </td>
                     </tr>
@@ -755,6 +760,27 @@ export default function BandejaAsignadosPage() {
                 Folio: <b>{obsFolio}</b>
               </div>
             </div>
+
+            <div style={{ display: "grid", gap: 8 }}>
+  <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.85 }}>Historial</div>
+
+  <div
+    style={{
+      border: "1px solid #e5e7eb",
+      borderRadius: 10,
+      padding: 10,
+      background: "#fafafa",
+      maxHeight: 220,
+      overflowY: "auto",
+      whiteSpace: "pre-wrap",
+      fontSize: 12,
+      lineHeight: "18px",
+    }}
+  >
+    {obsHistory?.trim() ? obsHistory : "— Sin historial —"}
+  </div>
+</div>
+
 
             <div style={{ padding: 14, display: "grid", gap: 10 }}>
               <textarea
@@ -850,7 +876,12 @@ export default function BandejaAsignadosPage() {
               </div>
             </div>
 
-            <div style={{ padding: 14, display: "grid", gap: 12 }}>
+            <div style={{ padding: 14, 
+              display: "grid", 
+              gap: 12,
+              maxHeight: "70vh",
+              overflowY: "auto",
+              }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
                   <label style={{ fontSize: 12, opacity: 0.8 }}>Razón social</label>
