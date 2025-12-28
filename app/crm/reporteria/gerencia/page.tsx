@@ -3,9 +3,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import {
-  PieChart,
-  Pie,
-  Tooltip,
   ResponsiveContainer,
   BarChart,
   Bar,
@@ -13,9 +10,7 @@ import {
   YAxis,
   CartesianGrid,
   Legend,
-  FunnelChart,
-  Funnel,
-  LabelList,
+  Tooltip,
 } from "recharts";
 
 const JEFATURAS = new Set(
@@ -71,6 +66,8 @@ function cardStyle() {
   } as const;
 }
 
+type KV = { name: string; value: number };
+
 type ApiData = {
   ok: boolean;
   error?: string;
@@ -94,10 +91,14 @@ type ApiData = {
       ganados: number;
       noGanados: number;
     }[];
+
+    // ✅ NUEVO (opcional) para tablas/reportes
+    fechaCierre?: KV[];
+    probCierre?: KV[];
   };
 };
 
-/** ✅ Tick rotado con displayName (arregla react/display-name) */
+/** ✅ Tick rotado con displayName (evita react/display-name) */
 function XAxisTickRotated(props: any) {
   const { x, y, payload } = props || {};
   const value = payload?.value ?? "";
@@ -118,6 +119,52 @@ function XAxisTickRotated(props: any) {
   );
 }
 XAxisTickRotated.displayName = "XAxisTickRotated";
+
+function MiniTable({
+  title,
+  rows,
+  hint,
+}: {
+  title: string;
+  rows: KV[];
+  hint?: string;
+}) {
+  return (
+    <div style={cardStyle()}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+        <div style={{ fontWeight: 900 }}>{title}</div>
+        {hint ? <div style={{ fontSize: 12, opacity: 0.7 }}>{hint}</div> : null}
+      </div>
+
+      <div style={{ marginTop: 10, overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr style={{ textAlign: "left", opacity: 0.8 }}>
+              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Categoría</th>
+              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb", width: 120 }}>Cantidad</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length ? (
+              rows.map((r, idx) => (
+                <tr key={`${r.name}-${idx}`} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                  <td style={{ padding: 10, fontWeight: 800 }}>{r.name || "—"}</td>
+                  <td style={{ padding: 10 }}>{r.value ?? 0}</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={2} style={{ padding: 10, opacity: 0.7 }}>
+                  Sin datos para mostrar (falta que la API devuelva este bloque o no hay registros con ese filtro).
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 export default function CRMReporteriaGerenciaPage() {
   const supabase = useMemo(() => createClientComponentClient(), []);
@@ -219,13 +266,26 @@ export default function CRMReporteriaGerenciaPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, isJefatura]);
 
-  const funnelData = useMemo(() => data?.charts?.estados || [], [data]);
-  const pieOrigenData = useMemo(() => data?.charts?.origenes || [], [data]);
+  // === Datos para charts ===
+  const k = data?.kpis;
 
-  const barEjecutivos = useMemo(() => {
-    const arr = data?.charts?.ejecutivos || [];
-    return arr.slice(0, 12);
+  const barEjecutivos = useMemo(() => (data?.charts?.ejecutivos || []).slice(0, 12), [data]);
+
+  const barEstados = useMemo(() => {
+    const arr = data?.charts?.estados || [];
+    // recharts pide dataKey; dejamos name/value
+    return arr.map((x) => ({ name: x.name, value: x.value, key: x.key }));
   }, [data]);
+
+  const barOrigenes = useMemo(() => data?.charts?.origenes || [], [data]);
+
+  // === Tablas ===
+  const tablaEstados: KV[] = useMemo(
+    () => (data?.charts?.estados || []).map((x) => ({ name: x.name, value: x.value })),
+    [data]
+  );
+  const tablaFechaCierre: KV[] = useMemo(() => data?.charts?.fechaCierre || [], [data]);
+  const tablaProbCierre: KV[] = useMemo(() => data?.charts?.probCierre || [], [data]);
 
   if (authLoading) {
     return (
@@ -247,8 +307,6 @@ export default function CRMReporteriaGerenciaPage() {
       </div>
     );
   }
-
-  const k = data?.kpis;
 
   return (
     <div style={{ padding: 16, maxWidth: 1400 }}>
@@ -398,35 +456,9 @@ export default function CRMReporteriaGerenciaPage() {
         </div>
       </div>
 
-      {/* Gráficos */}
+      {/* GRÁFICOS (solo barras) */}
       <div style={{ marginTop: 14, display: "grid", gap: 10, gridTemplateColumns: "repeat(12, 1fr)" }}>
-        <div style={{ ...cardStyle(), gridColumn: "span 6" }}>
-          <div style={{ fontWeight: 900, marginBottom: 8 }}>Embudo por estado</div>
-          <div style={{ width: "100%", height: 320 }}>
-            <ResponsiveContainer>
-              <FunnelChart>
-                <Tooltip />
-                <Funnel dataKey="value" data={data?.charts?.estados || []} isAnimationActive>
-                  <LabelList position="right" dataKey="name" />
-                </Funnel>
-              </FunnelChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div style={{ ...cardStyle(), gridColumn: "span 6" }}>
-          <div style={{ fontWeight: 900, marginBottom: 8 }}>Origen (torta)</div>
-          <div style={{ width: "100%", height: 320 }}>
-            <ResponsiveContainer>
-              <PieChart>
-                <Tooltip />
-                <Legend />
-                <Pie data={data?.charts?.origenes || []} dataKey="value" nameKey="name" outerRadius={110} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
+        {/* Pipeline por ejecutivo */}
         <div style={{ ...cardStyle(), gridColumn: "span 12" }}>
           <div style={{ fontWeight: 900, marginBottom: 8 }}>Pipeline por ejecutivo (Top 12)</div>
 
@@ -438,38 +470,61 @@ export default function CRMReporteriaGerenciaPage() {
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="pipeline" name="Pipeline" />
-                <Bar dataKey="forecast" name="Forecast" />
+                {/* Azul rey + azul claro */}
+                <Bar dataKey="pipeline" name="Pipeline" fill="#1D4ED8" />
+                <Bar dataKey="forecast" name="Forecast" fill="#60A5FA" />
               </BarChart>
             </ResponsiveContainer>
           </div>
+        </div>
 
-          <div style={{ marginTop: 10, overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead>
-                <tr style={{ textAlign: "left", opacity: 0.8 }}>
-                  <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Ejecutivo</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>#</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Pipeline</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Forecast</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>✅</th>
-                  <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>❌</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(data?.charts?.ejecutivos || []).slice(0, 20).map((x) => (
-                  <tr key={x.ejecutivo || `${Math.random()}`} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                    <td style={{ padding: 10, fontWeight: 800 }}>{x.ejecutivo || "—"}</td>
-                    <td style={{ padding: 10 }}>{x.count}</td>
-                    <td style={{ padding: 10 }}>{moneyCLP(x.pipeline)}</td>
-                    <td style={{ padding: 10 }}>{moneyCLP(x.forecast)}</td>
-                    <td style={{ padding: 10 }}>{x.ganados}</td>
-                    <td style={{ padding: 10 }}>{x.noGanados}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {/* Leads por estado/etapa */}
+        <div style={{ ...cardStyle(), gridColumn: "span 6" }}>
+          <div style={{ fontWeight: 900, marginBottom: 8 }}>Leads por estado/etapa</div>
+          <div style={{ width: "100%", height: 320 }}>
+            <ResponsiveContainer>
+              <BarChart data={barEstados}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" interval={0} height={90} tick={<XAxisTickRotated />} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="value" name="Cantidad" fill="#1D4ED8" />
+              </BarChart>
+            </ResponsiveContainer>
           </div>
+        </div>
+
+        {/* Leads por origen */}
+        <div style={{ ...cardStyle(), gridColumn: "span 6" }}>
+          <div style={{ fontWeight: 900, marginBottom: 8 }}>Leads por origen</div>
+          <div style={{ width: "100%", height: 320 }}>
+            <ResponsiveContainer>
+              <BarChart data={barOrigenes}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" interval={0} height={80} tick={<XAxisTickRotated />} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="value" name="Cantidad" fill="#1D4ED8" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      {/* TABLAS (estado/etapas, fecha cierre, prob cierre) */}
+      <div style={{ marginTop: 14, display: "grid", gap: 10, gridTemplateColumns: "repeat(12, 1fr)" }}>
+        <div style={{ gridColumn: "span 4" }}>
+          <MiniTable title="Estado / Etapas" rows={tablaEstados} hint="Conteo por estado" />
+        </div>
+
+        <div style={{ gridColumn: "span 4" }}>
+          <MiniTable title="Fecha de cierre" rows={tablaFechaCierre} hint="Conteo por rango/plazo" />
+        </div>
+
+        <div style={{ gridColumn: "span 4" }}>
+          <MiniTable title="Probabilidad de cierre" rows={tablaProbCierre} hint="Conteo por tramo %" />
         </div>
       </div>
 
