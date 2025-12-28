@@ -26,6 +26,41 @@ const ESTADOS_GESTION = [
 ] as const;
 
 /** =========================
+ *  Etapas (para reportería)
+ *  ========================= */
+const CRM_ETAPAS = [
+  { id: 0, label: "Asignado" },
+  { id: 1, label: "En gestión" },
+  { id: 2, label: "Contactado" },
+  { id: 3, label: "Reunión" },
+  { id: 4, label: "Levantamiento" },
+  { id: 5, label: "Propuesta" },
+  { id: 6, label: "Cerrado ganado" },
+  { id: 7, label: "Instalado, 1° O/C" },
+  { id: 8, label: "No ganado" },
+] as const;
+
+const ESTADO_TO_ETAPA_ID: Record<string, number> = {
+  ASIGNADO: 0,
+  EN_GESTION: 1,
+  CONTACTADO: 2,
+  REUNION: 3,
+  LEVANTAMIENTO: 4,
+  PROPUESTA: 5,
+  CERRADO_GANADO: 6,
+  INSTALADO_1OC: 7,
+  NO_GANADO: 8,
+};
+
+function getEtapaFromEstado(estadoRaw: string) {
+  const estado = normU(estadoRaw);
+  const etapaId = ESTADO_TO_ETAPA_ID[estado];
+  if (etapaId == null) return { etapa_id: "", etapa_nombre: "" };
+  const etapaNombre = CRM_ETAPAS.find((e) => e.id === etapaId)?.label ?? "";
+  return { etapa_id: String(etapaId), etapa_nombre: etapaNombre };
+}
+
+/** =========================
  *  CSV Helpers
  *  ========================= */
 type RowAny = Record<string, string>;
@@ -134,6 +169,20 @@ function estadoBadgeStyle(estadoRaw: string) {
   return { bg: "#F3F4F6", color: "#374151", border: "#E5E7EB" };
 }
 
+function etapaBadgeStyle(etapaIdRaw: string) {
+  const id = Number(etapaIdRaw);
+  if (id === 0) return { bg: "#E0F2FE", color: "#0369A1", border: "#BAE6FD" };
+  if (id === 1) return { bg: "#FEF9C3", color: "#854D0E", border: "#FDE68A" };
+  if (id === 2) return { bg: "#DCFCE7", color: "#166534", border: "#BBF7D0" };
+  if (id === 3) return { bg: "#EDE9FE", color: "#5B21B6", border: "#DDD6FE" };
+  if (id === 4) return { bg: "#FDF2F8", color: "#9D174D", border: "#FBCFE8" };
+  if (id === 5) return { bg: "#FFEDD5", color: "#9A3412", border: "#FED7AA" };
+  if (id === 6) return { bg: "#BBF7D0", color: "#14532D", border: "#86EFAC" };
+  if (id === 7) return { bg: "#DCFCE7", color: "#166534", border: "#86EFAC" };
+  if (id === 8) return { bg: "#FEE2E2", color: "#7F1D1D", border: "#FECACA" };
+  return { bg: "#F3F4F6", color: "#374151", border: "#E5E7EB" };
+}
+
 function chipStyle() {
   return {
     display: "inline-flex",
@@ -218,14 +267,11 @@ export default function BandejaAsignadosPage() {
     const me = norm(loggedEmail);
     if (!me) return [];
 
-    // Ejecutivo ve ASIGNADO + EN_GESTION
-    const allowedEstados = new Set(["ASIGNADO", "EN_GESTION"]);
+    // ✅ CLAVE: mostrar TODO lo asignado a mí (no filtrar por estado)
+    let base = rows.filter((r) => norm(r.asignado_a || "") === me);
 
-    const base = rows.filter((r) => {
-      const estado = normU(r.estado || "");
-      const asignadoA = norm(r.asignado_a || "");
-      return allowedEstados.has(estado) && asignadoA === me;
-    });
+    // opcional: si quieres excluir pendientes de asignación
+    base = base.filter((r) => normU(r.estado || "") !== "PENDIENTE_ASIGNACION");
 
     const s = norm(q);
     if (!s) return base;
@@ -273,14 +319,12 @@ export default function BandejaAsignadosPage() {
     if (!folioParam) return;
     if (loading) return;
 
-    // espera un tick para asegurar refs montadas
     const t = window.setTimeout(() => {
       const el = rowRefs.current[folioParam];
       if (el) {
         setHighlightFolio(folioParam);
         el.scrollIntoView({ behavior: "smooth", block: "center" });
 
-        // apaga highlight después de 4.5s
         window.setTimeout(() => {
           setHighlightFolio((cur) => (cur === folioParam ? null : cur));
         }, 4500);
@@ -293,8 +337,9 @@ export default function BandejaAsignadosPage() {
   async function guardarGestion(folio: string) {
     const estado = normU(draftEstado[folio] || "");
     const nota = (draftNota[folio] || "").trim();
-
     if (!folio) return;
+
+    const { etapa_id, etapa_nombre } = getEtapaFromEstado(estado);
 
     try {
       setSavingFolio(folio);
@@ -306,6 +351,8 @@ export default function BandejaAsignadosPage() {
         body: JSON.stringify({
           folio,
           estado,
+          etapa_id: etapa_id || undefined,
+          etapa_nombre: etapa_nombre || undefined,
           observacion: nota || undefined,
         }),
       });
@@ -319,7 +366,9 @@ export default function BandejaAsignadosPage() {
       }
 
       if (!resp.ok || !data?.ok) {
-        alert(`❌ Error guardando gestión\nstatus=${resp.status}\n${JSON.stringify(data, null, 2)}`);
+        alert(
+          `❌ Error guardando gestión\nstatus=${resp.status}\n${JSON.stringify(data, null, 2)}`
+        );
         return;
       }
 
@@ -422,6 +471,7 @@ export default function BandejaAsignadosPage() {
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Gestión</th>
               </tr>
             </thead>
+
             <tbody>
               {loading ? (
                 <tr>
@@ -442,8 +492,19 @@ export default function BandejaAsignadosPage() {
                   const st = estadoBadgeStyle(est);
                   const busy = savingFolio === folio;
 
-                  const currentDraftEstado = normU(draftEstado[folio] || normU(est) || "ASIGNADO");
+                  const currentDraftEstado = normU(
+                    draftEstado[folio] || normU(est) || "ASIGNADO"
+                  );
                   const changedEstado = currentDraftEstado !== normU(est);
+
+                  // Mostrar etapa con color (si no viene etapa_id, la inferimos desde estado)
+                  const etapaId = (r.etapa_id || "").trim();
+                  const etapaNombre = (r.etapa_nombre || "").trim();
+
+                  const inferred = getEtapaFromEstado(currentDraftEstado);
+                  const etapaIdToShow = etapaId || inferred.etapa_id || "";
+                  const etapaNombreToShow = etapaNombre || inferred.etapa_nombre || "—";
+                  const etapaSt = etapaBadgeStyle(etapaIdToShow);
 
                   const isHighlighted = !!folio && highlightFolio === folio;
 
@@ -458,9 +519,17 @@ export default function BandejaAsignadosPage() {
                         transition: "background 250ms ease",
                       }}
                     >
-                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6", whiteSpace: "nowrap" }}>
+                      <td
+                        style={{
+                          padding: 10,
+                          borderBottom: "1px solid #f3f4f6",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
                         <b>{r.folio || "—"}</b>
-                        <div style={{ fontSize: 11, opacity: 0.7 }}>{fmtDate(r.created_at)}</div>
+                        <div style={{ fontSize: 11, opacity: 0.7 }}>
+                          {fmtDate(r.created_at)}
+                        </div>
                       </td>
 
                       <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
@@ -490,7 +559,17 @@ export default function BandejaAsignadosPage() {
                       </td>
 
                       <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                        {r.etapa_nombre || "—"}
+                        <span
+                          style={{
+                            ...chipStyle(),
+                            background: etapaSt.bg,
+                            color: etapaSt.color,
+                            border: `1px solid ${etapaSt.border}`,
+                          }}
+                          title={etapaIdToShow ? `etapa_id=${etapaIdToShow}` : ""}
+                        >
+                          {etapaNombreToShow}
+                        </span>
                       </td>
 
                       <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
@@ -507,8 +586,21 @@ export default function BandejaAsignadosPage() {
                       </td>
 
                       {/* ✅ Gestión */}
-                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6", minWidth: 320 }}>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <td
+                        style={{
+                          padding: 10,
+                          borderBottom: "1px solid #f3f4f6",
+                          minWidth: 320,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 8,
+                            alignItems: "center",
+                            flexWrap: "wrap",
+                          }}
+                        >
                           <select
                             value={currentDraftEstado}
                             onChange={(e) =>
@@ -582,7 +674,7 @@ export default function BandejaAsignadosPage() {
                         </div>
 
                         <div style={{ marginTop: 6, fontSize: 11, opacity: 0.7 }}>
-                          Esto llama a <b>/api/crm/prospectos/update</b> y actualiza CRM_DB (Apps Script).
+                          Guarda: <b>estado + etapa_id + etapa_nombre</b> y append de Observación.
                         </div>
                       </td>
                     </tr>
@@ -595,9 +687,9 @@ export default function BandejaAsignadosPage() {
       </div>
 
       <div style={{ marginTop: 12, fontSize: 12, opacity: 0.8 }}>
-        Regla: muestra <b>estado ∈ (ASIGNADO, EN_GESTION)</b> y <b>asignado_a = tu login</b>.
+        Regla: muestra <b>todo lo asignado_a = tu login</b> (no se esconde por cambiar estado).
         <br />
-        Tip: apenas empieces a gestionarlo, cámbialo a <b>EN_GESTION</b>.
+        Etapa se autocompleta según Estado para reportería.
       </div>
     </div>
   );
