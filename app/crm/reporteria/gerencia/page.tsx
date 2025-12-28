@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { CSSProperties, useEffect, useMemo, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import {
   ResponsiveContainer,
@@ -9,8 +9,8 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Legend,
   Tooltip,
+  Legend,
 } from "recharts";
 
 const JEFATURAS = new Set(
@@ -24,10 +24,9 @@ const JEFATURAS = new Set(
 
 const JEFATURA_SCOPE_PREFIJOS: Record<string, string[]> = {
   "claudia.borquez@spartan.cl": ["IN", "FB"],
-  "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND", "BSC"],
+  "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND"],
   "alberto.damm@spartan.cl": ["IND"],
-  "nelson.norambuena@spartan.cl": ["BSC"],
-  "carlos.avendano@spartan.cl": ["HC"],
+  "nelson.norambuena@spartan.cl": ["HC"],
 };
 
 function normalizeEmail(s: string) {
@@ -47,27 +46,39 @@ function moneyCLP(n: number) {
   }
 }
 
-function inputStyle() {
+function inputStyle(): CSSProperties {
   return {
     padding: 10,
     borderRadius: 12,
     border: "1px solid #e5e7eb",
     boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
     background: "white",
-  } as const;
+  };
 }
 
-function cardStyle() {
+function cardStyle(): CSSProperties {
   return {
     border: "1px solid #e5e7eb",
     borderRadius: 14,
     background: "white",
     boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
     padding: 14,
-  } as const;
+  };
 }
 
-type KV = { name: string; value: number };
+// ✅ labels cortos para evitar rotación
+function shortLabel(s: string) {
+  const v = (s || "").trim();
+  if (!v) return "—";
+  // ejecutivo: mostrar antes del @
+  if (v.includes("@")) return v.split("@")[0];
+  // cualquier string largo
+  if (v.length > 18) return v.slice(0, 18) + "…";
+  return v;
+}
+
+type ApiSeries = { name: string; value: number }[];
+type ApiEstado = { key: string; name: string; value: number };
 
 type ApiData = {
   ok: boolean;
@@ -80,10 +91,11 @@ type ApiData = {
     noGanado: number;
     pipelineMonto: number;
     forecastMonto: number;
+    pendientesWeb: number;
   };
   charts?: {
-    estados: { key: string; name: string; value: number }[];
-    origenes: { name: string; value: number }[];
+    estados: ApiEstado[];
+    origenes: ApiSeries;
     ejecutivos: {
       ejecutivo: string;
       count: number;
@@ -92,82 +104,13 @@ type ApiData = {
       ganados: number;
       noGanados: number;
     }[];
-
-    // ✅ NUEVO (opcional) para tablas/reportes
-    fechaCierre?: KV[];
-    probCierre?: KV[];
+    fechaCierre: ApiSeries;
+    probCierre: ApiSeries;
+    pendientesWebPorDivision: ApiSeries;
   };
 };
 
-/** ✅ Tick rotado con displayName (evita react/display-name) */
-function XAxisTickRotated(props: any) {
-  const { x, y, payload } = props || {};
-  const value = payload?.value ?? "";
-  return (
-    <g transform={`translate(${x},${y})`}>
-      <text
-        x={0}
-        y={0}
-        dy={16}
-        textAnchor="end"
-        transform="rotate(-20)"
-        fontSize={11}
-        fill="#374151"
-      >
-        {String(value)}
-      </text>
-    </g>
-  );
-}
-XAxisTickRotated.displayName = "XAxisTickRotated";
-
-function MiniTable({
-  title,
-  rows,
-  hint,
-}: {
-  title: string;
-  rows: KV[];
-  hint?: string;
-}) {
-  return (
-    <div style={cardStyle()}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
-        <div style={{ fontWeight: 900 }}>{title}</div>
-        {hint ? <div style={{ fontSize: 12, opacity: 0.7 }}>{hint}</div> : null}
-      </div>
-
-      <div style={{ marginTop: 10, overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-          <thead>
-            <tr style={{ textAlign: "left", opacity: 0.8 }}>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Categoría</th>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb", width: 120 }}>Cantidad</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length ? (
-              rows.map((r, idx) => (
-                <tr key={`${r.name}-${idx}`} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                  <td style={{ padding: 10, fontWeight: 800 }}>{r.name || "—"}</td>
-                  <td style={{ padding: 10 }}>{r.value ?? 0}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={2} style={{ padding: 10, opacity: 0.7 }}>
-                  Sin datos para mostrar (falta que la API devuelva este bloque o no hay registros con ese filtro).
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-export default function CRMReporteriaGerenciaPage() {
+const CRMReporteriaGerenciaPage: React.FC = () => {
   const supabase = useMemo(() => createClientComponentClient(), []);
 
   const [authLoading, setAuthLoading] = useState(true);
@@ -197,7 +140,10 @@ export default function CRMReporteriaGerenciaPage() {
     return (JEFATURA_SCOPE_PREFIJOS[email] || []).map((x) => x.toUpperCase());
   }, [loggedEmail]);
 
-  const divisionOptions = useMemo(() => ["", ...allowedDivs], [allowedDivs]);
+  const divisionOptions = useMemo(
+    () => ["", ...Array.from(new Set(allowedDivs))],
+    [allowedDivs]
+  );
 
   useEffect(() => {
     (async () => {
@@ -216,14 +162,12 @@ export default function CRMReporteriaGerenciaPage() {
 
   const ejecutivoOptions = useMemo(() => {
     const arr = data?.charts?.ejecutivos?.map((x) => x.ejecutivo).filter(Boolean) || [];
-    const uniq = Array.from(new Set(arr)).sort();
-    return ["", ...uniq];
+    return ["", ...Array.from(new Set(arr)).sort()];
   }, [data]);
 
   const origenOptions = useMemo(() => {
     const arr = data?.charts?.origenes?.map((x) => x.name).filter(Boolean) || [];
-    const uniq = Array.from(new Set(arr)).sort();
-    return ["", ...uniq];
+    return ["", ...Array.from(new Set(arr)).sort()];
   }, [data]);
 
   async function reload() {
@@ -232,6 +176,7 @@ export default function CRMReporteriaGerenciaPage() {
       setErr(null);
 
       const qs = new URLSearchParams();
+
       if (from) qs.set("from", new Date(from).toISOString());
       if (to) qs.set("to", new Date(`${to}T23:59:59.999`).toISOString());
 
@@ -243,8 +188,12 @@ export default function CRMReporteriaGerenciaPage() {
       if (onlyClosed) qs.set("onlyClosed", "1");
 
       qs.set("includeAssigned", "1");
+      qs.set("viewerEmail", loggedEmail || "");
 
-      const resp = await fetch(`/api/crm/reporteria/gerencia?${qs.toString()}`, { cache: "no-store" });
+      const resp = await fetch(`/api/crm/reporteria/gerencia?${qs.toString()}`, {
+        cache: "no-store",
+      });
+
       const json = (await resp.json()) as ApiData;
 
       if (!resp.ok || !json.ok) {
@@ -267,31 +216,31 @@ export default function CRMReporteriaGerenciaPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, isJefatura]);
 
-  // === Datos para charts ===
   const k = data?.kpis;
 
-  const barEjecutivos = useMemo(() => (data?.charts?.ejecutivos || []).slice(0, 12), [data]);
+  const barEstados = useMemo(() => data?.charts?.estados || [], [data]);
 
-  const barEstados = useMemo(() => {
-    const arr = data?.charts?.estados || [];
-    // recharts pide dataKey; dejamos name/value
-    return arr.map((x) => ({ name: x.name, value: x.value, key: x.key }));
+  const barEjecutivos = useMemo(() => {
+    const arr = data?.charts?.ejecutivos || [];
+    return arr.slice(0, 12).map((x) => ({
+      ...x,
+      ejecutivoLabel: shortLabel(x.ejecutivo),
+    }));
   }, [data]);
 
-  const barOrigenes = useMemo(() => data?.charts?.origenes || [], [data]);
-
-  // === Tablas ===
-  const tablaEstados: KV[] = useMemo(
-    () => (data?.charts?.estados || []).map((x) => ({ name: x.name, value: x.value })),
+  const fechaCierre = useMemo(() => (data?.charts?.fechaCierre || []).slice(0, 12), [data]);
+  const probCierre = useMemo(() => (data?.charts?.probCierre || []).slice(0, 12), [data]);
+  const pendientesWebPorDivision = useMemo(
+    () => (data?.charts?.pendientesWebPorDivision || []).slice(0, 20),
     [data]
   );
-  const tablaFechaCierre: KV[] = useMemo(() => data?.charts?.fechaCierre || [], [data]);
-  const tablaProbCierre: KV[] = useMemo(() => data?.charts?.probCierre || [], [data]);
 
   if (authLoading) {
     return (
       <div style={{ padding: 16 }}>
-        <h2 style={{ fontSize: 20, fontWeight: 900, margin: 0 }}>CRM · Reportería (Gerencia)</h2>
+        <h2 style={{ fontSize: 20, fontWeight: 900, margin: 0 }}>
+          CRM · Reportería (Gerencia)
+        </h2>
         <div style={{ marginTop: 10, opacity: 0.75 }}>Cargando usuario…</div>
       </div>
     );
@@ -300,8 +249,12 @@ export default function CRMReporteriaGerenciaPage() {
   if (!isJefatura) {
     return (
       <div style={{ padding: 16, maxWidth: 900 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>CRM · Reportería (Gerencia)</h2>
-        <div style={{ marginTop: 10, color: "crimson" }}>No tienes permisos para este módulo (solo jefaturas).</div>
+        <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>
+          CRM · Reportería (Gerencia)
+        </h2>
+        <div style={{ marginTop: 10, color: "crimson" }}>
+          No tienes permisos para este módulo (solo jefaturas).
+        </div>
         <div style={{ marginTop: 8, opacity: 0.8 }}>
           Login detectado: <b>{loggedEmail || "—"}</b>
         </div>
@@ -313,7 +266,9 @@ export default function CRMReporteriaGerenciaPage() {
     <div style={{ padding: 16, maxWidth: 1400 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>CRM · Reportería (Gerencia)</h2>
+          <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>
+            CRM · Reportería (Gerencia)
+          </h2>
           <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
             Jefatura: <b>{loggedEmail || "—"}</b> {" · "}
             Scope: <b>{allowedDivs.length ? allowedDivs.join(", ") : "TODOS"}</b>
@@ -353,10 +308,9 @@ export default function CRMReporteriaGerenciaPage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 180 }}>
           <div style={{ fontSize: 12, fontWeight: 800, opacity: 0.8 }}>División</div>
           <select value={division} onChange={(e) => setDivision(e.target.value)} style={inputStyle()}>
-            {divisionOptions.map((d) => (
-              <option key={d || "ALL"} value={d}>
-                {d ? d : "Todas (scope)"}
-              </option>
+            <option value="">Todas</option>
+            {divisionOptions.filter(Boolean).map((d) => (
+              <option key={d} value={d}>{d}</option>
             ))}
           </select>
         </div>
@@ -420,11 +374,11 @@ export default function CRMReporteriaGerenciaPage() {
           marginTop: 14,
           display: "grid",
           gap: 10,
-          gridTemplateColumns: "repeat(6, minmax(160px, 1fr))",
+          gridTemplateColumns: "repeat(7, minmax(160px, 1fr))",
         }}
       >
         <div style={cardStyle()}>
-          <div style={{ fontSize: 12, opacity: 0.8, fontWeight: 800 }}>Leads</div>
+          <div style={{ fontSize: 12, opacity: 0.8, fontWeight: 800 }}>Leads (CRM_DB)</div>
           <div style={{ fontSize: 22, fontWeight: 900, marginTop: 6 }}>{k?.total ?? "—"}</div>
         </div>
 
@@ -455,11 +409,61 @@ export default function CRMReporteriaGerenciaPage() {
             <div style={{ fontSize: 18, fontWeight: 900, opacity: 0.75 }}>❌ {k?.noGanado ?? 0}</div>
           </div>
         </div>
+
+        <div style={cardStyle()}>
+          <div style={{ fontSize: 12, opacity: 0.8, fontWeight: 800 }}>Por asignar (WEB)</div>
+          <div style={{ fontSize: 22, fontWeight: 900, marginTop: 6 }}>{k?.pendientesWeb ?? "—"}</div>
+          <div style={{ fontSize: 11, opacity: 0.7, marginTop: 6 }}>No incluye PIA</div>
+        </div>
       </div>
 
-      {/* GRÁFICOS (solo barras) */}
+      {/* Gráficos */}
       <div style={{ marginTop: 14, display: "grid", gap: 10, gridTemplateColumns: "repeat(12, 1fr)" }}>
-        {/* Pipeline por ejecutivo */}
+        {/* Estados/Etapas */}
+        <div style={{ ...cardStyle(), gridColumn: "span 12" }}>
+          <div style={{ fontWeight: 900, marginBottom: 8 }}>Estados / Etapas</div>
+
+          <div style={{ width: "100%", height: 320 }}>
+            <ResponsiveContainer>
+              <BarChart data={barEstados}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="name"
+                  interval={0}
+                  height={80}
+                  tick={{ fontSize: 11 }}
+                  tickMargin={10}
+                  minTickGap={6}
+                />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="value" name="Cantidad" fill="#1d4ed8" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div style={{ marginTop: 10, overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ textAlign: "left", opacity: 0.8 }}>
+                  <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Estado</th>
+                  <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Cantidad</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data?.charts?.estados || []).map((x) => (
+                  <tr key={x.key} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                    <td style={{ padding: 10, fontWeight: 800 }}>{x.name}</td>
+                    <td style={{ padding: 10 }}>{x.value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Ejecutivos */}
         <div style={{ ...cardStyle(), gridColumn: "span 12" }}>
           <div style={{ fontWeight: 900, marginBottom: 8 }}>Pipeline por ejecutivo (Top 12)</div>
 
@@ -467,71 +471,156 @@ export default function CRMReporteriaGerenciaPage() {
             <ResponsiveContainer>
               <BarChart data={barEjecutivos}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="ejecutivo" interval={0} height={90} tick={<XAxisTickRotated />} />
+                <XAxis
+                  dataKey="ejecutivoLabel"
+                  interval={0}
+                  height={80}
+                  tick={{ fontSize: 11 }}
+                  tickMargin={10}
+                  minTickGap={6}
+                />
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip />
                 <Legend />
-                {/* Azul rey + azul claro */}
-                <Bar dataKey="pipeline" name="Pipeline" fill="#1D4ED8" />
-                <Bar dataKey="forecast" name="Forecast" fill="#60A5FA" />
+                <Bar dataKey="pipeline" name="Pipeline" fill="#1d4ed8" />
+                <Bar dataKey="forecast" name="Forecast" fill="#0ea5e9" />
               </BarChart>
             </ResponsiveContainer>
           </div>
+
+          <div style={{ marginTop: 10, overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ textAlign: "left", opacity: 0.8 }}>
+                  <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Ejecutivo</th>
+                  <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>#</th>
+                  <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Pipeline</th>
+                  <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Forecast</th>
+                  <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>✅</th>
+                  <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>❌</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data?.charts?.ejecutivos || []).slice(0, 20).map((x) => (
+                  <tr key={x.ejecutivo || `${x.count}_${x.pipeline}`} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                    <td style={{ padding: 10, fontWeight: 800 }}>{x.ejecutivo || "—"}</td>
+                    <td style={{ padding: 10 }}>{x.count}</td>
+                    <td style={{ padding: 10 }}>{moneyCLP(x.pipeline)}</td>
+                    <td style={{ padding: 10 }}>{moneyCLP(x.forecast)}</td>
+                    <td style={{ padding: 10 }}>{x.ganados}</td>
+                    <td style={{ padding: 10 }}>{x.noGanados}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        {/* Leads por estado/etapa */}
+        {/* Tablas: Fecha de cierre + Prob cierre */}
         <div style={{ ...cardStyle(), gridColumn: "span 6" }}>
-          <div style={{ fontWeight: 900, marginBottom: 8 }}>Leads por estado/etapa</div>
-          <div style={{ width: "100%", height: 320 }}>
-            <ResponsiveContainer>
-              <BarChart data={barEstados}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" interval={0} height={90} tick={<XAxisTickRotated />} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="value" name="Cantidad" fill="#1D4ED8" />
-              </BarChart>
-            </ResponsiveContainer>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+            <div style={{ fontWeight: 900 }}>Fecha de cierre</div>
+            <div style={{ fontSize: 12, opacity: 0.75 }}>Conteo por rango/plazo</div>
           </div>
+
+          {fechaCierre.length === 0 ? (
+            <div style={{ fontSize: 12, opacity: 0.7 }}>
+              Sin datos para mostrar (falta que la API devuelva este bloque o no hay registros con ese filtro).
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ textAlign: "left", opacity: 0.8 }}>
+                    <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Categoría</th>
+                    <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Cantidad</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fechaCierre.map((x) => (
+                    <tr key={x.name} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                      <td style={{ padding: 10, fontWeight: 800 }}>{x.name}</td>
+                      <td style={{ padding: 10 }}>{x.value}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
-        {/* Leads por origen */}
         <div style={{ ...cardStyle(), gridColumn: "span 6" }}>
-          <div style={{ fontWeight: 900, marginBottom: 8 }}>Leads por origen</div>
-          <div style={{ width: "100%", height: 320 }}>
-            <ResponsiveContainer>
-              <BarChart data={barOrigenes}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" interval={0} height={80} tick={<XAxisTickRotated />} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="value" name="Cantidad" fill="#1D4ED8" />
-              </BarChart>
-            </ResponsiveContainer>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+            <div style={{ fontWeight: 900 }}>Probabilidad de cierre</div>
+            <div style={{ fontSize: 12, opacity: 0.75 }}>Conteo por tramo %</div>
           </div>
-        </div>
-      </div>
 
-      {/* TABLAS (estado/etapas, fecha cierre, prob cierre) */}
-      <div style={{ marginTop: 14, display: "grid", gap: 10, gridTemplateColumns: "repeat(12, 1fr)" }}>
-        <div style={{ gridColumn: "span 4" }}>
-          <MiniTable title="Estado / Etapas" rows={tablaEstados} hint="Conteo por estado" />
+          {probCierre.length === 0 ? (
+            <div style={{ fontSize: 12, opacity: 0.7 }}>
+              Sin datos para mostrar (falta que la API devuelva este bloque o no hay registros con ese filtro).
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ textAlign: "left", opacity: 0.8 }}>
+                    <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Categoría</th>
+                    <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Cantidad</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {probCierre.map((x) => (
+                    <tr key={x.name} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                      <td style={{ padding: 10, fontWeight: 800 }}>{x.name}</td>
+                      <td style={{ padding: 10 }}>{x.value}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
-        <div style={{ gridColumn: "span 4" }}>
-          <MiniTable title="Fecha de cierre" rows={tablaFechaCierre} hint="Conteo por rango/plazo" />
-        </div>
+        {/* Pendientes WEB por división */}
+        <div style={{ ...cardStyle(), gridColumn: "span 12" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+            <div style={{ fontWeight: 900 }}>Por asignar (WEB) por división</div>
+            <div style={{ fontSize: 12, opacity: 0.75 }}>No incluye PIA</div>
+          </div>
 
-        <div style={{ gridColumn: "span 4" }}>
-          <MiniTable title="Probabilidad de cierre" rows={tablaProbCierre} hint="Conteo por tramo %" />
+          {pendientesWebPorDivision.length === 0 ? (
+            <div style={{ fontSize: 12, opacity: 0.7 }}>
+              Sin datos para mostrar (revisa permisos del Sheet WEB o filtros de división/fechas).
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ textAlign: "left", opacity: 0.8 }}>
+                    <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>División</th>
+                    <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Cantidad</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendientesWebPorDivision.map((x) => (
+                    <tr key={x.name} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                      <td style={{ padding: 10, fontWeight: 800 }}>{x.name}</td>
+                      <td style={{ padding: 10 }}>{x.value}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
 
       <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-        Fuente: <b>CRM_DB</b> (prospectos)
+        Fuente: <b>CRM_DB</b> (prospectos) + <b>BD_WEB</b> (por asignar)
       </div>
     </div>
   );
-}
+};
+
+CRMReporteriaGerenciaPage.displayName = "CRMReporteriaGerenciaPage";
+export default CRMReporteriaGerenciaPage;
