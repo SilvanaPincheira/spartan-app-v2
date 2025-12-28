@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { useSearchParams } from "next/navigation";
 
 /** =========================
  *  CONFIG
@@ -11,7 +12,6 @@ const CSV_CRM_DB_URL =
 
 /** =========================
  *  Estados disponibles para gestión
- *  (deben calzar con lo que guardas en CRM_DB)
  *  ========================= */
 const ESTADOS_GESTION = [
   { value: "ASIGNADO", label: "Asignado" },
@@ -125,12 +125,12 @@ function estadoBadgeStyle(estadoRaw: string) {
   if (e === "ASIGNADO") return { bg: "#E0F2FE", color: "#0369A1", border: "#BAE6FD" };
   if (e === "EN_GESTION") return { bg: "#FEF9C3", color: "#854D0E", border: "#FDE68A" };
   if (e === "CONTACTADO") return { bg: "#DCFCE7", color: "#166534", border: "#BBF7D0" };
-  if (e === "REUNION" || e === "REUNIÓN") return { bg: "#EDE9FE", color: "#5B21B6", border: "#DDD6FE" };
+  if (e === "REUNION") return { bg: "#EDE9FE", color: "#5B21B6", border: "#DDD6FE" };
   if (e === "LEVANTAMIENTO") return { bg: "#FDF2F8", color: "#9D174D", border: "#FBCFE8" };
   if (e === "PROPUESTA") return { bg: "#FFEDD5", color: "#9A3412", border: "#FED7AA" };
-  if (e === "CERRADO_GANADO" || e === "CERRADO_GANADO") return { bg: "#BBF7D0", color: "#14532D", border: "#86EFAC" };
+  if (e === "CERRADO_GANADO") return { bg: "#BBF7D0", color: "#14532D", border: "#86EFAC" };
   if (e === "INSTALADO_1OC") return { bg: "#DCFCE7", color: "#166534", border: "#86EFAC" };
-  if (e === "NO_GANADO" || e === "NO_GANADO") return { bg: "#FEE2E2", color: "#7F1D1D", border: "#FECACA" };
+  if (e === "NO_GANADO") return { bg: "#FEE2E2", color: "#7F1D1D", border: "#FECACA" };
   return { bg: "#F3F4F6", color: "#374151", border: "#E5E7EB" };
 }
 
@@ -152,6 +152,7 @@ function chipStyle() {
  *  ========================= */
 export default function BandejaAsignadosPage() {
   const supabase = useMemo(() => createClientComponentClient(), []);
+  const searchParams = useSearchParams();
 
   const [authLoading, setAuthLoading] = useState(true);
   const [loggedEmail, setLoggedEmail] = useState("");
@@ -166,6 +167,12 @@ export default function BandejaAsignadosPage() {
   const [draftEstado, setDraftEstado] = useState<Record<string, string>>({});
   const [draftNota, setDraftNota] = useState<Record<string, string>>({});
   const [savingFolio, setSavingFolio] = useState<string | null>(null);
+
+  // ✅ scroll/highlight
+  const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
+  const [highlightFolio, setHighlightFolio] = useState<string | null>(null);
+
+  const folioParam = (searchParams.get("folio") || "").trim();
 
   async function reload() {
     try {
@@ -211,14 +218,14 @@ export default function BandejaAsignadosPage() {
     const me = norm(loggedEmail);
     if (!me) return [];
 
-    // Ejecutivo ve ASIGNADO + EN_GESTION (puedes sumar más si quieres)
+    // Ejecutivo ve ASIGNADO + EN_GESTION
     const allowedEstados = new Set(["ASIGNADO", "EN_GESTION"]);
 
     const base = rows.filter((r) => {
+      const estado = normU(r.estado || "");
       const asignadoA = norm(r.asignado_a || "");
-      return asignadoA === me;
+      return allowedEstados.has(estado) && asignadoA === me;
     });
-    
 
     const s = norm(q);
     if (!s) return base;
@@ -261,6 +268,28 @@ export default function BandejaAsignadosPage() {
     });
   }, [assignedToMe]);
 
+  // ✅ Scroll + highlight cuando viene ?folio=
+  useEffect(() => {
+    if (!folioParam) return;
+    if (loading) return;
+
+    // espera un tick para asegurar refs montadas
+    const t = window.setTimeout(() => {
+      const el = rowRefs.current[folioParam];
+      if (el) {
+        setHighlightFolio(folioParam);
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+
+        // apaga highlight después de 4.5s
+        window.setTimeout(() => {
+          setHighlightFolio((cur) => (cur === folioParam ? null : cur));
+        }, 4500);
+      }
+    }, 50);
+
+    return () => window.clearTimeout(t);
+  }, [folioParam, loading, assignedToMe.length]);
+
   async function guardarGestion(folio: string) {
     const estado = normU(draftEstado[folio] || "");
     const nota = (draftNota[folio] || "").trim();
@@ -276,9 +305,8 @@ export default function BandejaAsignadosPage() {
         cache: "no-store",
         body: JSON.stringify({
           folio,
-          estado, // "ASIGNADO" | "EN_GESTION" | ...
-          observacion: nota || undefined, // Apps Script hace append con timestamp
-          // ejecutivo_email opcional (tu route puede setearlo)
+          estado,
+          observacion: nota || undefined,
         }),
       });
 
@@ -295,9 +323,7 @@ export default function BandejaAsignadosPage() {
         return;
       }
 
-      // limpia nota draft si guardó
       setDraftNota((p) => ({ ...p, [folio]: "" }));
-
       await reload();
     } finally {
       setSavingFolio(null);
@@ -414,21 +440,25 @@ export default function BandejaAsignadosPage() {
                   const folio = (r.folio || "").trim();
                   const est = r.estado || "—";
                   const st = estadoBadgeStyle(est);
-
                   const busy = savingFolio === folio;
 
                   const currentDraftEstado = normU(draftEstado[folio] || normU(est) || "ASIGNADO");
                   const changedEstado = currentDraftEstado !== normU(est);
 
+                  const isHighlighted = !!folio && highlightFolio === folio;
+
                   return (
-                    <tr key={`${folio || "x"}_${i}`}>
-                      <td
-                        style={{
-                          padding: 10,
-                          borderBottom: "1px solid #f3f4f6",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
+                    <tr
+                      key={`${folio || "x"}_${i}`}
+                      ref={(el) => {
+                        if (folio) rowRefs.current[folio] = el;
+                      }}
+                      style={{
+                        background: isHighlighted ? "#FEF3C7" : "transparent",
+                        transition: "background 250ms ease",
+                      }}
+                    >
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6", whiteSpace: "nowrap" }}>
                         <b>{r.folio || "—"}</b>
                         <div style={{ fontSize: 11, opacity: 0.7 }}>{fmtDate(r.created_at)}</div>
                       </td>
@@ -567,7 +597,7 @@ export default function BandejaAsignadosPage() {
       <div style={{ marginTop: 12, fontSize: 12, opacity: 0.8 }}>
         Regla: muestra <b>estado ∈ (ASIGNADO, EN_GESTION)</b> y <b>asignado_a = tu login</b>.
         <br />
-        Tip: apenas empieces a gestionarlo, cámbialo a <b>EN_GESTION</b> para que se vea el avance.
+        Tip: apenas empieces a gestionarlo, cámbialo a <b>EN_GESTION</b>.
       </div>
     </div>
   );

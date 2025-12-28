@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { useRouter } from "next/navigation";
 
 const CSV_CRM_DB_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vR6D9j1ZjygWJKRXLV22AMb2oMYKVQWlly1KdAIKRm9jBAOIvIxNd9jqhEi2Zc-7LnjLe2wfhKrfsEW/pub?gid=0&single=true&output=csv";
@@ -77,7 +78,7 @@ function normalizeEmail(s: string) {
 }
 
 function normU(s: string) {
-  return (s || "").trim().toUpperCase();
+  return (s || "").trim().toUpperCase().replace(/\s+/g, "_");
 }
 
 function badgeStyle(estadoRaw: string) {
@@ -85,8 +86,10 @@ function badgeStyle(estadoRaw: string) {
   if (e === "ASIGNADO") return { bg: "#E0F2FE", color: "#0369A1", border: "#BAE6FD" };
   if (e === "EN_GESTION") return { bg: "#FEF9C3", color: "#854D0E", border: "#FDE68A" };
   if (e === "CONTACTADO") return { bg: "#DCFCE7", color: "#166534", border: "#BBF7D0" };
-  if (e === "NO_GANADO") return { bg: "#FEE2E2", color: "#7F1D1D", border: "#FECACA" };
+  if (e === "REUNION") return { bg: "#EDE9FE", color: "#5B21B6", border: "#DDD6FE" };
+  if (e === "PROPUESTA") return { bg: "#FFEDD5", color: "#9A3412", border: "#FED7AA" };
   if (e === "CERRADO_GANADO") return { bg: "#BBF7D0", color: "#14532D", border: "#86EFAC" };
+  if (e === "NO_GANADO") return { bg: "#FEE2E2", color: "#7F1D1D", border: "#FECACA" };
   return { bg: "#F3F4F6", color: "#374151", border: "#E5E7EB" };
 }
 
@@ -113,6 +116,7 @@ function Chip({ text }: { text: string }) {
 }
 
 export default function CRMProspeccionBandejaPage() {
+  const router = useRouter();
   const supabase = useMemo(() => createClientComponentClient(), []);
 
   const [authLoading, setAuthLoading] = useState(true);
@@ -124,15 +128,6 @@ export default function CRMProspeccionBandejaPage() {
 
   const [q, setQ] = useState("");
   const [onlyAssigned, setOnlyAssigned] = useState(true);
-
-  // Modal gestión
-  const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState<Row | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  const [formEstado, setFormEstado] = useState("");
-  const [formEtapaNombre, setFormEtapaNombre] = useState("");
-  const [formObs, setFormObs] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -177,6 +172,7 @@ export default function CRMProspeccionBandejaPage() {
 
     let base = rows;
 
+    // ✅ Mantén tu lógica actual de bandeja (asignados o asignados+ya gestionados)
     if (onlyAssigned) {
       base = base.filter((r) => normalizeEmail(r.asignado_a) === email);
     } else {
@@ -206,52 +202,12 @@ export default function CRMProspeccionBandejaPage() {
     });
   }, [rows, loggedEmail, q, onlyAssigned]);
 
-  function openGestion(r: Row) {
-    setSelected(r);
-    setFormEstado(r.estado || "ASIGNADO");
-    setFormEtapaNombre(r.etapa_nombre || "");
-    setFormObs(r.observacion || "");
-    setOpen(true);
-  }
-
-  async function saveGestion() {
-    if (!selected?.folio) return;
-
-    try {
-      setSaving(true);
-
-      const resp = await fetch("/api/crm/prospectos/update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          folio: selected.folio,
-          estado: formEstado,
-          // si no manejas etapa_id, igual puedes actualizar solo etapa_nombre
-          etapa_nombre: formEtapaNombre,
-          observacion: formObs,
-          actualizado_por: loggedEmail,
-        }),
-      });
-
-      const text = await resp.text();
-      let data: any = null;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = { ok: false, error: "Respuesta no JSON", raw: text.slice(0, 300) };
-      }
-
-      if (!resp.ok || !data?.ok) {
-        alert(`❌ Error guardando:\nstatus=${resp.status}\n${JSON.stringify(data, null, 2)}`);
-        return;
-      }
-
-      setOpen(false);
-      setSelected(null);
-      await reload();
-    } finally {
-      setSaving(false);
-    }
+  function goToAsignados(folio?: string) {
+    // Puedes pasar folio por query param si luego quieres auto-scroll/auto-focus
+    const url = folio
+      ? `/crm/gestionprospeccion/bandeja/asignados?folio=${encodeURIComponent(folio)}`
+      : `/crm/gestionprospeccion/bandeja/asignados`;
+    router.push(url);
   }
 
   if (authLoading) {
@@ -311,9 +267,37 @@ export default function CRMProspeccionBandejaPage() {
         </button>
       </div>
 
+      <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <button
+          type="button"
+          onClick={() => goToAsignados()}
+          style={{
+            padding: "10px 12px",
+            borderRadius: 10,
+            border: "1px solid #111827",
+            background: "#111827",
+            color: "white",
+            cursor: "pointer",
+          }}
+        >
+          Ir a Asignados (Gestión)
+        </button>
+
+        <div style={{ fontSize: 12, opacity: 0.75, alignSelf: "center" }}>
+          Gestión se realiza solo en <b>/crm/gestionprospeccion/bandeja/asignados</b>.
+        </div>
+      </div>
+
       {err && <div style={{ marginTop: 10, color: "crimson" }}>Error: {err}</div>}
 
-      <div style={{ marginTop: 12, border: "1px solid #e5e7eb", borderRadius: 12, overflowX: "auto" }}>
+      <div
+        style={{
+          marginTop: 12,
+          border: "1px solid #e5e7eb",
+          borderRadius: 12,
+          overflowX: "auto",
+        }}
+      >
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ textAlign: "left", fontSize: 12, opacity: 0.8 }}>
@@ -356,7 +340,7 @@ export default function CRMProspeccionBandejaPage() {
                 <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
                   <button
                     type="button"
-                    onClick={() => openGestion(r)}
+                    onClick={() => goToAsignados(r.folio)}
                     style={{
                       padding: "8px 10px",
                       borderRadius: 10,
@@ -367,7 +351,7 @@ export default function CRMProspeccionBandejaPage() {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    Gestionar
+                    Gestionar (Asignados)
                   </button>
                 </td>
               </tr>
@@ -387,136 +371,6 @@ export default function CRMProspeccionBandejaPage() {
       <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
         Mostrando <b>{myItems.length}</b> registros.
       </div>
-
-      {/* MODAL */}
-      {open && selected && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.35)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 16,
-            zIndex: 50,
-          }}
-          onClick={() => (!saving ? setOpen(false) : null)}
-        >
-          <div
-            style={{
-              width: "min(720px, 100%)",
-              background: "white",
-              borderRadius: 14,
-              border: "1px solid #e5e7eb",
-              boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
-              overflow: "hidden",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>
-              <div style={{ fontSize: 16, fontWeight: 900 }}>Gestionar prospecto</div>
-              <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
-                <b>{selected.folio}</b> · {selected.nombre_razon_social || "—"} · {selected.correo || "—"}
-              </div>
-            </div>
-
-            <div style={{ padding: 14, display: "grid", gap: 12 }}>
-              <div style={{ display: "grid", gap: 6 }}>
-                <label style={{ fontSize: 12, opacity: 0.8 }}>Estado</label>
-                <select
-                  value={formEstado}
-                  onChange={(e) => setFormEstado(e.target.value)}
-                  style={{
-                    padding: 10,
-                    borderRadius: 10,
-                    border: "1px solid #d1d5db",
-                  }}
-                >
-                  <option value="ASIGNADO">ASIGNADO</option>
-                  <option value="EN_GESTION">EN_GESTION</option>
-                  <option value="CONTACTADO">CONTACTADO</option>
-                  <option value="REUNION">REUNION</option>
-                  <option value="PROPUESTA">PROPUESTA</option>
-                  <option value="CERRADO_GANADO">CERRADO_GANADO</option>
-                  <option value="NO_GANADO">NO_GANADO</option>
-                </select>
-              </div>
-
-              <div style={{ display: "grid", gap: 6 }}>
-                <label style={{ fontSize: 12, opacity: 0.8 }}>Etapa (texto)</label>
-                <input
-                  value={formEtapaNombre}
-                  onChange={(e) => setFormEtapaNombre(e.target.value)}
-                  placeholder="Ej: Primer contacto / Cotización / Visita..."
-                  style={{
-                    padding: 10,
-                    borderRadius: 10,
-                    border: "1px solid #d1d5db",
-                  }}
-                />
-              </div>
-
-              <div style={{ display: "grid", gap: 6 }}>
-                <label style={{ fontSize: 12, opacity: 0.8 }}>Observación / Gestión</label>
-                <textarea
-                  value={formObs}
-                  onChange={(e) => setFormObs(e.target.value)}
-                  rows={6}
-                  placeholder="Registra llamada, correo, acuerdos, próxima acción..."
-                  style={{
-                    padding: 10,
-                    borderRadius: 10,
-                    border: "1px solid #d1d5db",
-                    resize: "vertical",
-                  }}
-                />
-              </div>
-            </div>
-
-            <div
-              style={{
-                padding: 14,
-                borderTop: "1px solid #e5e7eb",
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: 10,
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                disabled={saving}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 10,
-                  border: "1px solid #d1d5db",
-                  background: "white",
-                  cursor: saving ? "not-allowed" : "pointer",
-                }}
-              >
-                Cancelar
-              </button>
-
-              <button
-                type="button"
-                onClick={saveGestion}
-                disabled={saving}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 10,
-                  border: "1px solid #111827",
-                  background: saving ? "#6b7280" : "#111827",
-                  color: "white",
-                  cursor: saving ? "not-allowed" : "pointer",
-                }}
-              >
-                {saving ? "Guardando…" : "Guardar cambios"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
