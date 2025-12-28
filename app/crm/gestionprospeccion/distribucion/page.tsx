@@ -171,6 +171,7 @@ function normalizeLeadRow(origen: string, r: Row): Row {
     etapa_nombre: etapa,
     monto_proyectado: String(toMontoNumber(montoRaw) || montoRaw || ""),
 
+    // fuente siempre “pendiente” desde las hojas
     estado: "PENDIENTE_ASIGNACION",
     asignado_a: "",
     asignado_por: "",
@@ -209,13 +210,6 @@ function moneyCLP(raw: string) {
   }
 }
 
-/** ✅ estado local “asignado” (optimista) */
-function isAssignedLocal(r: Row) {
-  const asignadoA = (r.asignado_a || "").trim();
-  const estado = normUpper(r.estado || "");
-  return !!asignadoA && estado !== "PENDIENTE_ASIGNACION";
-}
-
 /** =========================
  *  Page
  *  ========================= */
@@ -228,7 +222,10 @@ export default function CRMDistribucionPage() {
   const [err, setErr] = useState<string | null>(null);
 
   const [rows, setRows] = useState<Row[]>([]);
-  const [crmIndex, setCrmIndex] = useState<Record<string, string>>({}); // folio -> estado en CRM_DB
+
+  // ✅ CRM_DB: folio -> estado / asignado_a
+  const [crmIndex, setCrmIndex] = useState<Record<string, string>>({});
+  const [crmAsignadoA, setCrmAsignadoA] = useState<Record<string, string>>({});
 
   const [q, setQ] = useState("");
   const [assigningFolio, setAssigningFolio] = useState<string | null>(null);
@@ -268,19 +265,24 @@ export default function CRMDistribucionPage() {
       setLoading(true);
       setErr(null);
 
-      // 1) CRM_DB index (para ocultar asignados)
+      // 1) CRM_DB index (estado + asignado_a)
       const resDb = await fetch(CSV_CRM_DB_URL, { cache: "no-store" });
       if (!resDb.ok) throw new Error(`No se pudo leer CRM_DB (${resDb.status})`);
       const textDb = await resDb.text();
       const dbRows = parseCsv(textDb);
 
-      const idx: Record<string, string> = {};
+      const idxEstado: Record<string, string> = {};
+      const idxAsign: Record<string, string> = {};
+
       for (const r of dbRows) {
         const f = (r.folio || "").trim();
         if (!f) continue;
-        idx[f] = normUpper(r.estado || "");
+        idxEstado[f] = normUpper(r.estado || "");
+        idxAsign[f] = normalizeEmail(r.asignado_a || "");
       }
-      setCrmIndex(idx);
+
+      setCrmIndex(idxEstado);
+      setCrmAsignadoA(idxAsign);
 
       // 2) 4 hojas (leads)
       const results = await Promise.all(
@@ -304,6 +306,7 @@ export default function CRMDistribucionPage() {
       setErr(e?.message || "Error leyendo hojas/CRM_DB");
       setRows([]);
       setCrmIndex({});
+      setCrmAsignadoA({});
     } finally {
       setLoading(false);
     }
@@ -314,6 +317,8 @@ export default function CRMDistribucionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading]);
 
+  // ✅ ahora “pendientes” incluye también los que ya están ASIGNADO en CRM_DB,
+  // pero los vamos a mostrar BLOQUEADOS.
   const pendientes = useMemo(() => {
     const query = q.trim().toLowerCase();
 
@@ -321,16 +326,9 @@ export default function CRMDistribucionPage() {
       const folio = (r.folio || "").trim();
       if (!folio) return false;
 
-      // ✅ Si ya está en CRM_DB asignado o autorizado -> no mostrar acá
-      const dbEstado = normUpper(crmIndex[folio] || "");
-      if (dbEstado === "ASIGNADO" || dbEstado === "AUTORIZADO") return false;
-
-      // seguridad
+      // seguridad: la fuente siempre debe ser “pendiente” (desde hojas)
       const estado = normUpper(r.estado || "");
       if (estado !== "PENDIENTE_ASIGNACION") return false;
-
-      const asignadoA = normLower(r.asignado_a || "");
-      if (asignadoA) return false;
 
       const pref = normUpper(r.division || r.prefijo || "");
       if (allowedPrefijosSet.size > 0 && !allowedPrefijosSet.has(pref)) return false;
@@ -341,12 +339,19 @@ export default function CRMDistribucionPage() {
     if (!query) return base;
 
     return base.filter((r) => {
-      const haystack = [r.folio, r.nombre_razon_social, r.correo, r.origen_prospecto, r.division, r.observacion]
+      const haystack = [
+        r.folio,
+        r.nombre_razon_social,
+        r.correo,
+        r.origen_prospecto,
+        r.division,
+        r.observacion,
+      ]
         .join(" ")
         .toLowerCase();
       return haystack.includes(query);
     });
-  }, [rows, q, allowedPrefijosSet, crmIndex]);
+  }, [rows, q, allowedPrefijosSet]);
 
   async function asignar(folio: string, lead: Row) {
     const asignado_a = normalizeEmail(targetEmail[folio] || "");
@@ -379,22 +384,7 @@ export default function CRMDistribucionPage() {
         return;
       }
 
-      // ✅ optimistic UI: deja visible “Asignado” y bloqueado inmediatamente
-      setRows((prev) =>
-        prev.map((r) =>
-          (r.folio || "").trim() === folio
-            ? {
-                ...r,
-                estado: "ASIGNADO",
-                asignado_a,
-                asignado_por,
-                asignado_at: new Date().toISOString(),
-              }
-            : r
-        )
-      );
-
-      // ✅ refrescar, y como ya estará ASIGNADO en CRM_DB, desaparecerá del listado
+      // ✅ refrescar: quedará marcado como ASIGNADO en crmIndex/crmAsignadoA
       await reload();
     } finally {
       setAssigningFolio(null);
@@ -414,13 +404,28 @@ export default function CRMDistribucionPage() {
     return (
       <div style={{ padding: 16, maxWidth: 900 }}>
         <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>CRM · Prospección · Distribución</h2>
-        <div style={{ marginTop: 10, color: "crimson" }}>No tienes permisos para este módulo (solo jefaturas).</div>
+        <div style={{ marginTop: 10, color: "crimson" }}>
+          No tienes permisos para este módulo (solo jefaturas).
+        </div>
         <div style={{ marginTop: 8, opacity: 0.8 }}>
           Login detectado: <b>{loggedEmail || "—"}</b>
         </div>
       </div>
     );
   }
+
+  // ✅ ordenar: primero no asignados, luego asignados (bloqueados)
+  const pendientesOrdenados = useMemo(() => {
+    const arr = pendientes.slice();
+    arr.sort((a, b) => {
+      const fa = (a.folio || "").trim();
+      const fb = (b.folio || "").trim();
+      const aAssigned = !!(crmAsignadoA[fa] || "");
+      const bAssigned = !!(crmAsignadoA[fb] || "");
+      return Number(aAssigned) - Number(bAssigned);
+    });
+    return arr;
+  }, [pendientes, crmAsignadoA]);
 
   return (
     <div style={{ padding: 16, maxWidth: 1250 }}>
@@ -460,7 +465,7 @@ export default function CRMDistribucionPage() {
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar pendientes por folio / razón social / correo / mensaje…"
+          placeholder="Buscar por folio / razón social / correo / mensaje…"
           style={{
             flex: 1,
             minWidth: 280,
@@ -473,9 +478,7 @@ export default function CRMDistribucionPage() {
       </div>
 
       {err && (
-        <div style={{ marginTop: 10, color: "crimson", fontSize: 13 }}>
-          Error: {err}
-        </div>
+        <div style={{ marginTop: 10, color: "crimson", fontSize: 13 }}>Error: {err}</div>
       )}
 
       <div
@@ -501,29 +504,42 @@ export default function CRMDistribucionPage() {
               <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb" }} />
             </tr>
           </thead>
+
           <tbody>
-            {pendientes.map((r, i) => {
-              const folio = r.folio || "";
+            {pendientesOrdenados.map((r, i) => {
+              const folio = (r.folio || "").trim();
               const busy = assigningFolio === folio;
 
-              // ✅ si ya fue asignado (optimista), bloquea UI
-              const assignedNow = isAssignedLocal(r);
-              const assignedEmail = (r.asignado_a || "").trim();
+              const dbEstado = normUpper(crmIndex[folio] || "");
+              const dbAsignado = (crmAsignadoA[folio] || "").trim();
+              const yaAsignado = dbEstado === "ASIGNADO" || dbEstado === "AUTORIZADO" || !!dbAsignado;
 
               return (
-                <tr key={`${folio}_${i}`} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                <tr
+                  key={`${folio}_${i}`}
+                  style={{
+                    borderBottom: "1px solid #f3f4f6",
+                    opacity: yaAsignado ? 0.82 : 1,
+                  }}
+                >
                   <td style={{ padding: 12, verticalAlign: "top" }}>
                     <div style={{ fontWeight: 800 }}>{folio || "—"}</div>
-                    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>{r.created_at || "—"}</div>
+                    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
+                      {r.created_at || "—"}
+                    </div>
                   </td>
 
                   <td style={{ padding: 12, verticalAlign: "top" }}>
                     <div style={{ fontWeight: 800 }}>{r.nombre_razon_social || "—"}</div>
-                    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>{r.correo || "—"}</div>
+                    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
+                      {r.correo || "—"}
+                    </div>
                   </td>
 
                   <td style={{ padding: 12, verticalAlign: "top" }}>
-                    <span style={badgeStyle("rgba(59,130,246,0.12)")}>{r.origen_prospecto || "—"}</span>
+                    <span style={badgeStyle("rgba(59,130,246,0.12)")}>
+                      {r.origen_prospecto || "—"}
+                    </span>
                   </td>
 
                   <td style={{ padding: 12, verticalAlign: "top" }}>
@@ -556,24 +572,25 @@ export default function CRMDistribucionPage() {
                     <div style={{ fontWeight: 800 }}>{moneyCLP(r.monto_proyectado || "")}</div>
                   </td>
 
-                  {/* ✅ AQUÍ: “Asignar a” -> “Asignado” read-only */}
                   <td style={{ padding: 12, verticalAlign: "top" }}>
-                    {assignedNow ? (
+                    {yaAsignado ? (
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>Asignado</div>
+                        <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>
+                          Asignado
+                        </div>
                         <div
                           style={{
                             width: "100%",
                             minWidth: 240,
                             padding: "10px 12px",
                             borderRadius: 12,
-                            border: "1px solid #e5e7eb",
-                            background: "#f9fafb",
+                            border: "1px solid rgba(17,24,39,0.10)",
+                            background: "rgba(16,185,129,0.12)",
                             fontWeight: 800,
-                            color: "#111827",
                           }}
+                          title="Ya está asignado en CRM_DB"
                         >
-                          {assignedEmail || "—"}
+                          {dbAsignado || "—"}
                         </div>
                       </div>
                     ) : (
@@ -596,26 +613,26 @@ export default function CRMDistribucionPage() {
                     <button
                       type="button"
                       onClick={() => asignar(folio, r)}
-                      disabled={busy || assignedNow}
+                      disabled={busy || yaAsignado}
                       style={{
                         padding: "10px 14px",
                         borderRadius: 12,
                         border: "1px solid #111827",
-                        background: assignedNow ? "#f3f4f6" : busy ? "#6b7280" : "#111827",
-                        color: assignedNow ? "#6b7280" : "white",
+                        background: yaAsignado ? "#9ca3af" : busy ? "#6b7280" : "#111827",
+                        color: "white",
                         fontWeight: 800,
-                        cursor: busy || assignedNow ? "not-allowed" : "pointer",
+                        cursor: busy || yaAsignado ? "not-allowed" : "pointer",
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {assignedNow ? "Asignado" : busy ? "Asignando…" : "Asignar"}
+                      {yaAsignado ? "Asignado" : busy ? "Asignando…" : "Asignar"}
                     </button>
                   </td>
                 </tr>
               );
             })}
 
-            {!loading && pendientes.length === 0 && (
+            {!loading && pendientesOrdenados.length === 0 && (
               <tr>
                 <td colSpan={8} style={{ padding: 14, opacity: 0.7 }}>
                   No hay prospectos pendientes de asignación.
@@ -627,7 +644,7 @@ export default function CRMDistribucionPage() {
       </div>
 
       <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-        Pendientes: <b>{pendientes.length}</b>
+        Registros visibles: <b>{pendientesOrdenados.length}</b> (los ya asignados quedan bloqueados)
       </div>
 
       {/* Modal mensaje */}
@@ -681,7 +698,9 @@ export default function CRMDistribucionPage() {
                 Cerrar
               </button>
             </div>
-            <div style={{ padding: 14, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{openMsg.body}</div>
+            <div style={{ padding: 14, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
+              {openMsg.body}
+            </div>
           </div>
         </div>
       )}
