@@ -159,6 +159,11 @@ function normalizeEstadoToKey(estadoRaw: string) {
   return n || "ASIGNADO";
 }
 
+function countKey(raw: string) {
+  const s = String(raw || "").trim();
+  return s ? s : "—";
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
@@ -225,6 +230,10 @@ export async function GET(req: Request) {
     const countByEstado: Record<string, number> = {};
     const countByOrigen: Record<string, number> = {};
 
+    // ✅ NUEVO: tablas para reporteria
+    const countByFechaCierre: Record<string, number> = {};
+    const countByProbCierre: Record<string, number> = {};
+
     const byEjecutivo: Record<
       string,
       { ejecutivo: string; count: number; pipeline: number; forecast: number; ganados: number; noGanados: number }
@@ -236,12 +245,18 @@ export async function GET(req: Request) {
       const estadoKey = normalizeEstadoToKey(pick(r, "estado"));
       countByEstado[estadoKey] = (countByEstado[estadoKey] || 0) + 1;
 
-      const org = (pick(r, "origen_prospecto") || "—").trim().toUpperCase();
+      const org = countKey((pick(r, "origen_prospecto") || "").trim().toUpperCase());
       countByOrigen[org] = (countByOrigen[org] || 0) + 1;
 
+      // ✅ NUEVO: fecha/prob cierre por nombre (categorías)
+      const fechaCierreNombre = countKey(pick(r, "fecha_cierre_nombre"));
+      countByFechaCierre[fechaCierreNombre] = (countByFechaCierre[fechaCierreNombre] || 0) + 1;
+
+      const probCierreNombre = countKey(pick(r, "prob_cierre_nombre"));
+      countByProbCierre[probCierreNombre] = (countByProbCierre[probCierreNombre] || 0) + 1;
+
       const monto = toMontoNumber(pick(r, "monto_proyectado"));
-      const probNombre = pick(r, "prob_cierre_nombre");
-      const factor = parseProbFactor(probNombre, estadoKey);
+      const factor = parseProbFactor(probCierreNombre, estadoKey);
       const forecast = monto * factor;
 
       const isClosed = estadoKey === "CERRADO_GANADO" || estadoKey === "NO_GANADO";
@@ -291,6 +306,15 @@ export async function GET(req: Request) {
       }))
       .sort((a, b) => b.pipeline - a.pipeline);
 
+    // ✅ NUEVO: series para tablas (fecha cierre / prob cierre)
+    const fechaCierreSeries = Object.entries(countByFechaCierre)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+
+    const probCierreSeries = Object.entries(countByProbCierre)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+
     return NextResponse.json({
       ok: true,
       filters: { from, to, division, ejecutivo, origen, onlyAssigned, onlyClosed, includeAssigned },
@@ -307,6 +331,10 @@ export async function GET(req: Request) {
         estados: estadoSeries,
         origenes: origenSeries,
         ejecutivos: ejecutivoSeries,
+
+        // ✅ NUEVO
+        fechaCierre: fechaCierreSeries,
+        probCierre: probCierreSeries,
       },
     });
   } catch (e: unknown) {
