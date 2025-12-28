@@ -5,7 +5,7 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 /**
  * Spreadsheet de “Bases de datos” (4 hojas)
- * Formato CSV vía gviz:
+ * CSV vía gviz:
  * https://docs.google.com/spreadsheets/d/<ID>/gviz/tq?tqx=out:csv&gid=<GID>
  */
 const SHEET_ID = "1xHT48r3asID6PCrgXTCpjbwujdnu6E7aev29BHq7U9w";
@@ -31,20 +31,12 @@ const JEFATURAS = new Set(
   ].map((x) => x.trim().toLowerCase())
 );
 
-/**
- * Mapeo prefijo (Supabase) -> valores esperados en tus registros
- * Ajusta si en tus hojas la columna de división usa otros valores.
- */
-const PREFIX_TO_DIVISION: Record<string, string[]> = {
-  FB: ["FOOD"],
-  IN: ["INSTITUCIONAL"],
-  HC: ["HC"],
-  IND: ["IND", "INDUSTRIAL"],
-};
-
 type Row = Record<string, string>;
 type JefaturaScopeRow = { email: string; prefijo: string };
 
+/** =========================
+ *  CSV helpers
+ *  ========================= */
 function normalizeHeader(h: string) {
   return (h || "")
     .replace(/^\uFEFF/, "")
@@ -119,6 +111,71 @@ function normLower(s: string) {
   return (s || "").trim().toLowerCase();
 }
 
+function pick(r: Row, ...keys: string[]) {
+  for (const k of keys) {
+    const v = r[k];
+    if (v != null && String(v).trim() !== "") return String(v).trim();
+  }
+  return "";
+}
+
+function toMontoNumber(raw: string) {
+  const n = Number(String(raw || "").replace(/[^\d]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function makeFolio(origen: string, razon: string, mail: string, fecha: string) {
+  const base = `${origen}|${razon}|${mail}|${fecha}`.toLowerCase().replace(/\s+/g, "_");
+  const hash = base.length.toString(36) + "_" + base.slice(0, 40);
+  return `LEAD-${origen.replace(/\s+/g, "")}-${hash}`;
+}
+
+/**
+ * Normaliza fila desde tus hojas (WEB/INOFOOD/FOOD SERVICE/REFERIDO)
+ * Cabeceras esperadas (normalizadas):
+ * razon_social, contacto, mail, telefono, industria, mensaje, fecha_contacto, division, etapa, monto
+ */
+function normalizeLeadRow(origen: string, r: Row): Row {
+  const razon = pick(r, "razon_social", "razon", "empresa", "nombre_razon_social", "nombre_o_razon_social");
+  const contacto = pick(r, "contacto", "nombre_contacto");
+  const mail = pick(r, "mail", "correo", "email", "e_mail");
+  const telefono = pick(r, "telefono", "teléfono", "phone");
+  const industria = pick(r, "industria", "rubro");
+  const mensaje = pick(r, "mensaje", "observacion", "comentario");
+  const fechaContacto = pick(r, "fecha_contacto", "fecha", "created_at");
+  const division = pick(r, "division", "prefijo"); // 👈 en tus hojas viene "division" (IN/FB/etc)
+  const etapa = pick(r, "etapa", "etapa_nombre");
+  const montoRaw = pick(r, "monto", "monto_proyectado");
+
+  const folio = pick(r, "folio") || makeFolio(origen, razon, mail, fechaContacto);
+
+  return {
+    // claves “CRM-like” para la tabla
+    folio,
+    created_at: fechaContacto,
+    origen_prospecto: origen,
+
+    nombre_razon_social: razon,
+    correo: mail,
+    contacto,
+    telefono,
+
+    rubro: industria,
+    observacion: mensaje,
+
+    division, // IN / FB / HC / IND
+
+    etapa_nombre: etapa,
+    monto_proyectado: String(toMontoNumber(montoRaw) || montoRaw || ""),
+
+    // distribución: siempre pendiente
+    estado: "PENDIENTE_ASIGNACION",
+    asignado_a: "",
+    asignado_por: "",
+    asignado_at: "",
+  };
+}
+
 export default function CRMDistribucionPage() {
   const supabase = useMemo(() => createClientComponentClient(), []);
   const [authLoading, setAuthLoading] = useState(true);
@@ -127,14 +184,13 @@ export default function CRMDistribucionPage() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // filas combinadas de las 4 hojas
   const [rows, setRows] = useState<Row[]>([]);
 
   const [q, setQ] = useState("");
   const [assigningFolio, setAssigningFolio] = useState<string | null>(null);
   const [targetEmail, setTargetEmail] = useState<Record<string, string>>({});
 
-  // Prefijos/áreas permitidas para la jefatura (desde Supabase)
+  // Prefijos permitidos para esta jefatura (desde Supabase)
   const [allowedPrefijos, setAllowedPrefijos] = useState<string[]>([]);
   const [scopeErr, setScopeErr] = useState<string | null>(null);
 
@@ -159,7 +215,7 @@ export default function CRMDistribucionPage() {
     })();
   }, [supabase]);
 
-  /** 2) Scope desde Supabase (tu tabla de email+prefijo) */
+  /** 2) Scope desde Supabase (email + prefijo) */
   useEffect(() => {
     if (authLoading) return;
     if (!loggedEmail) return;
@@ -168,7 +224,6 @@ export default function CRMDistribucionPage() {
       try {
         setScopeErr(null);
 
-        // 👇 Cambia "crm_permisos_prefijo" si tu tabla se llama distinto
         const { data, error } = await supabase
           .from("gerencia_prefijos")
           .select("email,prefijo")
@@ -186,16 +241,12 @@ export default function CRMDistribucionPage() {
     })();
   }, [authLoading, loggedEmail, supabase]);
 
-  /** 3) Prefijos -> divisiones permitidas */
-  const allowedDivisions = useMemo(() => {
-    const divs = new Set<string>();
-    for (const p of allowedPrefijos) {
-      (PREFIX_TO_DIVISION[p] || []).forEach((d) => divs.add(normUpper(d)));
-    }
-    return divs;
+  /** 3) Set de prefijos permitidos */
+  const allowedPrefijosSet = useMemo(() => {
+    return new Set(allowedPrefijos.map((p) => normUpper(p)));
   }, [allowedPrefijos]);
 
-  /** 4) Cargar 4 hojas y combinar */
+  /** 4) Cargar 4 hojas y normalizar */
   async function reload() {
     try {
       setLoading(true);
@@ -205,23 +256,30 @@ export default function CRMDistribucionPage() {
         ORIGIN_SOURCES.map(async (src) => {
           const url = sheetCsvUrl(src.gid);
           const res = await fetch(url, { cache: "no-store" });
-          if (!res.ok) throw new Error(`No se pudo leer ${src.origen} (gid=${src.gid}) status=${res.status}`);
+
+          if (!res.ok) {
+            throw new Error(
+              `No se pudo leer ${src.origen} (gid=${src.gid}) status=${res.status}`
+            );
+          }
+
           const text = await res.text();
+
+          // Si Google devuelve HTML, la hoja NO está publicada como CSV
+          if (text.trim().startsWith("<")) {
+            throw new Error(
+              `La hoja ${src.origen} no está publicada para CSV (Google devolvió HTML). ` +
+                `En Google Sheets: Archivo → Publicar en la web.`
+            );
+          }
+
           const parsed = parseCsv(text);
 
-          // Inyectamos campos mínimos que el módulo espera
-          return parsed.map((r) => ({
-            ...r,
-            origen_prospecto: src.origen, // 👈 origen viene por hoja
-            // si no existe estado, lo tratamos como pendiente por defecto
-            estado: r.estado ? r.estado : "PENDIENTE_ASIGNACION",
-          }));
+          return parsed.map((r) => normalizeLeadRow(src.origen, r));
         })
       );
 
-      const merged = results.flat();
-
-      setRows(merged);
+      setRows(results.flat());
     } catch (e: any) {
       setErr(e?.message || "Error leyendo hojas");
       setRows([]);
@@ -235,27 +293,23 @@ export default function CRMDistribucionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading]);
 
-  /**
-   * 5) Pendientes filtrados por:
-   * - estado = PENDIENTE_ASIGNACION (o vacío -> lo seteamos arriba)
-   * - asignado_a vacío
-   * - división según scope de prefijos
-   * - búsqueda
-   */
+  /** 5) Pendientes filtrados */
   const pendientes = useMemo(() => {
     const query = q.trim().toLowerCase();
 
     const base = rows.filter((r) => {
+      // siempre pendiente (pero lo dejamos por seguridad)
       const estado = normUpper(r.estado || "");
       if (estado !== "PENDIENTE_ASIGNACION") return false;
 
+      // no asignados
       const asignadoA = normLower(r.asignado_a || "");
       if (asignadoA) return false;
 
-      // ✅ filtro por división/área (la columna debe existir en tus hojas)
-      // Si tu hoja usa "prefijo" en vez de "division", cambia acá.
-      const division = normUpper(r.division || r.prefijo || "");
-      if (allowedDivisions.size > 0 && !allowedDivisions.has(division)) return false;
+      // ✅ FILTRO POR PREFIJO/DIVISIÓN
+      // En tus hojas la columna se llama "division" y trae IN/FB/HC/IND
+      const pref = normUpper(r.division || r.prefijo || "");
+      if (allowedPrefijosSet.size > 0 && !allowedPrefijosSet.has(pref)) return false;
 
       return true;
     });
@@ -269,14 +323,14 @@ export default function CRMDistribucionPage() {
         r.correo,
         r.origen_prospecto,
         r.division,
-        r.prefijo,
+        r.etapa_nombre,
       ]
         .join(" ")
         .toLowerCase();
 
       return haystack.includes(query);
     });
-  }, [rows, q, allowedDivisions]);
+  }, [rows, q, allowedPrefijosSet]);
 
   async function asignar(folio: string) {
     const asignado_a = normalizeEmail(targetEmail[folio] || "");
@@ -422,7 +476,7 @@ export default function CRMDistribucionPage() {
                     {r.origen_prospecto || "—"}
                   </td>
                   <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                    {r.division || r.prefijo || "—"}
+                    {r.division || "—"}
                   </td>
                   <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
                     {r.etapa_nombre || "—"}
