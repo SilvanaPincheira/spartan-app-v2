@@ -34,9 +34,6 @@ const JEFATURAS = new Set(
 type Row = Record<string, string>;
 type JefaturaScopeRow = { email: string; prefijo: string };
 
-/** =========================
- *  CSV helpers
- *  ========================= */
 function normalizeHeader(h: string) {
   return (h || "")
     .replace(/^\uFEFF/, "")
@@ -120,38 +117,49 @@ function pick(r: Row, ...keys: string[]) {
 }
 
 function toMontoNumber(raw: string) {
-  const n = Number(String(raw || "").replace(/[^\d]/g, ""));
+  const s = String(raw || "");
+  // soporta $ 1.234.567, 1,234,567, etc.
+  const cleaned = s.replace(/[^\d]/g, "");
+  const n = Number(cleaned);
   return Number.isFinite(n) ? n : 0;
 }
 
-function makeFolio(origen: string, razon: string, mail: string, fecha: string) {
-  const base = `${origen}|${razon}|${mail}|${fecha}`.toLowerCase().replace(/\s+/g, "_");
-  const hash = base.length.toString(36) + "_" + base.slice(0, 40);
-  return `LEAD-${origen.replace(/\s+/g, "")}-${hash}`;
+/**
+ * LeadKey temporal SOLO para UI (no es folio real CRM_DB)
+ * Apps Script generará el folio correlativo real al insertar en CRM_DB.
+ */
+function makeLeadKey(origen: string, razon: string, mail: string, fecha: string) {
+  const base = `${origen}|${razon}|${mail}|${fecha}`
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .slice(0, 120);
+  // pseudo-id estable
+  return `LEAD-${origen.replace(/\s+/g, "")}-${base.length.toString(36)}-${base.slice(0, 36)}`;
 }
 
 /**
- * Normaliza fila desde tus hojas (WEB/INOFOOD/FOOD SERVICE/REFERIDO)
- * Cabeceras esperadas (normalizadas):
- * razon_social, contacto, mail, telefono, industria, mensaje, fecha_contacto, division, etapa, monto
+ * Normaliza fila desde hojas externas a “estructura CRM”
+ * Cabeceras actuales (WEB): Razon Social, contacto, Mail, Teléfono, Industria, Mensaje, Fecha Contacto, division, Gestion, Etapa, Monto
  */
 function normalizeLeadRow(origen: string, r: Row): Row {
-  const razon = pick(r, "razon_social", "razon", "empresa", "nombre_razon_social", "nombre_o_razon_social");
+  const razon = pick(r, "razon_social", "razon", "empresa", "nombre_razon_social");
   const contacto = pick(r, "contacto", "nombre_contacto");
-  const mail = pick(r, "mail", "correo", "email", "e_mail");
+  const mail = pick(r, "mail", "correo", "email");
   const telefono = pick(r, "telefono", "teléfono", "phone");
   const industria = pick(r, "industria", "rubro");
   const mensaje = pick(r, "mensaje", "observacion", "comentario");
   const fechaContacto = pick(r, "fecha_contacto", "fecha", "created_at");
-  const division = pick(r, "division", "prefijo"); // 👈 en tus hojas viene "division" (IN/FB/etc)
+  const division = pick(r, "division", "prefijo"); // IN/FB/etc
   const etapa = pick(r, "etapa", "etapa_nombre");
   const montoRaw = pick(r, "monto", "monto_proyectado");
 
-  const folio = pick(r, "folio") || makeFolio(origen, razon, mail, fechaContacto);
+  const lead_key = makeLeadKey(origen, razon, mail, fechaContacto);
 
   return {
-    // claves “CRM-like” para la tabla
-    folio,
+    // clave temporal UI
+    lead_key,
+
+    // datos que insertaremos en CRM_DB
     created_at: fechaContacto,
     origen_prospecto: origen,
 
@@ -163,12 +171,12 @@ function normalizeLeadRow(origen: string, r: Row): Row {
     rubro: industria,
     observacion: mensaje,
 
-    division, // IN / FB / HC / IND
+    division, // IN/FB/HC/IND (según tu scope)
 
     etapa_nombre: etapa,
-    monto_proyectado: String(toMontoNumber(montoRaw) || montoRaw || ""),
+    monto_proyectado: String(toMontoNumber(montoRaw) || ""),
 
-    // distribución: siempre pendiente
+    // distribución: se muestra como pendiente (solo UI)
     estado: "PENDIENTE_ASIGNACION",
     asignado_a: "",
     asignado_por: "",
@@ -187,12 +195,16 @@ export default function CRMDistribucionPage() {
   const [rows, setRows] = useState<Row[]>([]);
 
   const [q, setQ] = useState("");
-  const [assigningFolio, setAssigningFolio] = useState<string | null>(null);
+  const [assigningKey, setAssigningKey] = useState<string | null>(null);
   const [targetEmail, setTargetEmail] = useState<Record<string, string>>({});
 
   // Prefijos permitidos para esta jefatura (desde Supabase)
   const [allowedPrefijos, setAllowedPrefijos] = useState<string[]>([]);
   const [scopeErr, setScopeErr] = useState<string | null>(null);
+
+  // modal ver mensaje
+  const [msgOpen, setMsgOpen] = useState(false);
+  const [msgRow, setMsgRow] = useState<Row | null>(null);
 
   const isJefatura = useMemo(
     () => JEFATURAS.has(normalizeEmail(loggedEmail)),
@@ -241,12 +253,11 @@ export default function CRMDistribucionPage() {
     })();
   }, [authLoading, loggedEmail, supabase]);
 
-  /** 3) Set de prefijos permitidos */
   const allowedPrefijosSet = useMemo(() => {
     return new Set(allowedPrefijos.map((p) => normUpper(p)));
   }, [allowedPrefijos]);
 
-  /** 4) Cargar 4 hojas y normalizar */
+  /** 3) Cargar hojas */
   async function reload() {
     try {
       setLoading(true);
@@ -265,16 +276,14 @@ export default function CRMDistribucionPage() {
 
           const text = await res.text();
 
-          // Si Google devuelve HTML, la hoja NO está publicada como CSV
           if (text.trim().startsWith("<")) {
             throw new Error(
-              `La hoja ${src.origen} no está publicada para CSV (Google devolvió HTML). ` +
+              `La hoja ${src.origen} no está publicada como CSV (Google devolvió HTML). ` +
                 `En Google Sheets: Archivo → Publicar en la web.`
             );
           }
 
           const parsed = parseCsv(text);
-
           return parsed.map((r) => normalizeLeadRow(src.origen, r));
         })
       );
@@ -293,21 +302,14 @@ export default function CRMDistribucionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading]);
 
-  /** 5) Pendientes filtrados */
+  /** 4) Pendientes filtrados por prefijo */
   const pendientes = useMemo(() => {
     const query = q.trim().toLowerCase();
 
     const base = rows.filter((r) => {
-      // siempre pendiente (pero lo dejamos por seguridad)
       const estado = normUpper(r.estado || "");
       if (estado !== "PENDIENTE_ASIGNACION") return false;
 
-      // no asignados
-      const asignadoA = normLower(r.asignado_a || "");
-      if (asignadoA) return false;
-
-      // ✅ FILTRO POR PREFIJO/DIVISIÓN
-      // En tus hojas la columna se llama "division" y trae IN/FB/HC/IND
       const pref = normUpper(r.division || r.prefijo || "");
       if (allowedPrefijosSet.size > 0 && !allowedPrefijosSet.has(pref)) return false;
 
@@ -318,7 +320,7 @@ export default function CRMDistribucionPage() {
 
     return base.filter((r) => {
       const haystack = [
-        r.folio,
+        r.lead_key,
         r.nombre_razon_social,
         r.correo,
         r.origen_prospecto,
@@ -332,8 +334,10 @@ export default function CRMDistribucionPage() {
     });
   }, [rows, q, allowedPrefijosSet]);
 
-  async function asignar(folio: string) {
-    const asignado_a = normalizeEmail(targetEmail[folio] || "");
+  /** 5) ASIGNAR = CREAR EN CRM_DB + ASIGNAR */
+  async function asignar(lead: Row) {
+    const lead_key = String(lead.lead_key || "").trim();
+    const asignado_a = normalizeEmail(targetEmail[lead_key] || "");
     const asignado_por = normalizeEmail(loggedEmail);
 
     if (!asignado_a) {
@@ -342,12 +346,34 @@ export default function CRMDistribucionPage() {
     }
 
     try {
-      setAssigningFolio(folio);
+      setAssigningKey(lead_key);
+
+      const payload = {
+        lead_key,
+        origen: lead.origen_prospecto || "",
+
+        // datos del lead
+        nombre_razon_social: lead.nombre_razon_social || "",
+        correo: lead.correo || "",
+        telefono: lead.telefono || "",
+        contacto: lead.contacto || "",
+        rubro: lead.rubro || "",
+        monto_proyectado: lead.monto_proyectado || "",
+        etapa_nombre: lead.etapa_nombre || "",
+        observacion: lead.observacion || "",
+
+        // scope
+        division: lead.division || "",
+
+        // asignación
+        asignado_a,
+        asignado_por,
+      };
 
       const resp = await fetch("/api/crm/prospectos/asignar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ folio, asignado_a, asignado_por }),
+        body: JSON.stringify(payload),
       });
 
       const text = await resp.text();
@@ -359,14 +385,23 @@ export default function CRMDistribucionPage() {
       }
 
       if (!resp.ok || !data?.ok) {
-        alert(`❌ Error asignando:\nstatus=${resp.status}\n${JSON.stringify(data, null, 2)}`);
+        alert(
+          `❌ Error asignando (crear en CRM_DB):\nstatus=${resp.status}\n${JSON.stringify(
+            data,
+            null,
+            2
+          )}`
+        );
         return;
       }
 
-      alert("✅ Prospecto asignado.");
+      // Apps Script debería devolver folio real generado en CRM_DB
+      alert(`✅ Prospecto creado en CRM_DB y asignado.\nFolio: ${data?.folio || "—"}`);
+
+      // recargar lista leads origen (la jefatura sigue viendo leads externos)
       await reload();
     } finally {
-      setAssigningFolio(null);
+      setAssigningKey(null);
     }
   }
 
@@ -382,7 +417,9 @@ export default function CRMDistribucionPage() {
   if (!isJefatura) {
     return (
       <div style={{ padding: 16, maxWidth: 900 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 800 }}>CRM · Prospección · Distribución</h2>
+        <h2 style={{ fontSize: 22, fontWeight: 800 }}>
+          CRM · Prospección · Distribución
+        </h2>
         <div style={{ marginTop: 10, color: "crimson" }}>
           No tienes permisos para este módulo (solo jefaturas).
         </div>
@@ -416,7 +453,7 @@ export default function CRMDistribucionPage() {
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar pendientes (WEB/INOFOOD/FOOD SERVICE/REFERIDO) por folio / razón social / correo…"
+          placeholder="Buscar pendientes por lead_key / razón social / correo…"
           style={{
             flex: 1,
             minWidth: 260,
@@ -447,47 +484,76 @@ export default function CRMDistribucionPage() {
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ textAlign: "left", fontSize: 12, opacity: 0.8 }}>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Folio</th>
+              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>LeadKey</th>
               <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Razón Social</th>
               <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Origen</th>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>División/Prefijo</th>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Etapa</th>
+              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>División</th>
+              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Mensaje</th>
               <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Monto</th>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Asignar a (email/login)</th>
+              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Asignar a</th>
               <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}></th>
             </tr>
           </thead>
+
           <tbody>
             {pendientes.map((r, i) => {
-              const folio = r.folio || "";
-              const busy = assigningFolio === folio;
+              const leadKey = String(r.lead_key || "");
+              const busy = assigningKey === leadKey;
+              const hasMsg = String(r.observacion || "").trim().length > 0;
 
               return (
-                <tr key={`${folio}_${i}`}>
+                <tr key={`${leadKey}_${i}`}>
                   <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                    <b>{folio || "—"}</b>
+                    <b style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+                      {leadKey || "—"}
+                    </b>
                     <div style={{ fontSize: 12, opacity: 0.7 }}>{r.created_at || ""}</div>
                   </td>
+
                   <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
                     {r.nombre_razon_social || "—"}
                     <div style={{ fontSize: 12, opacity: 0.7 }}>{r.correo || ""}</div>
                   </td>
+
                   <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
                     {r.origen_prospecto || "—"}
                   </td>
+
                   <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
                     {r.division || "—"}
                   </td>
+
                   <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                    {r.etapa_nombre || "—"}
+                    {hasMsg ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMsgRow(r);
+                          setMsgOpen(true);
+                        }}
+                        style={{
+                          padding: "6px 10px",
+                          borderRadius: 10,
+                          border: "1px solid #d1d5db",
+                          background: "white",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Ver mensaje
+                      </button>
+                    ) : (
+                      <span style={{ opacity: 0.6 }}>—</span>
+                    )}
                   </td>
+
                   <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
                     {r.monto_proyectado || "—"}
                   </td>
+
                   <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
                     <input
-                      value={targetEmail[folio] || ""}
-                      onChange={(e) => setTargetEmail((p) => ({ ...p, [folio]: e.target.value }))}
+                      value={targetEmail[leadKey] || ""}
+                      onChange={(e) => setTargetEmail((p) => ({ ...p, [leadKey]: e.target.value }))}
                       placeholder="ej: pia.ramirez@spartan.cl"
                       style={{
                         width: "100%",
@@ -498,10 +564,11 @@ export default function CRMDistribucionPage() {
                       }}
                     />
                   </td>
+
                   <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
                     <button
                       type="button"
-                      onClick={() => asignar(folio)}
+                      onClick={() => asignar(r)}
                       disabled={busy}
                       style={{
                         padding: "10px 12px",
@@ -533,6 +600,63 @@ export default function CRMDistribucionPage() {
       <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
         Pendientes: <b>{pendientes.length}</b>
       </div>
+
+      {/* Modal Ver Mensaje */}
+      {msgOpen && (
+        <div
+          onClick={() => setMsgOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            zIndex: 50,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(720px, 100%)",
+              background: "white",
+              borderRadius: 14,
+              border: "1px solid #e5e7eb",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+              padding: 16,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 16 }}>
+                  {msgRow?.nombre_razon_social || "Mensaje"}
+                </div>
+                <div style={{ fontSize: 12, opacity: 0.7 }}>
+                  {msgRow?.correo || ""} · {msgRow?.origen_prospecto || ""} · {msgRow?.division || ""}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMsgOpen(false)}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #d1d5db",
+                  background: "white",
+                  cursor: "pointer",
+                }}
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div style={{ marginTop: 12, whiteSpace: "pre-wrap", lineHeight: 1.4 }}>
+              {String(msgRow?.observacion || "").trim() || "—"}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
