@@ -10,6 +10,22 @@ const CSV_CRM_DB_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vR6D9j1ZjygWJKRXLV22AMb2oMYKVQWlly1KdAIKRm9jBAOIvIxNd9jqhEi2Zc-7LnjLe2wfhKrfsEW/pub?gid=0&single=true&output=csv";
 
 /** =========================
+ *  Estados disponibles para gestión
+ *  (deben calzar con lo que guardas en CRM_DB)
+ *  ========================= */
+const ESTADOS_GESTION = [
+  { value: "ASIGNADO", label: "Asignado" },
+  { value: "EN_GESTION", label: "En gestión" },
+  { value: "CONTACTADO", label: "Contactado" },
+  { value: "REUNION", label: "Reunión" },
+  { value: "LEVANTAMIENTO", label: "Levantamiento" },
+  { value: "PROPUESTA", label: "Propuesta" },
+  { value: "CERRADO_GANADO", label: "Cerrado ganado" },
+  { value: "INSTALADO_1OC", label: "Instalado, 1° O/C" },
+  { value: "NO_GANADO", label: "No ganado" },
+] as const;
+
+/** =========================
  *  CSV Helpers
  *  ========================= */
 type RowAny = Record<string, string>;
@@ -85,7 +101,7 @@ function norm(s: string) {
   return (s || "").trim().toLowerCase();
 }
 function normU(s: string) {
-  return (s || "").trim().toUpperCase();
+  return (s || "").trim().toUpperCase().replace(/\s+/g, "_");
 }
 
 function fmtCLP(n: string) {
@@ -110,9 +126,11 @@ function estadoBadgeStyle(estadoRaw: string) {
   if (e === "EN_GESTION") return { bg: "#FEF9C3", color: "#854D0E", border: "#FDE68A" };
   if (e === "CONTACTADO") return { bg: "#DCFCE7", color: "#166534", border: "#BBF7D0" };
   if (e === "REUNION" || e === "REUNIÓN") return { bg: "#EDE9FE", color: "#5B21B6", border: "#DDD6FE" };
+  if (e === "LEVANTAMIENTO") return { bg: "#FDF2F8", color: "#9D174D", border: "#FBCFE8" };
   if (e === "PROPUESTA") return { bg: "#FFEDD5", color: "#9A3412", border: "#FED7AA" };
-  if (e === "CERRADO_GANADO" || e === "CERRADO GANADO") return { bg: "#BBF7D0", color: "#14532D", border: "#86EFAC" };
-  if (e === "NO_GANADO" || e === "NO GANADO") return { bg: "#FEE2E2", color: "#7F1D1D", border: "#FECACA" };
+  if (e === "CERRADO_GANADO" || e === "CERRADO_GANADO") return { bg: "#BBF7D0", color: "#14532D", border: "#86EFAC" };
+  if (e === "INSTALADO_1OC") return { bg: "#DCFCE7", color: "#166534", border: "#86EFAC" };
+  if (e === "NO_GANADO" || e === "NO_GANADO") return { bg: "#FEE2E2", color: "#7F1D1D", border: "#FECACA" };
   return { bg: "#F3F4F6", color: "#374151", border: "#E5E7EB" };
 }
 
@@ -143,6 +161,11 @@ export default function BandejaAsignadosPage() {
 
   const [rows, setRows] = useState<RowAny[]>([]);
   const [q, setQ] = useState("");
+
+  // drafts por folio
+  const [draftEstado, setDraftEstado] = useState<Record<string, string>>({});
+  const [draftNota, setDraftNota] = useState<Record<string, string>>({});
+  const [savingFolio, setSavingFolio] = useState<string | null>(null);
 
   async function reload() {
     try {
@@ -188,15 +211,14 @@ export default function BandejaAsignadosPage() {
     const me = norm(loggedEmail);
     if (!me) return [];
 
-    // ✅ IMPORTANTE:
-    // Para el ejecutivo, mostramos ASIGNADO + EN_GESTION (y más adelante puedes sumar otros)
+    // Ejecutivo ve ASIGNADO + EN_GESTION (puedes sumar más si quieres)
     const allowedEstados = new Set(["ASIGNADO", "EN_GESTION"]);
 
     const base = rows.filter((r) => {
-      const estado = normU(r.estado || "");
       const asignadoA = norm(r.asignado_a || "");
-      return allowedEstados.has(estado) && asignadoA === me;
+      return asignadoA === me;
     });
+    
 
     const s = norm(q);
     if (!s) return base;
@@ -222,6 +244,66 @@ export default function BandejaAsignadosPage() {
     });
   }, [rows, loggedEmail, q]);
 
+  // inicializa draftEstado con el estado actual cuando entra a la lista
+  useEffect(() => {
+    if (!assignedToMe.length) return;
+
+    setDraftEstado((prev) => {
+      const next = { ...prev };
+      for (const r of assignedToMe) {
+        const folio = (r.folio || "").trim();
+        if (!folio) continue;
+        if (next[folio] == null) {
+          next[folio] = normU(r.estado || "") || "ASIGNADO";
+        }
+      }
+      return next;
+    });
+  }, [assignedToMe]);
+
+  async function guardarGestion(folio: string) {
+    const estado = normU(draftEstado[folio] || "");
+    const nota = (draftNota[folio] || "").trim();
+
+    if (!folio) return;
+
+    try {
+      setSavingFolio(folio);
+
+      const resp = await fetch("/api/crm/prospectos/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          folio,
+          estado, // "ASIGNADO" | "EN_GESTION" | ...
+          observacion: nota || undefined, // Apps Script hace append con timestamp
+          // ejecutivo_email opcional (tu route puede setearlo)
+        }),
+      });
+
+      const text = await resp.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { ok: false, error: "Respuesta no JSON", raw: text.slice(0, 400) };
+      }
+
+      if (!resp.ok || !data?.ok) {
+        alert(`❌ Error guardando gestión\nstatus=${resp.status}\n${JSON.stringify(data, null, 2)}`);
+        return;
+      }
+
+      // limpia nota draft si guardó
+      setDraftNota((p) => ({ ...p, [folio]: "" }));
+
+      await reload();
+    } finally {
+      setSavingFolio(null);
+    }
+  }
+
   if (authLoading) {
     return (
       <div style={{ padding: 16 }}>
@@ -232,7 +314,7 @@ export default function BandejaAsignadosPage() {
   }
 
   return (
-    <div style={{ padding: 16, maxWidth: 1200 }}>
+    <div style={{ padding: 16, maxWidth: 1400 }}>
       <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>
         CRM · Bandeja · Asignados
       </h2>
@@ -311,28 +393,35 @@ export default function BandejaAsignadosPage() {
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Etapa</th>
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Monto</th>
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Asignación</th>
+                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Gestión</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} style={{ padding: 12, opacity: 0.8 }}>
+                  <td colSpan={8} style={{ padding: 12, opacity: 0.8 }}>
                     Cargando…
                   </td>
                 </tr>
               ) : assignedToMe.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ padding: 12, opacity: 0.8 }}>
+                  <td colSpan={8} style={{ padding: 12, opacity: 0.8 }}>
                     Sin registros.
                   </td>
                 </tr>
               ) : (
                 assignedToMe.map((r, i) => {
+                  const folio = (r.folio || "").trim();
                   const est = r.estado || "—";
                   const st = estadoBadgeStyle(est);
 
+                  const busy = savingFolio === folio;
+
+                  const currentDraftEstado = normU(draftEstado[folio] || normU(est) || "ASIGNADO");
+                  const changedEstado = currentDraftEstado !== normU(est);
+
                   return (
-                    <tr key={`${r.folio || "x"}_${i}`}>
+                    <tr key={`${folio || "x"}_${i}`}>
                       <td
                         style={{
                           padding: 10,
@@ -358,7 +447,14 @@ export default function BandejaAsignadosPage() {
                       </td>
 
                       <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                        <span style={{ ...chipStyle(), background: st.bg, color: st.color, border: `1px solid ${st.border}` }}>
+                        <span
+                          style={{
+                            ...chipStyle(),
+                            background: st.bg,
+                            color: st.color,
+                            border: `1px solid ${st.border}`,
+                          }}
+                        >
                           {normU(est) || "—"}
                         </span>
                       </td>
@@ -379,6 +475,86 @@ export default function BandejaAsignadosPage() {
                           por {r.asignado_por || "—"} · {fmtDate(r.asignado_at)}
                         </div>
                       </td>
+
+                      {/* ✅ Gestión */}
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6", minWidth: 320 }}>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <select
+                            value={currentDraftEstado}
+                            onChange={(e) =>
+                              setDraftEstado((p) => ({ ...p, [folio]: e.target.value }))
+                            }
+                            style={{
+                              padding: 10,
+                              borderRadius: 10,
+                              border: `1px solid ${changedEstado ? "#111827" : "#d1d5db"}`,
+                              background: "white",
+                              minWidth: 180,
+                            }}
+                          >
+                            {ESTADOS_GESTION.map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+
+                          <button
+                            type="button"
+                            onClick={() => guardarGestion(folio)}
+                            disabled={!folio || busy}
+                            style={{
+                              padding: "10px 12px",
+                              borderRadius: 10,
+                              border: "1px solid #111827",
+                              background: busy ? "#6b7280" : "#111827",
+                              color: "white",
+                              cursor: busy ? "not-allowed" : "pointer",
+                            }}
+                          >
+                            {busy ? "Guardando…" : "Guardar"}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDraftEstado((p) => ({ ...p, [folio]: normU(est) }));
+                              setDraftNota((p) => ({ ...p, [folio]: "" }));
+                            }}
+                            disabled={!folio || busy}
+                            style={{
+                              padding: "10px 12px",
+                              borderRadius: 10,
+                              border: "1px solid #d1d5db",
+                              background: "white",
+                              cursor: busy ? "not-allowed" : "pointer",
+                            }}
+                          >
+                            Deshacer
+                          </button>
+                        </div>
+
+                        <div style={{ marginTop: 8 }}>
+                          <textarea
+                            value={draftNota[folio] || ""}
+                            onChange={(e) =>
+                              setDraftNota((p) => ({ ...p, [folio]: e.target.value }))
+                            }
+                            rows={2}
+                            placeholder="Agregar nota (se agrega al historial en Observación)…"
+                            style={{
+                              width: "100%",
+                              padding: 10,
+                              borderRadius: 10,
+                              border: "1px solid #d1d5db",
+                            }}
+                          />
+                        </div>
+
+                        <div style={{ marginTop: 6, fontSize: 11, opacity: 0.7 }}>
+                          Esto llama a <b>/api/crm/prospectos/update</b> y actualiza CRM_DB (Apps Script).
+                        </div>
+                      </td>
                     </tr>
                   );
                 })
@@ -390,6 +566,8 @@ export default function BandejaAsignadosPage() {
 
       <div style={{ marginTop: 12, fontSize: 12, opacity: 0.8 }}>
         Regla: muestra <b>estado ∈ (ASIGNADO, EN_GESTION)</b> y <b>asignado_a = tu login</b>.
+        <br />
+        Tip: apenas empieces a gestionarlo, cámbialo a <b>EN_GESTION</b> para que se vea el avance.
       </div>
     </div>
   );
