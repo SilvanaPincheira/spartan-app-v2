@@ -16,6 +16,10 @@ function sheetCsvUrl(gid: string) {
   return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${gid}`;
 }
 
+/** ✅ CRM_DB (Sheet “prospectos” publicado como CSV) */
+const CSV_CRM_DB_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vR6D9j1ZjygWJKRXLV22AMb2oMYKVQWlly1KdAIKRm9jBAOIvIxNd9jqhEi2Zc-7LnjLe2wfhKrfsEW/pub?gid=0&single=true&output=csv";
+
 /** Jefaturas que asignan */
 const JEFATURAS = new Set(
   [
@@ -127,7 +131,7 @@ function toMontoNumber(raw: string) {
 }
 
 function makeFolio(origen: string, razon: string, mail: string, fecha: string) {
-  // folio determinístico “bonito” (no muestra leadKey crudo)
+  // folio determinístico “corto y bonito”
   const base = `${origen}|${razon}|${mail}|${fecha}`.toLowerCase();
   let hash = 0;
   for (let i = 0; i < base.length; i++) hash = (hash * 31 + base.charCodeAt(i)) >>> 0;
@@ -174,6 +178,36 @@ function normalizeLeadRow(origen: string, r: Row): Row {
   };
 }
 
+/** =========================
+ *  UI helpers
+ *  ========================= */
+function badgeStyle(bg: string) {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "4px 10px",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 700,
+    background: bg,
+    border: "1px solid rgba(17,24,39,0.08)",
+    whiteSpace: "nowrap" as const,
+  };
+}
+
+function moneyCLP(raw: string) {
+  const n = toMontoNumber(raw);
+  if (!n) return "—";
+  try {
+    return n.toLocaleString("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
+  } catch {
+    return String(n);
+  }
+}
+
+/** =========================
+ *  Page
+ *  ========================= */
 export default function CRMDistribucionPage() {
   const supabase = useMemo(() => createClientComponentClient(), []);
   const [authLoading, setAuthLoading] = useState(true);
@@ -183,15 +217,16 @@ export default function CRMDistribucionPage() {
   const [err, setErr] = useState<string | null>(null);
 
   const [rows, setRows] = useState<Row[]>([]);
+  const [crmIndex, setCrmIndex] = useState<Record<string, string>>({}); // folio -> estado en CRM_DB
 
   const [q, setQ] = useState("");
   const [assigningFolio, setAssigningFolio] = useState<string | null>(null);
   const [targetEmail, setTargetEmail] = useState<Record<string, string>>({});
 
-  const isJefatura = useMemo(
-    () => JEFATURAS.has(normalizeEmail(loggedEmail)),
-    [loggedEmail]
-  );
+  // modal mensaje
+  const [openMsg, setOpenMsg] = useState<{ title: string; body: string } | null>(null);
+
+  const isJefatura = useMemo(() => JEFATURAS.has(normalizeEmail(loggedEmail)), [loggedEmail]);
 
   /** ✅ scope fijo por email */
   const allowedPrefijos = useMemo(() => {
@@ -222,6 +257,21 @@ export default function CRMDistribucionPage() {
       setLoading(true);
       setErr(null);
 
+      // 1) CRM_DB index (para ocultar asignados)
+      const resDb = await fetch(CSV_CRM_DB_URL, { cache: "no-store" });
+      if (!resDb.ok) throw new Error(`No se pudo leer CRM_DB (${resDb.status})`);
+      const textDb = await resDb.text();
+      const dbRows = parseCsv(textDb);
+
+      const idx: Record<string, string> = {};
+      for (const r of dbRows) {
+        const f = (r.folio || "").trim();
+        if (!f) continue;
+        idx[f] = normUpper(r.estado || "");
+      }
+      setCrmIndex(idx);
+
+      // 2) 4 hojas (leads)
       const results = await Promise.all(
         ORIGIN_SOURCES.map(async (src) => {
           const url = sheetCsvUrl(src.gid);
@@ -240,8 +290,9 @@ export default function CRMDistribucionPage() {
 
       setRows(results.flat());
     } catch (e: any) {
-      setErr(e?.message || "Error leyendo hojas");
+      setErr(e?.message || "Error leyendo hojas/CRM_DB");
       setRows([]);
+      setCrmIndex({});
     } finally {
       setLoading(false);
     }
@@ -256,6 +307,14 @@ export default function CRMDistribucionPage() {
     const query = q.trim().toLowerCase();
 
     const base = rows.filter((r) => {
+      const folio = (r.folio || "").trim();
+      if (!folio) return false;
+
+      // ✅ Si ya está en CRM_DB asignado o autorizado -> no mostrar acá
+      const dbEstado = normUpper(crmIndex[folio] || "");
+      if (dbEstado === "ASIGNADO" || dbEstado === "AUTORIZADO") return false;
+
+      // seguridad
       const estado = normUpper(r.estado || "");
       if (estado !== "PENDIENTE_ASIGNACION") return false;
 
@@ -263,7 +322,6 @@ export default function CRMDistribucionPage() {
       if (asignadoA) return false;
 
       const pref = normUpper(r.division || r.prefijo || "");
-      // ✅ si hay scope definido, filtra; si no, deja pasar todo (jefatura sin scope)
       if (allowedPrefijosSet.size > 0 && !allowedPrefijosSet.has(pref)) return false;
 
       return true;
@@ -272,12 +330,12 @@ export default function CRMDistribucionPage() {
     if (!query) return base;
 
     return base.filter((r) => {
-      const haystack = [r.folio, r.nombre_razon_social, r.correo, r.origen_prospecto, r.division]
+      const haystack = [r.folio, r.nombre_razon_social, r.correo, r.origen_prospecto, r.division, r.observacion]
         .join(" ")
         .toLowerCase();
       return haystack.includes(query);
     });
-  }, [rows, q, allowedPrefijosSet]);
+  }, [rows, q, allowedPrefijosSet, crmIndex]);
 
   async function asignar(folio: string, lead: Row) {
     const asignado_a = normalizeEmail(targetEmail[folio] || "");
@@ -310,7 +368,7 @@ export default function CRMDistribucionPage() {
         return;
       }
 
-      alert("✅ Prospecto asignado.");
+      // ✅ refrescar, y como ya estará ASIGNADO en CRM_DB, desaparecerá del listado
       await reload();
     } finally {
       setAssigningFolio(null);
@@ -320,7 +378,7 @@ export default function CRMDistribucionPage() {
   if (authLoading) {
     return (
       <div style={{ padding: 16 }}>
-        <h2 style={{ fontSize: 20, fontWeight: 700 }}>CRM · Distribución</h2>
+        <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>CRM · Distribución</h2>
         <div style={{ marginTop: 10, opacity: 0.75 }}>Cargando usuario…</div>
       </div>
     );
@@ -329,7 +387,7 @@ export default function CRMDistribucionPage() {
   if (!isJefatura) {
     return (
       <div style={{ padding: 16, maxWidth: 900 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 800 }}>CRM · Prospección · Distribución</h2>
+        <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>CRM · Prospección · Distribución</h2>
         <div style={{ marginTop: 10, color: "crimson" }}>No tienes permisos para este módulo (solo jefaturas).</div>
         <div style={{ marginTop: 8, opacity: 0.8 }}>
           Login detectado: <b>{loggedEmail || "—"}</b>
@@ -339,64 +397,82 @@ export default function CRMDistribucionPage() {
   }
 
   return (
-    <div style={{ padding: 16, maxWidth: 1200 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-        <h2 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>
-          CRM · Prospección · Distribución de carga (Jefaturas)
-        </h2>
-        <div style={{ opacity: 0.75 }}>
-          Jefatura: <b>{loggedEmail || "—"}</b>
+    <div style={{ padding: 16, maxWidth: 1250 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>
+            CRM · Prospección · Distribución de carga (Jefaturas)
+          </h2>
+          <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
+            Jefatura: <b>{loggedEmail || "—"}</b>
+            {" · "}
+            Fuentes: <b>WEB · INOFOOD · FOOD SERVICE · REFERIDO</b>
+            {" · "}
+            Scope: <b>{allowedPrefijos.length ? allowedPrefijos.join(", ") : "TODOS"}</b>
+          </div>
         </div>
-      </div>
 
-      <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
-        Fuentes: <b>WEB · INOFOOD · FOOD SERVICE · REFERIDO</b>
-        {" · "}
-        Scope prefijos: <b>{allowedPrefijos.length ? allowedPrefijos.join(", ") : "TODOS"}</b>
-      </div>
-
-      <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar pendientes por folio / razón social / correo…"
-          style={{
-            flex: 1,
-            minWidth: 260,
-            padding: 10,
-            borderRadius: 10,
-            border: "1px solid #d1d5db",
-          }}
-        />
         <button
           type="button"
           onClick={reload}
           disabled={loading}
           style={{
-            padding: "10px 12px",
-            borderRadius: 10,
-            border: "1px solid #d1d5db",
+            padding: "10px 14px",
+            borderRadius: 12,
+            border: "1px solid #e5e7eb",
             background: "white",
+            fontWeight: 700,
             cursor: loading ? "not-allowed" : "pointer",
+            boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
           }}
         >
           {loading ? "Actualizando…" : "Actualizar"}
         </button>
       </div>
 
-      {err && <div style={{ marginTop: 10, color: "crimson" }}>Error: {err}</div>}
+      <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Buscar pendientes por folio / razón social / correo / mensaje…"
+          style={{
+            flex: 1,
+            minWidth: 280,
+            padding: 12,
+            borderRadius: 12,
+            border: "1px solid #e5e7eb",
+            boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+          }}
+        />
+      </div>
 
-      <div style={{ marginTop: 12, border: "1px solid #e5e7eb", borderRadius: 12, overflowX: "auto" }}>
+      {err && (
+        <div style={{ marginTop: 10, color: "crimson", fontSize: 13 }}>
+          Error: {err}
+        </div>
+      )}
+
+      <div
+        style={{
+          marginTop: 12,
+          border: "1px solid #e5e7eb",
+          borderRadius: 14,
+          overflow: "hidden",
+          boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+          background: "white",
+        }}
+      >
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
-            <tr style={{ textAlign: "left", fontSize: 12, opacity: 0.8 }}>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Folio</th>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Razón Social</th>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Origen</th>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>División</th>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Monto</th>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Asignar a</th>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}></th>
+            <tr style={{ textAlign: "left", fontSize: 12, opacity: 0.85, background: "#fafafa" }}>
+              <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb" }}>Folio</th>
+              <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb" }}>Razón Social</th>
+              <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb" }}>Origen</th>
+              <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb" }}>División</th>
+              <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb" }}>Mensaje</th>
+              <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb" }}>Monto</th>
+              <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb" }}>Asignar a</th>
+              <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb" }} />
             </tr>
           </thead>
           <tbody>
@@ -405,19 +481,56 @@ export default function CRMDistribucionPage() {
               const busy = assigningFolio === folio;
 
               return (
-                <tr key={`${folio}_${i}`}>
-                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                    <b>{folio || "—"}</b>
-                    <div style={{ fontSize: 12, opacity: 0.7 }}>{r.created_at || ""}</div>
+                <tr key={`${folio}_${i}`} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                  <td style={{ padding: 12, verticalAlign: "top" }}>
+                    <div style={{ fontWeight: 800 }}>{folio || "—"}</div>
+                    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
+                      {r.created_at || "—"}
+                    </div>
                   </td>
-                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                    {r.nombre_razon_social || "—"}
-                    <div style={{ fontSize: 12, opacity: 0.7 }}>{r.correo || ""}</div>
+
+                  <td style={{ padding: 12, verticalAlign: "top" }}>
+                    <div style={{ fontWeight: 800 }}>{r.nombre_razon_social || "—"}</div>
+                    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
+                      {r.correo || "—"}
+                    </div>
                   </td>
-                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>{r.origen_prospecto || "—"}</td>
-                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>{r.division || "—"}</td>
-                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>{r.monto_proyectado || "—"}</td>
-                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+
+                  <td style={{ padding: 12, verticalAlign: "top" }}>
+                    <span style={badgeStyle("rgba(59,130,246,0.12)")}>{r.origen_prospecto || "—"}</span>
+                  </td>
+
+                  <td style={{ padding: 12, verticalAlign: "top" }}>
+                    <span style={badgeStyle("rgba(16,185,129,0.12)")}>{r.division || "—"}</span>
+                  </td>
+
+                  <td style={{ padding: 12, verticalAlign: "top" }}>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOpenMsg({
+                          title: `${r.nombre_razon_social || "Prospecto"} · ${r.origen_prospecto || ""}`,
+                          body: r.observacion || "— (sin mensaje)",
+                        })
+                      }
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 10,
+                        border: "1px solid #e5e7eb",
+                        background: "white",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Ver mensaje
+                    </button>
+                  </td>
+
+                  <td style={{ padding: 12, verticalAlign: "top" }}>
+                    <div style={{ fontWeight: 800 }}>{moneyCLP(r.monto_proyectado || "")}</div>
+                  </td>
+
+                  <td style={{ padding: 12, verticalAlign: "top" }}>
                     <input
                       value={targetEmail[folio] || ""}
                       onChange={(e) => setTargetEmail((p) => ({ ...p, [folio]: e.target.value }))}
@@ -426,23 +539,26 @@ export default function CRMDistribucionPage() {
                         width: "100%",
                         minWidth: 240,
                         padding: 10,
-                        borderRadius: 10,
-                        border: "1px solid #d1d5db",
+                        borderRadius: 12,
+                        border: "1px solid #e5e7eb",
                       }}
                     />
                   </td>
-                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+
+                  <td style={{ padding: 12, verticalAlign: "top" }}>
                     <button
                       type="button"
                       onClick={() => asignar(folio, r)}
                       disabled={busy}
                       style={{
-                        padding: "10px 12px",
-                        borderRadius: 10,
+                        padding: "10px 14px",
+                        borderRadius: 12,
                         border: "1px solid #111827",
                         background: busy ? "#6b7280" : "#111827",
                         color: "white",
+                        fontWeight: 800,
                         cursor: busy ? "not-allowed" : "pointer",
+                        whiteSpace: "nowrap",
                       }}
                     >
                       {busy ? "Asignando…" : "Asignar"}
@@ -454,7 +570,7 @@ export default function CRMDistribucionPage() {
 
             {!loading && pendientes.length === 0 && (
               <tr>
-                <td colSpan={7} style={{ padding: 12, opacity: 0.7 }}>
+                <td colSpan={8} style={{ padding: 14, opacity: 0.7 }}>
                   No hay prospectos pendientes de asignación.
                 </td>
               </tr>
@@ -466,6 +582,56 @@ export default function CRMDistribucionPage() {
       <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
         Pendientes: <b>{pendientes.length}</b>
       </div>
+
+      {/* Modal mensaje */}
+      {openMsg && (
+        <div
+          onClick={() => setOpenMsg(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            zIndex: 50,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(780px, 100%)",
+              background: "white",
+              borderRadius: 16,
+              border: "1px solid #e5e7eb",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.18)",
+              overflow: "hidden",
+            }}
+          >
+            <div style={{ padding: 14, borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", gap: 12 }}>
+              <div style={{ fontWeight: 900 }}>{openMsg.title}</div>
+              <button
+                type="button"
+                onClick={() => setOpenMsg(null)}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #e5e7eb",
+                  background: "white",
+                  cursor: "pointer",
+                  fontWeight: 800,
+                }}
+              >
+                Cerrar
+              </button>
+            </div>
+            <div style={{ padding: 14, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
+              {openMsg.body}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
