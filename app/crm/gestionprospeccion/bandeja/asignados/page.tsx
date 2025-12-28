@@ -84,6 +84,9 @@ function parseCsv(text: string): RowAny[] {
 function norm(s: string) {
   return (s || "").trim().toLowerCase();
 }
+function normU(s: string) {
+  return (s || "").trim().toUpperCase();
+}
 
 function fmtCLP(n: string) {
   const x = Number(String(n || "").replace(/[^\d]/g, ""));
@@ -99,6 +102,31 @@ function fmtDate(s?: string) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
     d.getHours()
   )}:${pad(d.getMinutes())}`;
+}
+
+function estadoBadgeStyle(estadoRaw: string) {
+  const e = normU(estadoRaw);
+  if (e === "ASIGNADO") return { bg: "#E0F2FE", color: "#0369A1", border: "#BAE6FD" };
+  if (e === "EN_GESTION") return { bg: "#FEF9C3", color: "#854D0E", border: "#FDE68A" };
+  if (e === "CONTACTADO") return { bg: "#DCFCE7", color: "#166534", border: "#BBF7D0" };
+  if (e === "REUNION" || e === "REUNIÓN") return { bg: "#EDE9FE", color: "#5B21B6", border: "#DDD6FE" };
+  if (e === "PROPUESTA") return { bg: "#FFEDD5", color: "#9A3412", border: "#FED7AA" };
+  if (e === "CERRADO_GANADO" || e === "CERRADO GANADO") return { bg: "#BBF7D0", color: "#14532D", border: "#86EFAC" };
+  if (e === "NO_GANADO" || e === "NO GANADO") return { bg: "#FEE2E2", color: "#7F1D1D", border: "#FECACA" };
+  return { bg: "#F3F4F6", color: "#374151", border: "#E5E7EB" };
+}
+
+function chipStyle() {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "4px 10px",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 700 as const,
+    border: "1px solid #e5e7eb",
+    whiteSpace: "nowrap" as const,
+  };
 }
 
 /** =========================
@@ -133,6 +161,7 @@ export default function BandejaAsignadosPage() {
     }
   }
 
+  /** 1) Auth */
   useEffect(() => {
     (async () => {
       try {
@@ -148,20 +177,25 @@ export default function BandejaAsignadosPage() {
     })();
   }, [supabase]);
 
+  /** 2) Cargar datos SOLO cuando ya sepamos quién está logueado */
   useEffect(() => {
+    if (authLoading) return;
     reload();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading]);
 
   const assignedToMe = useMemo(() => {
     const me = norm(loggedEmail);
-
-    // Si por alguna razón no hay login, mostramos vacío (evita filtrar mal)
     if (!me) return [];
 
+    // ✅ IMPORTANTE:
+    // Para el ejecutivo, mostramos ASIGNADO + EN_GESTION (y más adelante puedes sumar otros)
+    const allowedEstados = new Set(["ASIGNADO", "EN_GESTION"]);
+
     const base = rows.filter((r) => {
-      const estado = norm(r.estado || "");
+      const estado = normU(r.estado || "");
       const asignadoA = norm(r.asignado_a || "");
-      return estado === "asignado" && asignadoA === me;
+      return allowedEstados.has(estado) && asignadoA === me;
     });
 
     const s = norm(q);
@@ -199,7 +233,7 @@ export default function BandejaAsignadosPage() {
 
   return (
     <div style={{ padding: 16, maxWidth: 1200 }}>
-      <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>
+      <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>
         CRM · Bandeja · Asignados
       </h2>
       <div style={{ opacity: 0.8, marginBottom: 12 }}>
@@ -221,7 +255,7 @@ export default function BandejaAsignadosPage() {
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar por folio / razón social / correo / rubro..."
+          placeholder="Buscar por folio / razón social / correo / rubro / mensaje..."
           style={{
             flex: 1,
             minWidth: 320,
@@ -273,6 +307,7 @@ export default function BandejaAsignadosPage() {
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Folio</th>
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Razón social</th>
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>División</th>
+                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Estado</th>
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Etapa</th>
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Monto</th>
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Asignación</th>
@@ -281,54 +316,72 @@ export default function BandejaAsignadosPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: 12, opacity: 0.8 }}>
+                  <td colSpan={7} style={{ padding: 12, opacity: 0.8 }}>
                     Cargando…
                   </td>
                 </tr>
               ) : assignedToMe.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: 12, opacity: 0.8 }}>
+                  <td colSpan={7} style={{ padding: 12, opacity: 0.8 }}>
                     Sin registros.
                   </td>
                 </tr>
               ) : (
-                assignedToMe.map((r, idx) => (
-                  <tr key={`${r.folio || idx}_${idx}`}>
-                    <td
-                      style={{
-                        padding: 10,
-                        borderBottom: "1px solid #f3f4f6",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      <b>{r.folio || "—"}</b>
-                      <div style={{ fontSize: 11, opacity: 0.7 }}>{fmtDate(r.created_at)}</div>
-                    </td>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                      {r.nombre_razon_social || "—"}
-                      <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
-                        {r.correo || "—"} · {r.telefono || "—"}
-                      </div>
-                    </td>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                      {r.division || "—"}
-                    </td>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                      {r.etapa_nombre || "—"}
-                    </td>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                      {fmtCLP(r.monto_proyectado || "")}
-                    </td>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                      <div style={{ fontSize: 12 }}>
-                        <b>{r.asignado_a || "—"}</b>
-                      </div>
-                      <div style={{ fontSize: 11, opacity: 0.7 }}>
-                        por {r.asignado_por || "—"} · {fmtDate(r.asignado_at)}
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                assignedToMe.map((r, i) => {
+                  const est = r.estado || "—";
+                  const st = estadoBadgeStyle(est);
+
+                  return (
+                    <tr key={`${r.folio || "x"}_${i}`}>
+                      <td
+                        style={{
+                          padding: 10,
+                          borderBottom: "1px solid #f3f4f6",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        <b>{r.folio || "—"}</b>
+                        <div style={{ fontSize: 11, opacity: 0.7 }}>{fmtDate(r.created_at)}</div>
+                      </td>
+
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                        {r.nombre_razon_social || "—"}
+                        <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
+                          {r.correo || "—"} · {r.telefono || "—"}
+                        </div>
+                      </td>
+
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                        <span style={{ ...chipStyle(), background: "#F3F4F6" }}>
+                          {r.division || "—"}
+                        </span>
+                      </td>
+
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                        <span style={{ ...chipStyle(), background: st.bg, color: st.color, border: `1px solid ${st.border}` }}>
+                          {normU(est) || "—"}
+                        </span>
+                      </td>
+
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                        {r.etapa_nombre || "—"}
+                      </td>
+
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                        {fmtCLP(r.monto_proyectado || "")}
+                      </td>
+
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                        <div style={{ fontSize: 12 }}>
+                          <b>{r.asignado_a || "—"}</b>
+                        </div>
+                        <div style={{ fontSize: 11, opacity: 0.7 }}>
+                          por {r.asignado_por || "—"} · {fmtDate(r.asignado_at)}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -336,7 +389,7 @@ export default function BandejaAsignadosPage() {
       </div>
 
       <div style={{ marginTop: 12, fontSize: 12, opacity: 0.8 }}>
-        Regla: muestra <b>estado=ASIGNADO</b> y <b>asignado_a = tu login</b>.
+        Regla: muestra <b>estado ∈ (ASIGNADO, EN_GESTION)</b> y <b>asignado_a = tu login</b>.
       </div>
     </div>
   );

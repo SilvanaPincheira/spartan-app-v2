@@ -20,22 +20,26 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-
-    // ✅ folio desde root o desde lead
     const lead = body?.lead || {};
-    const folio = pick(body, "folio") || pick(lead, "folio");
 
+    const folio = pick(body, "folio") || pick(lead, "folio");
     const asignado_a = pick(body, "asignado_a").toLowerCase();
     const asignado_por = pick(body, "asignado_por").toLowerCase();
 
-    if (!folio) return NextResponse.json({ ok: false, error: "Folio requerido" }, { status: 400 });
-    if (!asignado_a) return NextResponse.json({ ok: false, error: "asignado_a requerido" }, { status: 400 });
-    if (!asignado_por) return NextResponse.json({ ok: false, error: "asignado_por requerido" }, { status: 400 });
+    if (!folio)
+      return NextResponse.json({ ok: false, error: "Folio requerido" }, { status: 400 });
+    if (!asignado_a)
+      return NextResponse.json({ ok: false, error: "asignado_a requerido" }, { status: 400 });
+    if (!asignado_por)
+      return NextResponse.json({ ok: false, error: "asignado_por requerido" }, { status: 400 });
+
+    const nowIso = new Date().toISOString();
 
     // 1) CREATE (si existe -> duplicated true)
+    // Nota: puedes dejar PENDIENTE_ASIGNACION; yo lo dejo ASIGNADO para consistencia
     const createPayload = {
       action: "CREATE",
-      created_at: pick(lead, "created_at") || new Date().toISOString(),
+      created_at: pick(lead, "created_at") || nowIso,
       folio,
 
       fuente: pick(lead, "fuente") || "BD",
@@ -45,7 +49,7 @@ export async function POST(req: Request) {
       rut: pick(lead, "rut"),
       telefono: pick(lead, "telefono"),
       correo: pick(lead, "correo"),
-      direccion: pick(lead, "direccion"), // puede ir vacío
+      direccion: pick(lead, "direccion"),
       rubro: pick(lead, "rubro"),
       monto_proyectado: pick(lead, "monto_proyectado"),
 
@@ -65,10 +69,11 @@ export async function POST(req: Request) {
 
       ejecutivo_email: pick(lead, "ejecutivo_email"),
 
-      estado: "PENDIENTE_ASIGNACION",
-      asignado_a: "",
-      asignado_por: "",
-      asignado_at: "",
+      // 👇 consistente con asignación
+      estado: "ASIGNADO",
+      asignado_a,
+      asignado_por,
+      asignado_at: nowIso,
     };
 
     const respCreate = await fetch(APPS_SCRIPT_URL, {
@@ -83,17 +88,23 @@ export async function POST(req: Request) {
     try {
       dataCreate = JSON.parse(textCreate);
     } catch {
-      dataCreate = { ok: false, error: "Respuesta no JSON (CREATE)", raw: textCreate.slice(0, 300) };
+      dataCreate = { ok: false, error: "Respuesta no JSON (CREATE)", raw: textCreate.slice(0, 500) };
     }
 
     if (!respCreate.ok || dataCreate?.ok === false) {
       return NextResponse.json(
-        { ok: false, step: "CREATE", error: dataCreate?.error || `Sheets error (CREATE ${respCreate.status})`, raw: dataCreate?.raw },
+        {
+          ok: false,
+          step: "CREATE",
+          error: dataCreate?.error || `Sheets error (CREATE ${respCreate.status})`,
+          raw: dataCreate?.raw,
+          debug: dataCreate?.debug_idx || dataCreate?.debug_cols || null,
+        },
         { status: 500 }
       );
     }
 
-    // 2) ASIGNAR (ESTO debe cambiar estado)
+    // 2) ASIGNAR (debe forzar update en la fila existente por folio)
     const respAssign = await fetch(APPS_SCRIPT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -111,12 +122,18 @@ export async function POST(req: Request) {
     try {
       dataAssign = JSON.parse(textAssign);
     } catch {
-      dataAssign = { ok: false, error: "Respuesta no JSON (ASIGNAR)", raw: textAssign.slice(0, 300) };
+      dataAssign = { ok: false, error: "Respuesta no JSON (ASIGNAR)", raw: textAssign.slice(0, 500) };
     }
 
     if (!respAssign.ok || !dataAssign?.ok) {
       return NextResponse.json(
-        { ok: false, step: "ASIGNAR", error: dataAssign?.error || `Sheets error (ASIGNAR ${respAssign.status})`, raw: dataAssign?.raw },
+        {
+          ok: false,
+          step: "ASIGNAR",
+          error: dataAssign?.error || `Sheets error (ASIGNAR ${respAssign.status})`,
+          raw: dataAssign?.raw,
+          debug: dataAssign?.debug_idx || dataAssign?.debug_cols || null,
+        },
         { status: 500 }
       );
     }
@@ -127,4 +144,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }
-

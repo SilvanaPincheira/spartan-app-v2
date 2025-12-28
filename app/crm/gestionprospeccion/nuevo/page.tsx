@@ -18,13 +18,15 @@ const PIA_OWNER_COL_NORM = "email_col";
  *  LISTAS FIJAS
  *  ========================= */
 const CRM_ETAPAS = [
-  { id: 1, label: "Contactado" },
-  { id: 2, label: "Reunión" },
-  { id: 3, label: "Levantamiento" },
-  { id: 4, label: "Propuesta" },
-  { id: 5, label: "Cerrado ganado" },
-  { id: 6, label: "Instalado, 1° o/c" },
-  { id: 7, label: "No ganado" },
+  { id: 0, label: "Asignado"},
+  { id: 1, label: "En gestión"},
+  { id: 2, label: "Contactado" },
+  { id: 3, label: "Reunión" },
+  { id: 4, label: "Levantamiento" },
+  { id: 5, label: "Propuesta" },
+  { id: 6, label: "Cerrado ganado" },
+  { id: 7, label: "Instalado, 1° o/c" },
+  { id: 8, label: "No ganado" },
 ] as const;
 
 const CRM_FECHA_CIERRE = [
