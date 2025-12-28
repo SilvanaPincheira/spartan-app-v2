@@ -26,41 +26,6 @@ const ESTADOS_GESTION = [
 ] as const;
 
 /** =========================
- *  Etapas (para reportería)
- *  ========================= */
-const CRM_ETAPAS = [
-  { id: 0, label: "Asignado" },
-  { id: 1, label: "En gestión" },
-  { id: 2, label: "Contactado" },
-  { id: 3, label: "Reunión" },
-  { id: 4, label: "Levantamiento" },
-  { id: 5, label: "Propuesta" },
-  { id: 6, label: "Cerrado ganado" },
-  { id: 7, label: "Instalado, 1° O/C" },
-  { id: 8, label: "No ganado" },
-] as const;
-
-const ESTADO_TO_ETAPA_ID: Record<string, number> = {
-  ASIGNADO: 0,
-  EN_GESTION: 1,
-  CONTACTADO: 2,
-  REUNION: 3,
-  LEVANTAMIENTO: 4,
-  PROPUESTA: 5,
-  CERRADO_GANADO: 6,
-  INSTALADO_1OC: 7,
-  NO_GANADO: 8,
-};
-
-function getEtapaFromEstado(estadoRaw: string) {
-  const estado = normU(estadoRaw);
-  const etapaId = ESTADO_TO_ETAPA_ID[estado];
-  if (etapaId == null) return { etapa_id: "", etapa_nombre: "" };
-  const etapaNombre = CRM_ETAPAS.find((e) => e.id === etapaId)?.label ?? "";
-  return { etapa_id: String(etapaId), etapa_nombre: etapaNombre };
-}
-
-/** =========================
  *  CSV Helpers
  *  ========================= */
 type RowAny = Record<string, string>;
@@ -169,20 +134,6 @@ function estadoBadgeStyle(estadoRaw: string) {
   return { bg: "#F3F4F6", color: "#374151", border: "#E5E7EB" };
 }
 
-function etapaBadgeStyle(etapaIdRaw: string) {
-  const id = Number(etapaIdRaw);
-  if (id === 0) return { bg: "#E0F2FE", color: "#0369A1", border: "#BAE6FD" };
-  if (id === 1) return { bg: "#FEF9C3", color: "#854D0E", border: "#FDE68A" };
-  if (id === 2) return { bg: "#DCFCE7", color: "#166534", border: "#BBF7D0" };
-  if (id === 3) return { bg: "#EDE9FE", color: "#5B21B6", border: "#DDD6FE" };
-  if (id === 4) return { bg: "#FDF2F8", color: "#9D174D", border: "#FBCFE8" };
-  if (id === 5) return { bg: "#FFEDD5", color: "#9A3412", border: "#FED7AA" };
-  if (id === 6) return { bg: "#BBF7D0", color: "#14532D", border: "#86EFAC" };
-  if (id === 7) return { bg: "#DCFCE7", color: "#166534", border: "#86EFAC" };
-  if (id === 8) return { bg: "#FEE2E2", color: "#7F1D1D", border: "#FECACA" };
-  return { bg: "#F3F4F6", color: "#374151", border: "#E5E7EB" };
-}
-
 function chipStyle() {
   return {
     display: "inline-flex",
@@ -190,8 +141,30 @@ function chipStyle() {
     padding: "4px 10px",
     borderRadius: 999,
     fontSize: 12,
-    fontWeight: 700 as const,
+    fontWeight: 800 as const,
     border: "1px solid #e5e7eb",
+    whiteSpace: "nowrap" as const,
+  };
+}
+
+function btn(kind: "primary" | "ghost" = "ghost", disabled?: boolean) {
+  if (kind === "primary") {
+    return {
+      padding: "9px 12px",
+      borderRadius: 10,
+      border: "1px solid #111827",
+      background: disabled ? "#6b7280" : "#111827",
+      color: "white",
+      cursor: disabled ? "not-allowed" : "pointer",
+      whiteSpace: "nowrap" as const,
+    };
+  }
+  return {
+    padding: "9px 12px",
+    borderRadius: 10,
+    border: "1px solid #d1d5db",
+    background: "white",
+    cursor: disabled ? "not-allowed" : "pointer",
     whiteSpace: "nowrap" as const,
   };
 }
@@ -217,10 +190,16 @@ export default function BandejaAsignadosPage() {
   const [draftNota, setDraftNota] = useState<Record<string, string>>({});
   const [savingFolio, setSavingFolio] = useState<string | null>(null);
 
-  // ✅ scroll/highlight
+  // modal gestión
+  const [open, setOpen] = useState(false);
+  const [selectedFolio, setSelectedFolio] = useState<string>("");
+  const [selectedPreview, setSelectedPreview] = useState<{ name: string; email: string } | null>(
+    null
+  );
+
+  // scroll/highlight
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
   const [highlightFolio, setHighlightFolio] = useState<string | null>(null);
-
   const folioParam = (searchParams.get("folio") || "").trim();
 
   async function reload() {
@@ -240,7 +219,7 @@ export default function BandejaAsignadosPage() {
     }
   }
 
-  /** 1) Auth */
+  /** Auth */
   useEffect(() => {
     (async () => {
       try {
@@ -256,7 +235,7 @@ export default function BandejaAsignadosPage() {
     })();
   }, [supabase]);
 
-  /** 2) Cargar datos SOLO cuando ya sepamos quién está logueado */
+  /** Load */
   useEffect(() => {
     if (authLoading) return;
     reload();
@@ -267,10 +246,9 @@ export default function BandejaAsignadosPage() {
     const me = norm(loggedEmail);
     if (!me) return [];
 
-    // ✅ CLAVE: mostrar TODO lo asignado a mí (no filtrar por estado)
+    // ✅ ejecutivo ve TODO lo asignado a él (independiente del estado),
+    // excepto PENDIENTE_ASIGNACION si lo usas como pre-asignación
     let base = rows.filter((r) => norm(r.asignado_a || "") === me);
-
-    // opcional: si quieres excluir pendientes de asignación
     base = base.filter((r) => normU(r.estado || "") !== "PENDIENTE_ASIGNACION");
 
     const s = norm(q);
@@ -278,8 +256,6 @@ export default function BandejaAsignadosPage() {
 
     return base.filter((r) => {
       const blob =
-        norm(r.folio || "") +
-        " " +
         norm(r.nombre_razon_social || "") +
         " " +
         norm(r.correo || "") +
@@ -290,14 +266,16 @@ export default function BandejaAsignadosPage() {
         " " +
         norm(r.rubro || "") +
         " " +
-        norm(r.etapa_nombre || "") +
+        norm(r.observacion || "") +
         " " +
-        norm(r.observacion || "");
+        norm(r.origen_prospecto || "") +
+        " " +
+        norm(r.estado || "");
       return blob.includes(s);
     });
   }, [rows, loggedEmail, q]);
 
-  // inicializa draftEstado con el estado actual cuando entra a la lista
+  // init draftEstado
   useEffect(() => {
     if (!assignedToMe.length) return;
 
@@ -306,15 +284,13 @@ export default function BandejaAsignadosPage() {
       for (const r of assignedToMe) {
         const folio = (r.folio || "").trim();
         if (!folio) continue;
-        if (next[folio] == null) {
-          next[folio] = normU(r.estado || "") || "ASIGNADO";
-        }
+        if (next[folio] == null) next[folio] = normU(r.estado || "") || "ASIGNADO";
       }
       return next;
     });
   }, [assignedToMe]);
 
-  // ✅ Scroll + highlight cuando viene ?folio=
+  // scroll/highlight si viene ?folio=
   useEffect(() => {
     if (!folioParam) return;
     if (loading) return;
@@ -334,12 +310,16 @@ export default function BandejaAsignadosPage() {
     return () => window.clearTimeout(t);
   }, [folioParam, loading, assignedToMe.length]);
 
+  function openGestion(folio: string, name: string, email: string) {
+    setSelectedFolio(folio);
+    setSelectedPreview({ name, email });
+    setOpen(true);
+  }
+
   async function guardarGestion(folio: string) {
     const estado = normU(draftEstado[folio] || "");
     const nota = (draftNota[folio] || "").trim();
     if (!folio) return;
-
-    const { etapa_id, etapa_nombre } = getEtapaFromEstado(estado);
 
     try {
       setSavingFolio(folio);
@@ -351,8 +331,6 @@ export default function BandejaAsignadosPage() {
         body: JSON.stringify({
           folio,
           estado,
-          etapa_id: etapa_id || undefined,
-          etapa_nombre: etapa_nombre || undefined,
           observacion: nota || undefined,
         }),
       });
@@ -372,7 +350,12 @@ export default function BandejaAsignadosPage() {
         return;
       }
 
+      // limpio nota y cierro modal si estaba abierto
       setDraftNota((p) => ({ ...p, [folio]: "" }));
+      setOpen(false);
+      setSelectedFolio("");
+      setSelectedPreview(null);
+
       await reload();
     } finally {
       setSavingFolio(null);
@@ -382,7 +365,7 @@ export default function BandejaAsignadosPage() {
   if (authLoading) {
     return (
       <div style={{ padding: 16 }}>
-        <h2 style={{ fontSize: 20, fontWeight: 700 }}>CRM · Bandeja · Asignados</h2>
+        <h2 style={{ fontSize: 20, fontWeight: 800 }}>CRM · Asignados</h2>
         <div style={{ marginTop: 10, opacity: 0.75 }}>Cargando usuario…</div>
       </div>
     );
@@ -390,9 +373,7 @@ export default function BandejaAsignadosPage() {
 
   return (
     <div style={{ padding: 16, maxWidth: 1400 }}>
-      <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>
-        CRM · Bandeja · Asignados
-      </h2>
+      <h2 style={{ fontSize: 22, fontWeight: 900, marginBottom: 6 }}>CRM · Asignados</h2>
       <div style={{ opacity: 0.8, marginBottom: 12 }}>
         Usuario: <b>{loggedEmail || "—"}</b>
       </div>
@@ -412,7 +393,7 @@ export default function BandejaAsignadosPage() {
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar por folio / razón social / correo / rubro / mensaje..."
+          placeholder="Buscar por razón social / correo / rubro / mensaje..."
           style={{
             flex: 1,
             minWidth: 320,
@@ -422,18 +403,7 @@ export default function BandejaAsignadosPage() {
           }}
         />
 
-        <button
-          type="button"
-          onClick={reload}
-          disabled={loading}
-          style={{
-            padding: "10px 12px",
-            borderRadius: 10,
-            border: "1px solid #d1d5db",
-            background: "white",
-            cursor: loading ? "not-allowed" : "pointer",
-          }}
-        >
+        <button type="button" onClick={reload} disabled={loading} style={btn("ghost", loading)}>
           {loading ? "Actualizando..." : "Actualizar"}
         </button>
 
@@ -461,50 +431,43 @@ export default function BandejaAsignadosPage() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ textAlign: "left", fontSize: 12, opacity: 0.85 }}>
-                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Folio</th>
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Razón social</th>
+                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Contacto</th>
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>División</th>
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Estado</th>
-                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Etapa</th>
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Monto</th>
                 <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Asignación</th>
-                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Gestión</th>
+                <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }} />
               </tr>
             </thead>
 
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} style={{ padding: 12, opacity: 0.8 }}>
+                  <td colSpan={7} style={{ padding: 12, opacity: 0.8 }}>
                     Cargando…
                   </td>
                 </tr>
               ) : assignedToMe.length === 0 ? (
                 <tr>
-                  <td colSpan={8} style={{ padding: 12, opacity: 0.8 }}>
+                  <td colSpan={7} style={{ padding: 12, opacity: 0.8 }}>
                     Sin registros.
                   </td>
                 </tr>
               ) : (
                 assignedToMe.map((r, i) => {
                   const folio = (r.folio || "").trim();
-                  const est = r.estado || "—";
-                  const st = estadoBadgeStyle(est);
                   const busy = savingFolio === folio;
 
+                  const rs = r.nombre_razon_social || "—";
+                  const correo = r.correo || "—";
+                  const tel = r.telefono || "—";
+
                   const currentDraftEstado = normU(
-                    draftEstado[folio] || normU(est) || "ASIGNADO"
+                    draftEstado[folio] || normU(r.estado || "") || "ASIGNADO"
                   );
-                  const changedEstado = currentDraftEstado !== normU(est);
 
-                  // Mostrar etapa con color (si no viene etapa_id, la inferimos desde estado)
-                  const etapaId = (r.etapa_id || "").trim();
-                  const etapaNombre = (r.etapa_nombre || "").trim();
-
-                  const inferred = getEtapaFromEstado(currentDraftEstado);
-                  const etapaIdToShow = etapaId || inferred.etapa_id || "";
-                  const etapaNombreToShow = etapaNombre || inferred.etapa_nombre || "—";
-                  const etapaSt = etapaBadgeStyle(etapaIdToShow);
+                  const st = estadoBadgeStyle(currentDraftEstado);
 
                   const isHighlighted = !!folio && highlightFolio === folio;
 
@@ -519,24 +482,16 @@ export default function BandejaAsignadosPage() {
                         transition: "background 250ms ease",
                       }}
                     >
-                      <td
-                        style={{
-                          padding: 10,
-                          borderBottom: "1px solid #f3f4f6",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        <b>{r.folio || "—"}</b>
-                        <div style={{ fontSize: 11, opacity: 0.7 }}>
-                          {fmtDate(r.created_at)}
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                        <div style={{ fontWeight: 900 }}>{rs}</div>
+                        <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>
+                          {r.rubro || "—"} · {r.origen_prospecto || "—"}
                         </div>
                       </td>
 
                       <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                        {r.nombre_razon_social || "—"}
-                        <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
-                          {r.correo || "—"} · {r.telefono || "—"}
-                        </div>
+                        <div style={{ fontSize: 13 }}>{correo}</div>
+                        <div style={{ fontSize: 12, opacity: 0.7 }}>{tel}</div>
                       </td>
 
                       <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
@@ -545,62 +500,23 @@ export default function BandejaAsignadosPage() {
                         </span>
                       </td>
 
-                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                        <span
-                          style={{
-                            ...chipStyle(),
-                            background: st.bg,
-                            color: st.color,
-                            border: `1px solid ${st.border}`,
-                          }}
-                        >
-                          {normU(est) || "—"}
-                        </span>
-                      </td>
-
-                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                        <span
-                          style={{
-                            ...chipStyle(),
-                            background: etapaSt.bg,
-                            color: etapaSt.color,
-                            border: `1px solid ${etapaSt.border}`,
-                          }}
-                          title={etapaIdToShow ? `etapa_id=${etapaIdToShow}` : ""}
-                        >
-                          {etapaNombreToShow}
-                        </span>
-                      </td>
-
-                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                        {fmtCLP(r.monto_proyectado || "")}
-                      </td>
-
-                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                        <div style={{ fontSize: 12 }}>
-                          <b>{r.asignado_a || "—"}</b>
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6", minWidth: 330 }}>
+                        {/* Badge estado */}
+                        <div style={{ marginBottom: 8 }}>
+                          <span
+                            style={{
+                              ...chipStyle(),
+                              background: st.bg,
+                              color: st.color,
+                              border: `1px solid ${st.border}`,
+                            }}
+                          >
+                            {currentDraftEstado || "—"}
+                          </span>
                         </div>
-                        <div style={{ fontSize: 11, opacity: 0.7 }}>
-                          por {r.asignado_por || "—"} · {fmtDate(r.asignado_at)}
-                        </div>
-                      </td>
 
-                      {/* ✅ Gestión */}
-                      <td
-                        style={{
-                          padding: 10,
-                          borderBottom: "1px solid #f3f4f6",
-                          minWidth: 320,
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: 8,
-                            alignItems: "center",
-                            flexWrap: "wrap",
-                          }}
-                        >
+                        {/* Selector + acciones compactas */}
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                           <select
                             value={currentDraftEstado}
                             onChange={(e) =>
@@ -609,9 +525,9 @@ export default function BandejaAsignadosPage() {
                             style={{
                               padding: 10,
                               borderRadius: 10,
-                              border: `1px solid ${changedEstado ? "#111827" : "#d1d5db"}`,
+                              border: "1px solid #d1d5db",
                               background: "white",
-                              minWidth: 180,
+                              minWidth: 190,
                             }}
                           >
                             {ESTADOS_GESTION.map((o) => (
@@ -625,14 +541,7 @@ export default function BandejaAsignadosPage() {
                             type="button"
                             onClick={() => guardarGestion(folio)}
                             disabled={!folio || busy}
-                            style={{
-                              padding: "10px 12px",
-                              borderRadius: 10,
-                              border: "1px solid #111827",
-                              background: busy ? "#6b7280" : "#111827",
-                              color: "white",
-                              cursor: busy ? "not-allowed" : "pointer",
-                            }}
+                            style={btn("primary", !folio || busy)}
                           >
                             {busy ? "Guardando…" : "Guardar"}
                           </button>
@@ -640,42 +549,43 @@ export default function BandejaAsignadosPage() {
                           <button
                             type="button"
                             onClick={() => {
-                              setDraftEstado((p) => ({ ...p, [folio]: normU(est) }));
+                              setDraftEstado((p) => ({ ...p, [folio]: normU(r.estado || "") }));
                               setDraftNota((p) => ({ ...p, [folio]: "" }));
                             }}
                             disabled={!folio || busy}
-                            style={{
-                              padding: "10px 12px",
-                              borderRadius: 10,
-                              border: "1px solid #d1d5db",
-                              background: "white",
-                              cursor: busy ? "not-allowed" : "pointer",
-                            }}
+                            style={btn("ghost", !folio || busy)}
                           >
                             Deshacer
                           </button>
                         </div>
+                      </td>
 
-                        <div style={{ marginTop: 8 }}>
-                          <textarea
-                            value={draftNota[folio] || ""}
-                            onChange={(e) =>
-                              setDraftNota((p) => ({ ...p, [folio]: e.target.value }))
-                            }
-                            rows={2}
-                            placeholder="Agregar nota (se agrega al historial en Observación)…"
-                            style={{
-                              width: "100%",
-                              padding: 10,
-                              borderRadius: 10,
-                              border: "1px solid #d1d5db",
-                            }}
-                          />
-                        </div>
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                        {fmtCLP(r.monto_proyectado || "")}
+                      </td>
 
-                        <div style={{ marginTop: 6, fontSize: 11, opacity: 0.7 }}>
-                          Guarda: <b>estado + etapa_id + etapa_nombre</b> y append de Observación.
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                        <div style={{ fontSize: 12 }}>
+                          <b>{r.asignado_a || "—"}</b>
                         </div>
+                        {/* ✅ trazabilidad: fecha asignación importante */}
+                        <div style={{ fontSize: 11, opacity: 0.75, marginTop: 2 }}>
+                          Asignado: <b>{fmtDate(r.asignado_at)}</b>
+                        </div>
+                        <div style={{ fontSize: 11, opacity: 0.65 }}>
+                          por {r.asignado_por || "—"}
+                        </div>
+                      </td>
+
+                      <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                        <button
+                          type="button"
+                          onClick={() => openGestion(folio, rs, correo)}
+                          disabled={!folio}
+                          style={btn("ghost", !folio)}
+                        >
+                          Ver / Agregar gestión
+                        </button>
                       </td>
                     </tr>
                   );
@@ -686,11 +596,94 @@ export default function BandejaAsignadosPage() {
         </div>
       </div>
 
-      <div style={{ marginTop: 12, fontSize: 12, opacity: 0.8 }}>
-        Regla: muestra <b>todo lo asignado_a = tu login</b> (no se esconde por cambiar estado).
-        <br />
-        Etapa se autocompleta según Estado para reportería.
-      </div>
+      {/* =========================
+          MODAL OBSERVACIÓN
+         ========================= */}
+      {open && selectedFolio && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            zIndex: 50,
+          }}
+          onClick={() => (savingFolio ? null : setOpen(false))}
+        >
+          <div
+            style={{
+              width: "min(760px, 100%)",
+              background: "white",
+              borderRadius: 14,
+              border: "1px solid #e5e7eb",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
+              overflow: "hidden",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>
+              <div style={{ fontSize: 16, fontWeight: 900 }}>Gestión / Observaciones</div>
+              <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
+                {selectedPreview ? (
+                  <>
+                    <b>{selectedPreview.name}</b> · {selectedPreview.email}
+                  </>
+                ) : (
+                  "—"
+                )}
+              </div>
+            </div>
+
+            <div style={{ padding: 14, display: "grid", gap: 10 }}>
+              <div style={{ fontSize: 12, opacity: 0.75 }}>
+                Se agregará al historial (append) con timestamp al guardar.
+              </div>
+
+              <textarea
+                value={draftNota[selectedFolio] || ""}
+                onChange={(e) =>
+                  setDraftNota((p) => ({ ...p, [selectedFolio]: e.target.value }))
+                }
+                rows={8}
+                placeholder="Registra llamada, correo, acuerdos, próxima acción..."
+                style={{
+                  width: "100%",
+                  padding: 12,
+                  borderRadius: 12,
+                  border: "1px solid #d1d5db",
+                  resize: "vertical",
+                }}
+              />
+            </div>
+
+            <div
+              style={{
+                padding: 14,
+                borderTop: "1px solid #e5e7eb",
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 10,
+              }}
+            >
+              <button type="button" onClick={() => setOpen(false)} style={btn("ghost", false)}>
+                Cerrar
+              </button>
+
+              <button
+                type="button"
+                onClick={() => guardarGestion(selectedFolio)}
+                disabled={!selectedFolio || savingFolio === selectedFolio}
+                style={btn("primary", !selectedFolio || savingFolio === selectedFolio)}
+              >
+                {savingFolio === selectedFolio ? "Guardando…" : "Guardar gestión"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
