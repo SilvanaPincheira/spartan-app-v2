@@ -930,12 +930,12 @@ export default function ProspeccionPage() {
             onChange={(v) => setForm((p) => ({ ...p, origenProspecto: v }))}
             error={errors.origenProspecto}
             options={[
-              { value: "RRSS", label: "RRSS" },
-              { value: "Ferias", label: "Ferias" },
+              { value: "WEB", label: "Web" },
+              { value: "FOOD SERVICE", label: "Food Service" },
               { value: "Referido", label: "Referido" },
-              { value: "Web", label: "Web" },
+              { value: "INOFOOD", label: "Inofood" },
               { value: "Manual", label: "Manual" },
-              { value: "Otro", label: "Otro" },
+              { value: "CONTACTO DIRECTO", label: "Contacto Directo" },
             ]}
           />
         </div>
