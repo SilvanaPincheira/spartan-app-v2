@@ -66,6 +66,7 @@ type ProspectoForm = {
 
   nombreRazonSocial: string;
   rut: string;
+  contacto: string;
   telefono: string;
   correo: string;
   direccion: string;
@@ -206,6 +207,7 @@ function makeManualSourceId(nombre: string, correo: string) {
 function mapPiaRowToForm(row: PiaRow): Partial<ProspectoForm> {
   return {
     nombreRazonSocial: row.nombre_o_razon_social || "",
+    contacto: row.contacto || "",
     correo: row.e_mail || "",
     telefono: row.telefono || "",
     direccion: row.direccion || "",
@@ -219,6 +221,9 @@ function validateForm(f: ProspectoForm) {
 
   if (!f.division?.trim()) errors.division = "Campo requerido";
   if (!f.nombreRazonSocial.trim()) errors.nombreRazonSocial = "Campo requerido";
+
+  // ✅ Contacto obligatorio (como lo dejaste con *)
+  if (!f.contacto.trim()) errors.contacto = "Campo requerido";
 
   const email = normalizeEmail(f.correo);
   if (!email) errors.correo = "Campo requerido";
@@ -284,6 +289,7 @@ export default function ProspeccionPage() {
 
     nombreRazonSocial: "",
     rut: "",
+    contacto: "",
     telefono: "",
     correo: "",
     direccion: "",
@@ -451,7 +457,7 @@ export default function ProspeccionPage() {
       fuenteDatos: "CSV_PIA",
       sourceId: sid,
       sourcePayload: JSON.stringify(row),
-      origenProspecto: "RRSS", // 👈 consistencia
+      origenProspecto: "RRSS", // consistencia
     }));
   }
 
@@ -487,7 +493,7 @@ export default function ProspeccionPage() {
     return null;
   }, [crmRows, form.correo, form.nombreRazonSocial, form.rut]);
 
-  /** 9) Payload (✅ regla RRSS/Web -> Pendiente; resto -> autoasignado) */
+  /** 9) Payload (RRSS/Web -> Pendiente; resto -> autoasignado) */
   function buildPayload() {
     const monto = toMontoNumber(form.montoProyectado);
 
@@ -506,6 +512,7 @@ export default function ProspeccionPage() {
 
       nombre_razon_social: form.nombreRazonSocial,
       rut: form.rut || "",
+      contacto: form.contacto || "",
       telefono: form.telefono || "",
       correo: normalizeEmail(form.correo),
       direccion: form.direccion,
@@ -526,7 +533,6 @@ export default function ProspeccionPage() {
 
       ejecutivo_email: form.ejecutivoEmail,
 
-      // 👇 REGLA
       estado: requiere ? "PENDIENTE_ASIGNACION" : "ASIGNADO",
       asignado_a: requiere ? "" : form.ejecutivoEmail,
       asignado_por: requiere ? "" : form.ejecutivoEmail,
@@ -575,9 +581,7 @@ export default function ProspeccionPage() {
       }
 
       alert(
-        data.duplicated
-          ? "⚠️ El prospecto ya existía (folio duplicado)."
-          : "✅ Prospecto guardado en CRM_DB"
+        data.duplicated ? "⚠️ El prospecto ya existía (folio duplicado)." : "✅ Prospecto guardado en CRM_DB"
       );
 
       reloadCrmDb();
@@ -590,6 +594,7 @@ export default function ProspeccionPage() {
 
         nombreRazonSocial: "",
         rut: "",
+        contacto: "",
         telefono: "",
         correo: "",
         direccion: "",
@@ -600,9 +605,9 @@ export default function ProspeccionPage() {
         sourceId: undefined,
         sourcePayload: undefined,
 
-        // 👉 si vienes de CSV_PIA, mantenemos RRSS (suele ser lo correcto)
         origenProspecto: fuente === "CSV_PIA" ? "RRSS" : p.origenProspecto,
       }));
+
       setErrors({});
       setSelectedSourceId(null);
       setShowAll(false);
@@ -611,9 +616,7 @@ export default function ProspeccionPage() {
     }
   }
 
-  /** 10) Vista: últimos 5 creados por mí (desde CRM_DB)
-   *  Nota: el CSV no siempre viene ordenado. Ordenamos por created_at si existe.
-   */
+  /** 10) Vista: últimos 5 creados por mí (desde CRM_DB) */
   const myLast5 = useMemo(() => {
     const email = normalizeEmail(loggedEmail);
     if (!email || !crmRows.length) return [];
@@ -642,12 +645,8 @@ export default function ProspeccionPage() {
 
   return (
     <div style={{ padding: 16, maxWidth: 1100 }}>
-      <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
-        CRM · Gestión de Prospección · Nuevo Prospecto
-      </h2>
-      <div style={{ opacity: 0.8, marginBottom: 16 }}>
-        Registro para bandeja de asignación y gestión comercial.
-      </div>
+      <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>CRM · Gestión de Prospección · Nuevo Prospecto</h2>
+      <div style={{ opacity: 0.8, marginBottom: 16 }}>Registro para bandeja de asignación y gestión comercial.</div>
 
       {/* CRM_DB status */}
       <div style={{ marginBottom: 12, fontSize: 12, opacity: 0.85 }}>
@@ -829,13 +828,11 @@ export default function ProspeccionPage() {
         <b>Asignación:</b>{" "}
         {requiereAsign ? (
           <>
-            Este prospecto quedará en <b>PENDIENTE_ASIGNACION</b> (solo RRSS/Web) para que jefatura lo
-            derive.
+            Este prospecto quedará en <b>PENDIENTE_ASIGNACION</b> (solo RRSS/Web) para que jefatura lo derive.
           </>
         ) : (
           <>
-            Este prospecto quedará <b>ASIGNADO</b> automáticamente a <b>{loggedEmail || "tu usuario"}</b>{" "}
-            (Manual / Ferias / Referido / Otro).
+            Este prospecto quedará <b>ASIGNADO</b> automáticamente a <b>{loggedEmail || "tu usuario"}</b>.
           </>
         )}
       </div>
@@ -860,30 +857,42 @@ export default function ProspeccionPage() {
             error={errors.nombreRazonSocial}
           />
 
+          <Field
+            label="Contacto *"
+            value={form.contacto}
+            onChange={(v) => setForm((p) => ({ ...p, contacto: v }))}
+            error={errors.contacto}
+          />
+
           <Field label="RUT (opcional)" value={form.rut} onChange={(v) => setForm((p) => ({ ...p, rut: v }))} />
+
           <Field
             label="Teléfono (opcional)"
             value={form.telefono}
             onChange={(v) => setForm((p) => ({ ...p, telefono: v }))}
           />
+
           <Field
             label="Correo *"
             value={form.correo}
             onChange={(v) => setForm((p) => ({ ...p, correo: v }))}
             error={errors.correo}
           />
+
           <Field
             label="Dirección *"
             value={form.direccion}
             onChange={(v) => setForm((p) => ({ ...p, direccion: v }))}
             error={errors.direccion}
           />
+
           <Field
             label="Rubro *"
             value={form.rubro}
             onChange={(v) => setForm((p) => ({ ...p, rubro: v }))}
             error={errors.rubro}
           />
+
           <Field
             label="Monto proyectado (CLP) *"
             value={form.montoProyectado}
@@ -954,6 +963,7 @@ export default function ProspeccionPage() {
                 ejecutivoEmail: loggedEmail,
                 nombreRazonSocial: "",
                 rut: "",
+                contacto: "",
                 telefono: "",
                 correo: "",
                 direccion: "",
@@ -1020,9 +1030,7 @@ export default function ProspeccionPage() {
                 {myLast5.map((r, idx) => (
                   <tr key={`${r.folio || idx}_${idx}`}>
                     <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{r.folio || "—"}</td>
-                    <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
-                      {r.nombre_razon_social || "—"}
-                    </td>
+                    <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{r.nombre_razon_social || "—"}</td>
                     <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{r.division || "—"}</td>
                     <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{r.estado || "—"}</td>
                     <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{r.asignado_a || "—"}</td>

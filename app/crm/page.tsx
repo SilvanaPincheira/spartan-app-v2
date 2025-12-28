@@ -9,9 +9,9 @@ const CRM_JEFATURAS = new Set(
     "carlos.avendano@spartan.cl",
     "hernan.lopez@spartan.cl",
     "walter.gonzalez@spartan.cl",
-    "oscar.ortiz♠4spartan.cl",
-    "juan.prieto♠4spartan.cl",
-    
+    "oscar.ortiz@spartan.cl",
+    "juan.prieto@spartan.cl",
+
   ].map((x) => x.trim().toLowerCase())
 );
 
