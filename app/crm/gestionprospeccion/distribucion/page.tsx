@@ -223,6 +223,9 @@ export default function CRMDistribucionPage() {
   const [assigningFolio, setAssigningFolio] = useState<string | null>(null);
   const [targetEmail, setTargetEmail] = useState<Record<string, string>>({});
 
+  // ✅ filtro de vista
+  const [view, setView] = useState<"TODOS" | "PENDIENTES" | "ASIGNADOS">("TODOS");
+
   // modal mensaje
   const [openMsg, setOpenMsg] = useState<{ title: string; body: string } | null>(null);
 
@@ -321,13 +324,30 @@ export default function CRMDistribucionPage() {
       const pref = normUpper(r.division || r.prefijo || "");
       if (allowedPrefijosSet.size > 0 && !allowedPrefijosSet.has(pref)) return false;
 
+      // ✅ aplicar vista usando CRM_DB
+      const dbEstado = normUpper(crmIndex[folio] || "");
+      if (dbEstado === "AUTORIZADO") return false; // opcional
+
+      if (view === "ASIGNADOS" && dbEstado !== "ASIGNADO") return false;
+      if (view === "PENDIENTES" && dbEstado === "ASIGNADO") return false;
+
       return true;
     });
 
     const filtered = !query
       ? base
       : base.filter((r) => {
-          const haystack = [r.folio, r.nombre_razon_social, r.correo, r.origen_prospecto, r.division, r.observacion]
+          const folio = (r.folio || "").trim();
+          const haystack = [
+            r.folio,
+            r.nombre_razon_social,
+            r.correo,
+            r.origen_prospecto,
+            r.division,
+            r.observacion,
+            crmAsignadoA[folio] || "",
+            crmIndex[folio] || "",
+          ]
             .join(" ")
             .toLowerCase();
           return haystack.includes(query);
@@ -338,13 +358,40 @@ export default function CRMDistribucionPage() {
     arr.sort((a, b) => {
       const fa = (a.folio || "").trim();
       const fb = (b.folio || "").trim();
-      const aAssigned = !!(crmAsignadoA[fa] || "") || ["ASIGNADO", "AUTORIZADO"].includes(normUpper(crmIndex[fa] || ""));
-      const bAssigned = !!(crmAsignadoA[fb] || "") || ["ASIGNADO", "AUTORIZADO"].includes(normUpper(crmIndex[fb] || ""));
+      const aAssigned =
+        !!(crmAsignadoA[fa] || "") || ["ASIGNADO", "AUTORIZADO"].includes(normUpper(crmIndex[fa] || ""));
+      const bAssigned =
+        !!(crmAsignadoA[fb] || "") || ["ASIGNADO", "AUTORIZADO"].includes(normUpper(crmIndex[fb] || ""));
       return Number(aAssigned) - Number(bAssigned);
     });
 
     return arr;
-  }, [rows, q, allowedPrefijosSet, crmAsignadoA, crmIndex]);
+  }, [rows, q, allowedPrefijosSet, crmAsignadoA, crmIndex, view]);
+
+  // ✅ contadores para el filtro
+  const counts = useMemo(() => {
+    let asignados = 0;
+    let pendientes = 0;
+
+    for (const r of rows) {
+      const folio = (r.folio || "").trim();
+      if (!folio) continue;
+
+      const estadoLead = normUpper(r.estado || "");
+      if (estadoLead !== "PENDIENTE_ASIGNACION") continue;
+
+      const pref = normUpper(r.division || r.prefijo || "");
+      if (allowedPrefijosSet.size > 0 && !allowedPrefijosSet.has(pref)) continue;
+
+      const dbEstado = normUpper(crmIndex[folio] || "");
+      if (dbEstado === "AUTORIZADO") continue;
+
+      if (dbEstado === "ASIGNADO") asignados++;
+      else pendientes++;
+    }
+
+    return { asignados, pendientes, todos: asignados + pendientes };
+  }, [rows, allowedPrefijosSet, crmIndex]);
 
   async function asignar(folio: string, lead: Row) {
     const asignado_a = normalizeEmail(targetEmail[folio] || "");
@@ -436,7 +483,7 @@ export default function CRMDistribucionPage() {
         </button>
       </div>
 
-      <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+      <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -450,6 +497,35 @@ export default function CRMDistribucionPage() {
             boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
           }}
         />
+
+        <div style={{ display: "flex", gap: 8 }}>
+          {([
+            { k: "TODOS", label: `Todos (${counts.todos})` },
+            { k: "PENDIENTES", label: `Pendientes (${counts.pendientes})` },
+            { k: "ASIGNADOS", label: `Asignados (${counts.asignados})` },
+          ] as const).map((b) => {
+            const active = view === b.k;
+            return (
+              <button
+                key={b.k}
+                type="button"
+                onClick={() => setView(b.k)}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  border: "1px solid #e5e7eb",
+                  background: active ? "#111827" : "white",
+                  color: active ? "white" : "#111827",
+                  fontWeight: 800,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {b.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {err && <div style={{ marginTop: 10, color: "crimson", fontSize: 13 }}>Error: {err}</div>}
