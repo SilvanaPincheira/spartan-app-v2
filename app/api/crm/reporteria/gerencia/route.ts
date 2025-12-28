@@ -7,8 +7,8 @@ const CSV_CRM_DB_URL =
 /** ✅ BD_WEB (Sheet directo) */
 const SHEET_ID = "1xHT48r3asID6PCrgXTCpjbwujdnu6E7aev29BHq7U9w";
 const WEB_GID = "0";
+
 function sheetCsvUrl(gid: string) {
-  // gviz/tq csv funciona con el Sheet normal (no “publish”)
   return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${gid}`;
 }
 
@@ -174,9 +174,9 @@ function normalizeEstadoToKey(estadoRaw: string) {
   return n || "ASIGNADO";
 }
 
-/** =========================================================
- * ✅ Folio determinístico (igual idea que distribución)
- * ========================================================= */
+/** =========================
+ * ✅ Folio determinístico (WEB)
+ * ========================= */
 function makeFolio(origen: string, razon: string, mail: string, fecha: string) {
   const base = `${origen}|${razon}|${mail}|${fecha}`.toLowerCase();
   let hash = 0;
@@ -196,11 +196,40 @@ function normalizeLeadRowWeb(r: Row): { folio: string; division: string } {
   return { folio: (folio || "").trim(), division: division || "—" };
 }
 
+/** =========================
+ * ✅ Buckets: prob y fecha cierre
+ * ========================= */
+function bucketProb(probNombre: string) {
+  const raw = (probNombre || "").trim();
+  if (!raw) return "Sin dato";
+
+  const nums = raw
+    .match(/\d+/g)
+    ?.map((x) => Number(x))
+    .filter((n) => Number.isFinite(n)) || [];
+
+  if (nums.length >= 2) return `Entre ${nums[0]}% y ${nums[1]}%`;
+  if (nums.length === 1) return `${nums[0]}%`;
+
+  // si viene texto tipo "ALTA" etc.
+  return raw;
+}
+
+function bucketFechaCierre(nombre: string) {
+  const s = (nombre || "").trim();
+  return s ? s : "Sin dato";
+}
+
+function seriesFromCountMap(m: Record<string, number>) {
+  return Object.entries(m)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
 
-    // filtros (mismos que ya tenías)
     const from = searchParams.get("from") || "";
     const to = searchParams.get("to") || "";
     let division = searchParams.get("division") || "";
@@ -212,7 +241,7 @@ export async function GET(req: Request) {
     const onlyClosed = searchParams.get("onlyClosed") === "1";
     const includeAssigned = searchParams.get("includeAssigned") !== "0";
 
-    // ✅ opcional: para permitir que Jorge vea todo aunque venga división seteada
+    // ✅ gerente general ve todo
     const viewerEmail = lowerEmail(searchParams.get("viewerEmail") || "");
     if (viewerEmail === "jorge.beltran@spartan.cl") division = "";
 
@@ -227,24 +256,18 @@ export async function GET(req: Request) {
     const text = await res.text();
     const rows = parseCsv(text);
 
-    // index rápido por folio (para comparar con WEB)
-    const crmByFolio: Record<
-      string,
-      { estadoKey: string; asignadoA: string; division: string; origen: string; createdAt: Date | null }
-    > = {};
+    // index por folio (para comparar con WEB)
+    const crmByFolio: Record<string, { estadoKey: string; asignadoA: string }> = {};
     for (const r of rows) {
       const folio = (pick(r, "folio") || "").trim();
       if (!folio) continue;
       crmByFolio[folio] = {
         estadoKey: normalizeEstadoToKey(pick(r, "estado")),
         asignadoA: lowerEmail(pick(r, "asignado_a")),
-        division: (pick(r, "division") || "").trim().toUpperCase(),
-        origen: (pick(r, "origen_prospecto") || "").trim().toUpperCase(),
-        createdAt: parseIsoDate(pick(r, "created_at")),
       };
     }
 
-    /** 2) Filtrado CRM_DB (para KPIs / charts del CRM) */
+    /** 2) Filtrar CRM_DB */
     const filtered = rows.filter((r) => {
       const created = parseIsoDate(pick(r, "created_at"));
 
@@ -271,7 +294,7 @@ export async function GET(req: Request) {
       return true;
     });
 
-    // métricas CRM_DB
+    /** 3) Agregaciones CRM_DB */
     let total = 0;
     let asignados = 0;
     let contactados = 0;
@@ -283,6 +306,9 @@ export async function GET(req: Request) {
 
     const countByEstado: Record<string, number> = {};
     const countByOrigen: Record<string, number> = {};
+
+    const countByFechaCierre: Record<string, number> = {};
+    const countByProbCierre: Record<string, number> = {};
 
     const byEjecutivo: Record<
       string,
@@ -298,9 +324,15 @@ export async function GET(req: Request) {
       const org = (pick(r, "origen_prospecto") || "—").trim().toUpperCase();
       countByOrigen[org] = (countByOrigen[org] || 0) + 1;
 
+      // ✅ tablas que faltaban
+      const fechaNombre = bucketFechaCierre(pick(r, "fecha_cierre_nombre"));
+      countByFechaCierre[fechaNombre] = (countByFechaCierre[fechaNombre] || 0) + 1;
+
+      const probNombre = bucketProb(pick(r, "prob_cierre_nombre"));
+      countByProbCierre[probNombre] = (countByProbCierre[probNombre] || 0) + 1;
+
       const monto = toMontoNumber(pick(r, "monto_proyectado"));
-      const probNombre = pick(r, "prob_cierre_nombre");
-      const factor = parseProbFactor(probNombre, estadoKey);
+      const factor = parseProbFactor(pick(r, "prob_cierre_nombre"), estadoKey);
       const forecast = monto * factor;
 
       const isClosed = estadoKey === "CERRADO_GANADO" || estadoKey === "NO_GANADO";
@@ -329,7 +361,7 @@ export async function GET(req: Request) {
       }
     }
 
-    /** 3) ✅ PENDIENTES DESDE BD_WEB (NO PIA) */
+    /** 4) ✅ Pendientes desde BD_WEB */
     const resWeb = await fetch(sheetCsvUrl(WEB_GID), { cache: "no-store" });
     if (!resWeb.ok) {
       return NextResponse.json(
@@ -337,6 +369,7 @@ export async function GET(req: Request) {
         { status: 500 }
       );
     }
+
     const textWeb = await resWeb.text();
     if (textWeb.trim().startsWith("<")) {
       return NextResponse.json(
@@ -344,6 +377,7 @@ export async function GET(req: Request) {
         { status: 500 }
       );
     }
+
     const webRows = parseCsv(textWeb);
 
     let pendientesWeb = 0;
@@ -353,32 +387,25 @@ export async function GET(req: Request) {
       const { folio, division: divWeb } = normalizeLeadRowWeb(wr);
       if (!folio) continue;
 
-      // aplica filtro división si existe (y no es Jorge por bypass arriba)
       if (division && divWeb !== division.toUpperCase()) continue;
 
       const crm = crmByFolio[folio];
 
-      // ✅ regla:
-      // - si no existe en CRM_DB => pendiente
-      // - si existe pero está PENDIENTE_ASIGNACION y sin asignado_a => pendiente
-      const isPending =
-        !crm || (crm.estadoKey === "PENDIENTE_ASIGNACION" && !crm.asignadoA);
-
+      const isPending = !crm || (crm.estadoKey === "PENDIENTE_ASIGNACION" && !crm.asignadoA);
       if (isPending) {
         pendientesWeb += 1;
         pendientesWebByDivision[divWeb] = (pendientesWebByDivision[divWeb] || 0) + 1;
       }
     }
 
+    /** 5) Series */
     const estadoSeries = ESTADOS_ORDER.map((k) => ({
       key: k,
       name: ESTADOS_LABEL[k] || k,
       value: countByEstado[k] || 0,
     }));
 
-    const origenSeries = Object.entries(countByOrigen)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value);
+    const origenSeries = seriesFromCountMap(countByOrigen);
 
     const ejecutivoSeries = Object.values(byEjecutivo)
       .map((x) => ({
@@ -391,9 +418,10 @@ export async function GET(req: Request) {
       }))
       .sort((a, b) => b.pipeline - a.pipeline);
 
-    const pendientesWebPorDivision = Object.entries(pendientesWebByDivision)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value);
+    const fechaCierreSeries = seriesFromCountMap(countByFechaCierre);
+    const probCierreSeries = seriesFromCountMap(countByProbCierre);
+
+    const pendientesWebPorDivision = seriesFromCountMap(pendientesWebByDivision);
 
     return NextResponse.json({
       ok: true,
@@ -406,8 +434,6 @@ export async function GET(req: Request) {
         noGanado,
         pipelineMonto: Math.round(pipelineMonto),
         forecastMonto: Math.round(forecastMonto),
-
-        // ✅ KPI clave gerencia
         pendientesWeb,
       },
       charts: {
@@ -415,12 +441,18 @@ export async function GET(req: Request) {
         origenes: origenSeries,
         ejecutivos: ejecutivoSeries,
 
-        // ✅ tabla: pendientes por división desde BD_WEB
+        // ✅ ya salen en el page
+        fechaCierre: fechaCierreSeries,
+        probCierre: probCierreSeries,
+
+        // ✅ pendientes desde WEB
         pendientesWebPorDivision,
       },
       debug: {
         webRows: webRows.length,
         crmRows: rows.length,
+        fechaCierreBuckets: Object.keys(countByFechaCierre).length,
+        probCierreBuckets: Object.keys(countByProbCierre).length,
       },
     });
   } catch (e: unknown) {
