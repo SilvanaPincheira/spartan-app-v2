@@ -97,6 +97,28 @@ type ApiData = {
   };
 };
 
+/** ✅ Tick rotado con displayName (arregla react/display-name) */
+function XAxisTickRotated(props: any) {
+  const { x, y, payload } = props || {};
+  const value = payload?.value ?? "";
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text
+        x={0}
+        y={0}
+        dy={16}
+        textAnchor="end"
+        transform="rotate(-20)"
+        fontSize={11}
+        fill="#374151"
+      >
+        {String(value)}
+      </text>
+    </g>
+  );
+}
+XAxisTickRotated.displayName = "XAxisTickRotated";
+
 export default function CRMReporteriaGerenciaPage() {
   const supabase = useMemo(() => createClientComponentClient(), []);
 
@@ -174,9 +196,7 @@ export default function CRMReporteriaGerenciaPage() {
 
       qs.set("includeAssigned", "1");
 
-      const resp = await fetch(`/api/crm/reporteria/gerencia?${qs.toString()}`, {
-        cache: "no-store",
-      });
+      const resp = await fetch(`/api/crm/reporteria/gerencia?${qs.toString()}`, { cache: "no-store" });
       const json = (await resp.json()) as ApiData;
 
       if (!resp.ok || !json.ok) {
@@ -207,35 +227,10 @@ export default function CRMReporteriaGerenciaPage() {
     return arr.slice(0, 12);
   }, [data]);
 
-  // ✅ FIX: tick con rotación como función (TypeScript-friendly)
-  const xTickRotated = useMemo(() => {
-    return (props: any) => {
-      const { x, y, payload } = props || {};
-      const value = payload?.value ?? "";
-      return (
-        <g transform={`translate(${x},${y})`}>
-          <text
-            x={0}
-            y={0}
-            dy={16}
-            textAnchor="end"
-            transform="rotate(-20)"
-            fontSize={11}
-            fill="#374151"
-          >
-            {String(value)}
-          </text>
-        </g>
-      );
-    };
-  }, []);
-
   if (authLoading) {
     return (
       <div style={{ padding: 16 }}>
-        <h2 style={{ fontSize: 20, fontWeight: 900, margin: 0 }}>
-          CRM · Reportería (Gerencia)
-        </h2>
+        <h2 style={{ fontSize: 20, fontWeight: 900, margin: 0 }}>CRM · Reportería (Gerencia)</h2>
         <div style={{ marginTop: 10, opacity: 0.75 }}>Cargando usuario…</div>
       </div>
     );
@@ -244,12 +239,8 @@ export default function CRMReporteriaGerenciaPage() {
   if (!isJefatura) {
     return (
       <div style={{ padding: 16, maxWidth: 900 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>
-          CRM · Reportería (Gerencia)
-        </h2>
-        <div style={{ marginTop: 10, color: "crimson" }}>
-          No tienes permisos para este módulo (solo jefaturas).
-        </div>
+        <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>CRM · Reportería (Gerencia)</h2>
+        <div style={{ marginTop: 10, color: "crimson" }}>No tienes permisos para este módulo (solo jefaturas).</div>
         <div style={{ marginTop: 8, opacity: 0.8 }}>
           Login detectado: <b>{loggedEmail || "—"}</b>
         </div>
@@ -263,9 +254,7 @@ export default function CRMReporteriaGerenciaPage() {
     <div style={{ padding: 16, maxWidth: 1400 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>
-            CRM · Reportería (Gerencia)
-          </h2>
+          <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>CRM · Reportería (Gerencia)</h2>
           <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
             Jefatura: <b>{loggedEmail || "—"}</b> {" · "}
             Scope: <b>{allowedDivs.length ? allowedDivs.join(", ") : "TODOS"}</b>
@@ -417,7 +406,7 @@ export default function CRMReporteriaGerenciaPage() {
             <ResponsiveContainer>
               <FunnelChart>
                 <Tooltip />
-                <Funnel dataKey="value" data={funnelData} isAnimationActive>
+                <Funnel dataKey="value" data={data?.charts?.estados || []} isAnimationActive>
                   <LabelList position="right" dataKey="name" />
                 </Funnel>
               </FunnelChart>
@@ -432,7 +421,7 @@ export default function CRMReporteriaGerenciaPage() {
               <PieChart>
                 <Tooltip />
                 <Legend />
-                <Pie data={pieOrigenData} dataKey="value" nameKey="name" outerRadius={110} />
+                <Pie data={data?.charts?.origenes || []} dataKey="value" nameKey="name" outerRadius={110} />
               </PieChart>
             </ResponsiveContainer>
           </div>
@@ -445,12 +434,7 @@ export default function CRMReporteriaGerenciaPage() {
             <ResponsiveContainer>
               <BarChart data={barEjecutivos}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="ejecutivo"
-                  interval={0}
-                  height={90}
-                  tick={xTickRotated} // ✅ FIX
-                />
+                <XAxis dataKey="ejecutivo" interval={0} height={90} tick={<XAxisTickRotated />} />
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip />
                 <Legend />
@@ -474,7 +458,7 @@ export default function CRMReporteriaGerenciaPage() {
               </thead>
               <tbody>
                 {(data?.charts?.ejecutivos || []).slice(0, 20).map((x) => (
-                  <tr key={x.ejecutivo || Math.random()} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                  <tr key={x.ejecutivo || `${Math.random()}`} style={{ borderBottom: "1px solid #f3f4f6" }}>
                     <td style={{ padding: 10, fontWeight: 800 }}>{x.ejecutivo || "—"}</td>
                     <td style={{ padding: 10 }}>{x.count}</td>
                     <td style={{ padding: 10 }}>{moneyCLP(x.pipeline)}</td>
