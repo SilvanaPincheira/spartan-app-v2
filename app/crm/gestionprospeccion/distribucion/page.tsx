@@ -3,11 +3,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
-/**
- * Spreadsheet de “Bases de datos” (4 hojas)
- * CSV vía gviz:
- * https://docs.google.com/spreadsheets/d/<ID>/gviz/tq?tqx=out:csv&gid=<GID>
- */
 const SHEET_ID = "1xHT48r3asID6PCrgXTCpjbwujdnu6E7aev29BHq7U9w";
 
 const ORIGIN_SOURCES = [
@@ -21,7 +16,6 @@ function sheetCsvUrl(gid: string) {
   return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${gid}`;
 }
 
-/** Jefaturas que asignan */
 const JEFATURAS = new Set(
   [
     "claudia.borquez@spartan.cl",
@@ -32,7 +26,7 @@ const JEFATURAS = new Set(
 );
 
 type Row = Record<string, string>;
-type JefaturaScopeRow = { email: string; prefijo: string };
+type ScopeRow = { email: string; prefijo: string };
 
 function normalizeHeader(h: string) {
   return (h || "")
@@ -107,7 +101,6 @@ function normUpper(s: string) {
 function normLower(s: string) {
   return (s || "").trim().toLowerCase();
 }
-
 function pick(r: Row, ...keys: string[]) {
   for (const k of keys) {
     const v = r[k];
@@ -115,68 +108,60 @@ function pick(r: Row, ...keys: string[]) {
   }
   return "";
 }
-
 function toMontoNumber(raw: string) {
-  const s = String(raw || "");
-  // soporta $ 1.234.567, 1,234,567, etc.
-  const cleaned = s.replace(/[^\d]/g, "");
-  const n = Number(cleaned);
+  const n = Number(String(raw || "").replace(/[^\d]/g, ""));
   return Number.isFinite(n) ? n : 0;
 }
 
-/**
- * LeadKey temporal SOLO para UI (no es folio real CRM_DB)
- * Apps Script generará el folio correlativo real al insertar en CRM_DB.
- */
-function makeLeadKey(origen: string, razon: string, mail: string, fecha: string) {
-  const base = `${origen}|${razon}|${mail}|${fecha}`
-    .toLowerCase()
-    .replace(/\s+/g, "_")
-    .slice(0, 120);
-  // pseudo-id estable
-  return `LEAD-${origen.replace(/\s+/g, "")}-${base.length.toString(36)}-${base.slice(0, 36)}`;
+// folio “lindo” estable
+function makeFolio(origen: string, razon: string, mail: string, fecha: string) {
+  const base = `${origen}|${razon}|${mail}|${fecha}`.toLowerCase().replace(/\s+/g, "_");
+  // hash simple pero estable (no crypt): largo+slice
+  const hash = base.length.toString(36) + "-" + base.slice(0, 30);
+  return `LEAD-${origen.replace(/\s+/g, "")}-${hash}`;
 }
 
-/**
- * Normaliza fila desde hojas externas a “estructura CRM”
- * Cabeceras actuales (WEB): Razon Social, contacto, Mail, Teléfono, Industria, Mensaje, Fecha Contacto, division, Gestion, Etapa, Monto
- */
 function normalizeLeadRow(origen: string, r: Row): Row {
+  // Cabeceras reales tuyas (normalizadas):
+  // razon_social, contacto, mail, telefono, industria, mensaje, fecha_contacto, division, etapa, monto
+
   const razon = pick(r, "razon_social", "razon", "empresa", "nombre_razon_social");
-  const contacto = pick(r, "contacto", "nombre_contacto");
+  const contacto = pick(r, "contacto");
   const mail = pick(r, "mail", "correo", "email");
-  const telefono = pick(r, "telefono", "teléfono", "phone");
+  const telefono = pick(r, "telefono");
   const industria = pick(r, "industria", "rubro");
   const mensaje = pick(r, "mensaje", "observacion", "comentario");
   const fechaContacto = pick(r, "fecha_contacto", "fecha", "created_at");
-  const division = pick(r, "division", "prefijo"); // IN/FB/etc
+  const division = pick(r, "division", "prefijo"); // IN / FB / HC / IND
   const etapa = pick(r, "etapa", "etapa_nombre");
   const montoRaw = pick(r, "monto", "monto_proyectado");
 
-  const lead_key = makeLeadKey(origen, razon, mail, fechaContacto);
+  const folio = pick(r, "folio") || makeFolio(origen, razon, mail, fechaContacto);
 
   return {
-    // clave temporal UI
-    lead_key,
+    // Interno:
+    lead_key: folio,
 
-    // datos que insertaremos en CRM_DB
+    // Campos “CRM_DB-like”:
+    folio,
     created_at: fechaContacto,
     origen_prospecto: origen,
 
     nombre_razon_social: razon,
     correo: mail,
-    contacto,
     telefono,
-
     rubro: industria,
+
+    // este mensaje lo enviaremos a CRM_DB como observacion
     observacion: mensaje,
 
-    division, // IN/FB/HC/IND (según tu scope)
+    division: division,
 
-    etapa_nombre: etapa,
-    monto_proyectado: String(toMontoNumber(montoRaw) || ""),
+    etapa_nombre: etapa || "",
 
-    // distribución: se muestra como pendiente (solo UI)
+    monto_proyectado: String(toMontoNumber(montoRaw) || montoRaw || ""),
+
+    // distribución
     estado: "PENDIENTE_ASIGNACION",
     asignado_a: "",
     asignado_por: "",
@@ -193,25 +178,30 @@ export default function CRMDistribucionPage() {
   const [err, setErr] = useState<string | null>(null);
 
   const [rows, setRows] = useState<Row[]>([]);
-
   const [q, setQ] = useState("");
-  const [assigningKey, setAssigningKey] = useState<string | null>(null);
+
+  const [assigningFolio, setAssigningFolio] = useState<string | null>(null);
   const [targetEmail, setTargetEmail] = useState<Record<string, string>>({});
 
-  // Prefijos permitidos para esta jefatura (desde Supabase)
   const [allowedPrefijos, setAllowedPrefijos] = useState<string[]>([]);
   const [scopeErr, setScopeErr] = useState<string | null>(null);
 
-  // modal ver mensaje
-  const [msgOpen, setMsgOpen] = useState(false);
-  const [msgRow, setMsgRow] = useState<Row | null>(null);
+  // Modal mensaje
+  const [openMsg, setOpenMsg] = useState<{ title: string; body: string } | null>(null);
 
   const isJefatura = useMemo(
     () => JEFATURAS.has(normalizeEmail(loggedEmail)),
     [loggedEmail]
   );
 
-  /** 1) Auth */
+  // ✅ fallback si supabase scope falla (para no “romper” el módulo)
+  const FALLBACK_SCOPE: Record<string, string[]> = {
+    "claudia.borquez@spartan.cl": ["IN", "FB"],
+    "jorge.beltran@spartan.cl": ["IN", "FB", "HC", "IND"],
+    "alberto.damm@spartan.cl": ["IND"],
+    "nelson.norambuena@spartan.cl": ["HC"],
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -227,7 +217,7 @@ export default function CRMDistribucionPage() {
     })();
   }, [supabase]);
 
-  /** 2) Scope desde Supabase (email + prefijo) */
+  // Scope desde Supabase
   useEffect(() => {
     if (authLoading) return;
     if (!loggedEmail) return;
@@ -236,28 +226,32 @@ export default function CRMDistribucionPage() {
       try {
         setScopeErr(null);
 
+        // 👇 CAMBIA ESTE NOMBRE por tu tabla real.
+        // En tu screenshot se ve una tabla con columnas: id, email, prefijo
+        // Si se llama distinto (ej: "jefatura_prefijos"), ponlo aquí.
+        const SCOPE_TABLE = "jefatura_prefijos"; // <-- AJUSTA
+
         const { data, error } = await supabase
-          .from("gerencia_prefijos")
+          .from(SCOPE_TABLE)
           .select("email,prefijo")
           .eq("email", normalizeEmail(loggedEmail));
 
         if (error) throw error;
 
-        const prefijos =
-          (data as JefaturaScopeRow[] | null)?.map((r) => normUpper(r.prefijo)) ?? [];
-        setAllowedPrefijos(prefijos);
+        const prefijos = (data as ScopeRow[] | null)?.map((r) => normUpper(r.prefijo)) ?? [];
+        setAllowedPrefijos(prefijos.length ? prefijos : FALLBACK_SCOPE[normalizeEmail(loggedEmail)] || []);
       } catch (e: any) {
-        setAllowedPrefijos([]);
         setScopeErr(e?.message || "Error leyendo prefijos (scope) en Supabase");
+        setAllowedPrefijos(FALLBACK_SCOPE[normalizeEmail(loggedEmail)] || []);
       }
     })();
   }, [authLoading, loggedEmail, supabase]);
 
-  const allowedPrefijosSet = useMemo(() => {
-    return new Set(allowedPrefijos.map((p) => normUpper(p)));
-  }, [allowedPrefijos]);
+  const allowedPrefijosSet = useMemo(
+    () => new Set(allowedPrefijos.map((p) => normUpper(p))),
+    [allowedPrefijos]
+  );
 
-  /** 3) Cargar hojas */
   async function reload() {
     try {
       setLoading(true);
@@ -267,24 +261,17 @@ export default function CRMDistribucionPage() {
         ORIGIN_SOURCES.map(async (src) => {
           const url = sheetCsvUrl(src.gid);
           const res = await fetch(url, { cache: "no-store" });
-
-          if (!res.ok) {
-            throw new Error(
-              `No se pudo leer ${src.origen} (gid=${src.gid}) status=${res.status}`
-            );
-          }
-
+          if (!res.ok) throw new Error(`No se pudo leer ${src.origen} (gid=${src.gid}) status=${res.status}`);
           const text = await res.text();
 
           if (text.trim().startsWith("<")) {
             throw new Error(
               `La hoja ${src.origen} no está publicada como CSV (Google devolvió HTML). ` +
-                `En Google Sheets: Archivo → Publicar en la web.`
+                `En Google Sheets: Archivo → Publicar en la web`
             );
           }
 
-          const parsed = parseCsv(text);
-          return parsed.map((r) => normalizeLeadRow(src.origen, r));
+          return parseCsv(text).map((r) => normalizeLeadRow(src.origen, r));
         })
       );
 
@@ -302,78 +289,69 @@ export default function CRMDistribucionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading]);
 
-  /** 4) Pendientes filtrados por prefijo */
   const pendientes = useMemo(() => {
     const query = q.trim().toLowerCase();
 
-    const base = rows.filter((r) => {
-      const estado = normUpper(r.estado || "");
-      if (estado !== "PENDIENTE_ASIGNACION") return false;
+    const base = rows
+      .filter((r) => {
+        const estado = normUpper(r.estado || "");
+        if (estado !== "PENDIENTE_ASIGNACION") return false;
 
-      const pref = normUpper(r.division || r.prefijo || "");
-      if (allowedPrefijosSet.size > 0 && !allowedPrefijosSet.has(pref)) return false;
+        const asignadoA = normLower(r.asignado_a || "");
+        if (asignadoA) return false;
 
-      return true;
-    });
+        const pref = normUpper(r.division || "");
+        if (allowedPrefijosSet.size > 0 && pref && !allowedPrefijosSet.has(pref)) return false;
+
+        return true;
+      })
+      // ordena por fecha (si viene)
+      .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
 
     if (!query) return base;
 
     return base.filter((r) => {
       const haystack = [
-        r.lead_key,
+        r.folio,
         r.nombre_razon_social,
         r.correo,
         r.origen_prospecto,
         r.division,
-        r.etapa_nombre,
+        r.observacion,
       ]
         .join(" ")
         .toLowerCase();
-
       return haystack.includes(query);
     });
   }, [rows, q, allowedPrefijosSet]);
 
-  /** 5) ASIGNAR = CREAR EN CRM_DB + ASIGNAR */
-  async function asignar(lead: Row) {
-    const lead_key = String(lead.lead_key || "").trim();
-    const asignado_a = normalizeEmail(targetEmail[lead_key] || "");
+  async function asignar(row: Row) {
+    const folio = String(row.folio || "").trim();
+    const asignado_a = normalizeEmail(targetEmail[folio] || "");
     const asignado_por = normalizeEmail(loggedEmail);
 
+    if (!folio) {
+      alert("❌ No se puede asignar: falta folio en el lead.");
+      return;
+    }
     if (!asignado_a) {
       alert("Debes ingresar el correo/login del ejecutivo a asignar.");
       return;
     }
 
     try {
-      setAssigningKey(lead_key);
-
-      const payload = {
-        lead_key,
-        origen: lead.origen_prospecto || "",
-
-        // datos del lead
-        nombre_razon_social: lead.nombre_razon_social || "",
-        correo: lead.correo || "",
-        telefono: lead.telefono || "",
-        contacto: lead.contacto || "",
-        rubro: lead.rubro || "",
-        monto_proyectado: lead.monto_proyectado || "",
-        etapa_nombre: lead.etapa_nombre || "",
-        observacion: lead.observacion || "",
-
-        // scope
-        division: lead.division || "",
-
-        // asignación
-        asignado_a,
-        asignado_por,
-      };
+      setAssigningFolio(folio);
 
       const resp = await fetch("/api/crm/prospectos/asignar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        // ✅ mandamos el lead completo para que el backend haga CREATE en CRM_DB
+        body: JSON.stringify({
+          lead: row,
+          folio,
+          asignado_a,
+          asignado_por,
+        }),
       });
 
       const text = await resp.text();
@@ -385,45 +363,34 @@ export default function CRMDistribucionPage() {
       }
 
       if (!resp.ok || !data?.ok) {
-        alert(
-          `❌ Error asignando (crear en CRM_DB):\nstatus=${resp.status}\n${JSON.stringify(
-            data,
-            null,
-            2
-          )}`
-        );
+        alert(`❌ Error asignando:\nstatus=${resp.status}\n${JSON.stringify(data, null, 2)}`);
         return;
       }
 
-      // Apps Script debería devolver folio real generado en CRM_DB
-      alert(`✅ Prospecto creado en CRM_DB y asignado.\nFolio: ${data?.folio || "—"}`);
-
-      // recargar lista leads origen (la jefatura sigue viendo leads externos)
+      alert("✅ Prospecto asignado y creado en CRM_DB.");
       await reload();
     } finally {
-      setAssigningKey(null);
+      setAssigningFolio(null);
     }
   }
 
   if (authLoading) {
     return (
-      <div style={{ padding: 16 }}>
-        <h2 style={{ fontSize: 20, fontWeight: 700 }}>CRM · Distribución</h2>
-        <div style={{ marginTop: 10, opacity: 0.75 }}>Cargando usuario…</div>
+      <div style={{ padding: 18 }}>
+        <div style={{ fontSize: 20, fontWeight: 800 }}>CRM · Distribución</div>
+        <div style={{ marginTop: 10, opacity: 0.7 }}>Cargando usuario…</div>
       </div>
     );
   }
 
   if (!isJefatura) {
     return (
-      <div style={{ padding: 16, maxWidth: 900 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 800 }}>
-          CRM · Prospección · Distribución
-        </h2>
+      <div style={{ padding: 18, maxWidth: 900 }}>
+        <div style={{ fontSize: 22, fontWeight: 900 }}>CRM · Prospección · Distribución</div>
         <div style={{ marginTop: 10, color: "crimson" }}>
           No tienes permisos para este módulo (solo jefaturas).
         </div>
-        <div style={{ marginTop: 8, opacity: 0.8 }}>
+        <div style={{ marginTop: 8, opacity: 0.85 }}>
           Login detectado: <b>{loggedEmail || "—"}</b>
         </div>
       </div>
@@ -431,152 +398,162 @@ export default function CRMDistribucionPage() {
   }
 
   return (
-    <div style={{ padding: 16, maxWidth: 1200 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-        <h2 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>
-          CRM · Prospección · Distribución de carga (Jefaturas)
-        </h2>
-        <div style={{ opacity: 0.75 }}>
-          Jefatura: <b>{loggedEmail || "—"}</b>
+    <div style={{ padding: 18, maxWidth: 1250 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 24, fontWeight: 900, letterSpacing: -0.2 }}>
+            CRM · Prospección · Distribución de carga (Jefaturas)
+          </div>
+          <div style={{ marginTop: 6, fontSize: 13, opacity: 0.8 }}>
+            Jefatura: <b>{loggedEmail || "—"}</b>
+            {" · "}Fuentes: <b>WEB · INOFOOD · FOOD SERVICE · REFERIDO</b>
+            {" · "}Scope prefijos: <b>{allowedPrefijos.length ? allowedPrefijos.join(", ") : "—"}</b>
+          </div>
+          {scopeErr && (
+            <div style={{ marginTop: 8, color: "crimson", fontSize: 13 }}>
+              Error scope: {scopeErr} (usando fallback)
+            </div>
+          )}
         </div>
-      </div>
 
-      <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
-        Fuentes: <b>WEB · INOFOOD · FOOD SERVICE · REFERIDO</b>
-        {" · "}
-        Scope prefijos: <b>{allowedPrefijos.length ? allowedPrefijos.join(", ") : "—"}</b>
-      </div>
-
-      {scopeErr && <div style={{ marginTop: 8, color: "crimson" }}>Error scope: {scopeErr}</div>}
-
-      <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar pendientes por lead_key / razón social / correo…"
-          style={{
-            flex: 1,
-            minWidth: 260,
-            padding: 10,
-            borderRadius: 10,
-            border: "1px solid #d1d5db",
-          }}
-        />
         <button
           type="button"
           onClick={reload}
           disabled={loading}
           style={{
-            padding: "10px 12px",
-            borderRadius: 10,
-            border: "1px solid #d1d5db",
+            padding: "10px 14px",
+            borderRadius: 12,
+            border: "1px solid #e5e7eb",
             background: "white",
             cursor: loading ? "not-allowed" : "pointer",
+            boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
+            fontWeight: 700,
           }}
         >
           {loading ? "Actualizando…" : "Actualizar"}
         </button>
       </div>
 
+      <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Buscar por razón social / correo / división / mensaje…"
+          style={{
+            flex: 1,
+            minWidth: 320,
+            padding: "12px 14px",
+            borderRadius: 14,
+            border: "1px solid #e5e7eb",
+            outline: "none",
+          }}
+        />
+      </div>
+
       {err && <div style={{ marginTop: 10, color: "crimson" }}>Error: {err}</div>}
 
-      <div style={{ marginTop: 12, border: "1px solid #e5e7eb", borderRadius: 12, overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <div
+        style={{
+          marginTop: 14,
+          border: "1px solid #e5e7eb",
+          borderRadius: 16,
+          overflow: "hidden",
+          background: "white",
+          boxShadow: "0 6px 20px rgba(0,0,0,0.06)",
+        }}
+      >
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
           <thead>
-            <tr style={{ textAlign: "left", fontSize: 12, opacity: 0.8 }}>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>LeadKey</th>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Razón Social</th>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Origen</th>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>División</th>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Mensaje</th>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Monto</th>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}>Asignar a</th>
-              <th style={{ padding: 10, borderBottom: "1px solid #e5e7eb" }}></th>
+            <tr style={{ textAlign: "left", fontSize: 12, opacity: 0.75, background: "#fafafa" }}>
+              <th style={{ padding: 12, borderBottom: "1px solid #eee" }}>#</th>
+              <th style={{ padding: 12, borderBottom: "1px solid #eee" }}>Razón Social</th>
+              <th style={{ padding: 12, borderBottom: "1px solid #eee" }}>Origen</th>
+              <th style={{ padding: 12, borderBottom: "1px solid #eee" }}>División</th>
+              <th style={{ padding: 12, borderBottom: "1px solid #eee" }}>Mensaje</th>
+              <th style={{ padding: 12, borderBottom: "1px solid #eee" }}>Monto</th>
+              <th style={{ padding: 12, borderBottom: "1px solid #eee" }}>Asignar a</th>
+              <th style={{ padding: 12, borderBottom: "1px solid #eee" }} />
             </tr>
           </thead>
-
           <tbody>
-            {pendientes.map((r, i) => {
-              const leadKey = String(r.lead_key || "");
-              const busy = assigningKey === leadKey;
-              const hasMsg = String(r.observacion || "").trim().length > 0;
+            {pendientes.map((r, idx) => {
+              const folio = r.folio || "";
+              const busy = assigningFolio === folio;
 
               return (
-                <tr key={`${leadKey}_${i}`}>
-                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                    <b style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
-                      {leadKey || "—"}
-                    </b>
-                    <div style={{ fontSize: 12, opacity: 0.7 }}>{r.created_at || ""}</div>
+                <tr key={`${folio}_${idx}`} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                  <td style={{ padding: 12, borderBottom: "1px solid #f3f4f6", width: 40, fontWeight: 800 }}>
+                    {idx + 1}
                   </td>
 
-                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                    {r.nombre_razon_social || "—"}
+                  <td style={{ padding: 12, borderBottom: "1px solid #f3f4f6" }}>
+                    <div style={{ fontWeight: 900 }}>{r.nombre_razon_social || "—"}</div>
                     <div style={{ fontSize: 12, opacity: 0.7 }}>{r.correo || ""}</div>
+                    <div style={{ fontSize: 12, opacity: 0.6 }}>{r.created_at || ""}</div>
                   </td>
 
-                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                  <td style={{ padding: 12, borderBottom: "1px solid #f3f4f6", fontWeight: 800 }}>
                     {r.origen_prospecto || "—"}
                   </td>
 
-                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                  <td style={{ padding: 12, borderBottom: "1px solid #f3f4f6", fontWeight: 800 }}>
                     {r.division || "—"}
                   </td>
 
-                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                    {hasMsg ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setMsgRow(r);
-                          setMsgOpen(true);
-                        }}
-                        style={{
-                          padding: "6px 10px",
-                          borderRadius: 10,
-                          border: "1px solid #d1d5db",
-                          background: "white",
-                          cursor: "pointer",
-                        }}
-                      >
-                        Ver mensaje
-                      </button>
+                  <td style={{ padding: 12, borderBottom: "1px solid #f3f4f6" }}>
+                    <button
+                      type="button"
+                      onClick={() => setOpenMsg({ title: r.nombre_razon_social || "Mensaje", body: r.observacion || "—" })}
+                      style={{
+                        padding: "8px 10px",
+                        borderRadius: 12,
+                        border: "1px solid #e5e7eb",
+                        background: "white",
+                        cursor: "pointer",
+                        fontWeight: 700,
+                      }}
+                    >
+                      Ver mensaje
+                    </button>
+                  </td>
+
+                  <td style={{ padding: 12, borderBottom: "1px solid #f3f4f6" }}>
+                    {r.monto_proyectado ? (
+                      <span style={{ fontWeight: 900 }}>{r.monto_proyectado}</span>
                     ) : (
                       <span style={{ opacity: 0.6 }}>—</span>
                     )}
                   </td>
 
-                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                    {r.monto_proyectado || "—"}
-                  </td>
-
-                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                  <td style={{ padding: 12, borderBottom: "1px solid #f3f4f6" }}>
                     <input
-                      value={targetEmail[leadKey] || ""}
-                      onChange={(e) => setTargetEmail((p) => ({ ...p, [leadKey]: e.target.value }))}
+                      value={targetEmail[folio] || ""}
+                      onChange={(e) => setTargetEmail((p) => ({ ...p, [folio]: e.target.value }))}
                       placeholder="ej: pia.ramirez@spartan.cl"
                       style={{
                         width: "100%",
-                        minWidth: 240,
-                        padding: 10,
-                        borderRadius: 10,
-                        border: "1px solid #d1d5db",
+                        minWidth: 220,
+                        padding: "10px 12px",
+                        borderRadius: 14,
+                        border: "1px solid #e5e7eb",
+                        outline: "none",
                       }}
                     />
                   </td>
 
-                  <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
+                  <td style={{ padding: 12, borderBottom: "1px solid #f3f4f6" }}>
                     <button
                       type="button"
                       onClick={() => asignar(r)}
                       disabled={busy}
                       style={{
-                        padding: "10px 12px",
-                        borderRadius: 10,
+                        padding: "10px 14px",
+                        borderRadius: 14,
                         border: "1px solid #111827",
                         background: busy ? "#6b7280" : "#111827",
                         color: "white",
                         cursor: busy ? "not-allowed" : "pointer",
+                        fontWeight: 900,
                       }}
                     >
                       {busy ? "Asignando…" : "Asignar"}
@@ -588,8 +565,8 @@ export default function CRMDistribucionPage() {
 
             {!loading && pendientes.length === 0 && (
               <tr>
-                <td colSpan={8} style={{ padding: 12, opacity: 0.7 }}>
-                  No hay prospectos pendientes de asignación para tu scope.
+                <td colSpan={8} style={{ padding: 14, opacity: 0.7 }}>
+                  No hay prospectos pendientes para tu scope.
                 </td>
               </tr>
             )}
@@ -601,14 +578,14 @@ export default function CRMDistribucionPage() {
         Pendientes: <b>{pendientes.length}</b>
       </div>
 
-      {/* Modal Ver Mensaje */}
-      {msgOpen && (
+      {/* Modal mensaje */}
+      {openMsg && (
         <div
-          onClick={() => setMsgOpen(false)}
+          onClick={() => setOpenMsg(null)}
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.35)",
+            background: "rgba(17,24,39,0.55)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -621,38 +598,31 @@ export default function CRMDistribucionPage() {
             style={{
               width: "min(720px, 100%)",
               background: "white",
-              borderRadius: 14,
+              borderRadius: 18,
               border: "1px solid #e5e7eb",
-              boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+              boxShadow: "0 18px 60px rgba(0,0,0,0.25)",
               padding: 16,
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-              <div>
-                <div style={{ fontWeight: 800, fontSize: 16 }}>
-                  {msgRow?.nombre_razon_social || "Mensaje"}
-                </div>
-                <div style={{ fontSize: 12, opacity: 0.7 }}>
-                  {msgRow?.correo || ""} · {msgRow?.origen_prospecto || ""} · {msgRow?.division || ""}
-                </div>
-              </div>
+              <div style={{ fontSize: 16, fontWeight: 900 }}>{openMsg.title}</div>
               <button
                 type="button"
-                onClick={() => setMsgOpen(false)}
+                onClick={() => setOpenMsg(null)}
                 style={{
-                  padding: "8px 10px",
-                  borderRadius: 10,
-                  border: "1px solid #d1d5db",
+                  padding: "6px 10px",
+                  borderRadius: 12,
+                  border: "1px solid #e5e7eb",
                   background: "white",
                   cursor: "pointer",
+                  fontWeight: 800,
                 }}
               >
                 Cerrar
               </button>
             </div>
-
-            <div style={{ marginTop: 12, whiteSpace: "pre-wrap", lineHeight: 1.4 }}>
-              {String(msgRow?.observacion || "").trim() || "—"}
+            <div style={{ marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.45, fontSize: 14, opacity: 0.95 }}>
+              {openMsg.body || "—"}
             </div>
           </div>
         </div>

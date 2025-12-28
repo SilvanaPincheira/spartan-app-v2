@@ -2,101 +2,145 @@ import { NextResponse } from "next/server";
 
 const APPS_SCRIPT_URL = process.env.CRM_APPS_SCRIPT_URL;
 
-/**
- * POST /api/crm/prospectos/asignar
- * Body:
- * {
- *   lead_key: string,
- *   origen: "WEB"|"INOFOOD"|"FOOD SERVICE"|"REFERIDO",
- *   nombre_razon_social: string,
- *   correo: string,
- *   telefono?: string,
- *   contacto?: string,
- *   rubro?: string,
- *   monto_proyectado?: string,
- *   etapa_nombre?: string,
- *   observacion?: string,
- *   division?: string,        // IN/FB/etc
- *   asignado_a: string,
- *   asignado_por: string
- * }
- *
- * Este endpoint NO actualiza la hoja origen.
- * Debe CREAR el registro real en CRM_DB (prospectos) con folio correlativo y asignarlo.
- */
+function normEmail(x: any) {
+  return String(x || "").trim().toLowerCase();
+}
+
 export async function POST(req: Request) {
   try {
     if (!APPS_SCRIPT_URL) {
       return NextResponse.json(
-        { ok: false, error: "Falta env CRM_APPS_SCRIPT_URL en Vercel" },
+        { ok: false, error: "Falta env CRM_APPS_SCRIPT_URL en Vercel/.env" },
         { status: 500 }
       );
     }
 
     const body = await req.json();
 
-    const lead_key = String(body?.lead_key || "").trim();
-    const origen = String(body?.origen || "").trim(); // WEB/INOFOOD/...
-    const asignado_a = String(body?.asignado_a || "").trim().toLowerCase();
-    const asignado_por = String(body?.asignado_por || "").trim().toLowerCase();
+    const lead = body?.lead || {};
 
-    if (!lead_key) return NextResponse.json({ ok: false, error: "lead_key es obligatorio" }, { status: 400 });
-    if (!origen) return NextResponse.json({ ok: false, error: "origen es obligatorio" }, { status: 400 });
-    if (!asignado_a) return NextResponse.json({ ok: false, error: "asignado_a es obligatorio" }, { status: 400 });
-    if (!asignado_por) return NextResponse.json({ ok: false, error: "asignado_por es obligatorio" }, { status: 400 });
+    // ✅ folio viene del body o del lead (para evitar “Folio requerido”)
+    const folio = String(body?.folio || lead?.folio || "").trim();
 
-    // Payload orientado a cabeceras CRM_DB (lo que Apps Script insertará)
-    const payload = {
-      action: "CREAR_Y_ASIGNAR", // 👈 NUEVO ACTION en Apps Script
-      lead_key,
-      origen_prospecto: origen,
+    const asignado_a = normEmail(body?.asignado_a);
+    const asignado_por = normEmail(body?.asignado_por);
 
-      nombre_razon_social: String(body?.nombre_razon_social || "").trim(),
-      correo: String(body?.correo || "").trim(),
-      telefono: String(body?.telefono || "").trim(),
-      direccion: String(body?.direccion || "").trim(), // puede venir vacío en leads externos
-      rubro: String(body?.rubro || "").trim(),
+    if (!folio) {
+      return NextResponse.json(
+        { ok: false, error: "Folio requerido (no viene ni en body.folio ni en body.lead.folio)" },
+        { status: 400 }
+      );
+    }
+    if (!asignado_a) return NextResponse.json({ ok: false, error: "asignado_a requerido" }, { status: 400 });
+    if (!asignado_por) return NextResponse.json({ ok: false, error: "asignado_por requerido" }, { status: 400 });
 
-      monto_proyectado: String(body?.monto_proyectado || "").trim(),
-      etapa_nombre: String(body?.etapa_nombre || "").trim(),
-      observacion: String(body?.observacion || "").trim(),
+    // 1) CREATE en CRM_DB (si existe, Apps Script devuelve duplicated=true)
+    const createPayload = {
+      action: "CREATE",
 
-      // para tracking (si quieres guardarlo en una columna "fuente" o "source_id")
-      fuente: origen,
-      source_id: lead_key,
+      // trazabilidad
+      created_at: lead.created_at || new Date().toISOString(),
+      folio,
 
-      // asignación
-      asignado_a,
-      asignado_por,
+      // ✅ fuente/origen real
+      fuente: lead.origen_prospecto || lead.fuente || "BD",
+      // ✅ id estable (si no viene source_id)
+      source_id: lead.source_id || lead.lead_key || folio,
 
-      // scope auxiliar (si lo quieres guardar)
-      division: String(body?.division || "").trim(),
+      // datos principales
+      nombre_razon_social: lead.nombre_razon_social || "",
+      rut: lead.rut || "",
+      telefono: lead.telefono || "",
+      correo: lead.correo || "",
+      direccion: lead.direccion || "", // en hojas puede no venir
+      rubro: lead.rubro || "",
+      monto_proyectado: lead.monto_proyectado || "",
+
+      // tu hoja trae IN/FB/HC/IND
+      division: lead.division || "",
+
+      etapa_id: lead.etapa_id || "",
+      etapa_nombre: lead.etapa_nombre || "",
+
+      fecha_cierre_id: lead.fecha_cierre_id || "",
+      fecha_cierre_nombre: lead.fecha_cierre_nombre || "",
+
+      prob_cierre_id: lead.prob_cierre_id || "",
+      prob_cierre_nombre: lead.prob_cierre_nombre || "",
+
+      origen_prospecto: lead.origen_prospecto || "",
+      observacion: lead.observacion || "",
+
+      ejecutivo_email: lead.ejecutivo_email || "",
+
+      // estado inicial (el Apps Script igual lo defaultea)
+      estado: "PENDIENTE_ASIGNACION",
+      asignado_a: "",
+      asignado_por: "",
+      asignado_at: "",
     };
 
-    const resp = await fetch(APPS_SCRIPT_URL, {
+    const respCreate = await fetch(APPS_SCRIPT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       cache: "no-store",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(createPayload),
     });
 
-    const text = await resp.text();
-    let data: any = null;
+    const textCreate = await respCreate.text();
+    let dataCreate: any;
     try {
-      data = JSON.parse(text);
+      dataCreate = JSON.parse(textCreate);
     } catch {
-      data = { ok: false, error: "Respuesta no JSON desde Apps Script", raw: text.slice(0, 300) };
+      dataCreate = { ok: false, error: "Respuesta no JSON (CREATE)", raw: textCreate.slice(0, 300) };
     }
 
-    if (!resp.ok || !data?.ok) {
+    if (!respCreate.ok || dataCreate?.ok === false) {
       return NextResponse.json(
-        { ok: false, error: data?.error || `Sheets error (${resp.status})`, raw: data?.raw },
+        {
+          ok: false,
+          error: dataCreate?.error || `Sheets error (CREATE ${respCreate.status})`,
+          raw: dataCreate?.raw,
+          debug: { folio, fuente: createPayload.fuente },
+        },
         { status: 500 }
       );
     }
 
-    // Apps Script debe devolver folio real creado en CRM_DB (correlativo)
-    return NextResponse.json({ ok: true, folio: data?.folio || null });
+    // 2) ASIGNAR
+    const respAssign = await fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        action: "ASIGNAR",
+        folio,
+        asignado_a,
+        asignado_por,
+      }),
+    });
+
+    const textAssign = await respAssign.text();
+    let dataAssign: any;
+    try {
+      dataAssign = JSON.parse(textAssign);
+    } catch {
+      dataAssign = { ok: false, error: "Respuesta no JSON (ASIGNAR)", raw: textAssign.slice(0, 300) };
+    }
+
+    if (!respAssign.ok || !dataAssign?.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: dataAssign?.error || `Sheets error (ASIGNAR ${respAssign.status})`,
+          raw: dataAssign?.raw,
+          debug: { folio, asignado_a, asignado_por },
+        },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ ok: true, duplicated: !!dataCreate?.duplicated });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Error desconocido";
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
