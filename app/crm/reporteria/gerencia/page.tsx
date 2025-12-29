@@ -19,6 +19,7 @@ const JEFATURAS = new Set(
     "jorge.beltran@spartan.cl",
     "alberto.damm@spartan.cl",
     "nelson.norambuena@spartan.cl",
+    "carlos.avendano@spartan.cl",
   ].map((x) => x.trim().toLowerCase())
 );
 
@@ -26,7 +27,8 @@ const JEFATURA_SCOPE_PREFIJOS: Record<string, string[]> = {
   "claudia.borquez@spartan.cl": ["IN", "FB"],
   "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND"], // gerente general
   "alberto.damm@spartan.cl": ["IND"],
-  "nelson.norambuena@spartan.cl": ["HC"],
+  "nelson.norambuena@spartan.cl": ["BSC"],
+  "carlos.avendano@spartan.cl": ["HC"],
 };
 
 function normalizeEmail(s: string) {
