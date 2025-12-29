@@ -1,21 +1,24 @@
+// app/api/crm/reporteria/gerencia/route.ts
 import { NextResponse } from "next/server";
 
 const CSV_CRM_DB_URL =
   process.env.CRM_CRM_DB_CSV_URL ||
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vR6D9j1ZjygWJKRXLV22AMb2oMYKVQWlly1KdAIKRm9jBAOIvIxNd9jqhEi2Zc-7LnjLe2wfhKrfsEW/pub?gid=0&single=true&output=csv";
 
-/** ✅ BD_WEB (solo para pendientes por asignar) */
-const SHEET_ID = "1xHT48r3asID6PCrgXTCpjbwujdnu6E7aev29BHq7U9w";
+/** ✅ BD_WEB (por asignar) */
+const SHEET_ID_WEB = "1xHT48r3asID6PCrgXTCpjbwujdnu6E7aev29BHq7U9w";
 const WEB_GID = "0";
-function sheetCsvUrl(gid: string) {
-  return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${gid}`;
+
+/** ✅ EJECUTIVOS (scope y mapeo email -> división) */
+const SHEET_ID_EJECUTIVOS = "1VwCOaGlF7uXJH8wbPX6V81gLm3PMAonaG6Ts-_ye6rY";
+const EJECUTIVOS_GID = "0";
+
+function sheetCsvUrl(sheetId: string, gid: string) {
+  return `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`;
 }
 
 type Row = Record<string, string>;
 
-/** =========================
- * CSV helpers
- * ========================= */
 function normalizeHeader(h: string) {
   return (h || "")
     .replace(/^\uFEFF/, "")
@@ -113,9 +116,23 @@ function parseIsoDate(s: string) {
   return Number.isFinite(t) ? new Date(t) : null;
 }
 
-/** =========================
- * Estados
- * ========================= */
+function parseProbFactor(probNombre: string, estadoKey: string) {
+  if (estadoKey === "CERRADO_GANADO") return 1;
+  if (estadoKey === "NO_GANADO" || estadoKey === "CERRADO_PERDIDO") return 0;
+
+  const matches = String(probNombre || "").match(/(\d+)\s*%/g);
+  if (!matches || matches.length === 0) return 0;
+
+  const values = matches
+    .map((x) => Number(String(x).replace(/[^\d]/g, "")))
+    .filter((n) => Number.isFinite(n));
+
+  if (!values.length) return 0;
+
+  const avg = values.reduce((a, b) => a + b, 0) / values.length;
+  return Math.max(0, Math.min(1, avg / 100));
+}
+
 const ESTADOS_ORDER = [
   "PENDIENTE_ASIGNACION",
   "ASIGNADO",
@@ -163,50 +180,29 @@ function normalizeEstadoToKey(estadoRaw: string) {
 }
 
 /** =========================
- * Scope Jefaturas (API)
+ * ✅ Folio determinístico (WEB)
  * ========================= */
-const JEFATURA_SCOPE_PREFIJOS: Record<string, string[]> = {
-  "claudia.borquez@spartan.cl": ["IN", "FB"],
-  "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND", "BSC"],
-  "alberto.damm@spartan.cl": ["IND"],
-  "nelson.norambuena@spartan.cl": ["BSC"],
-  "carlos.avendano@spartan.cl": ["HC"],
-};
-
-function normalizeDivisionPrefijo(raw: string) {
-  const n = normUpper(raw);
-
-  // Normalizaciones típicas
-  const FB_ALIASES = new Set(["FB", "FOOD", "FOOD_SERVICE", "FOODSERVICE"]);
-  const IN_ALIASES = new Set(["IN", "INOFOOD", "INO_FOOD"]);
-
-  if (FB_ALIASES.has(n)) return "FB";
-  if (IN_ALIASES.has(n)) return "IN";
-
-  if (n === "HC" || n === "IND" || n === "BSC") return n;
-
-  return n || "";
+function makeFolio(origen: string, razon: string, mail: string, fecha: string) {
+  const base = `${origen}|${razon}|${mail}|${fecha}`.toLowerCase();
+  let hash = 0;
+  for (let i = 0; i < base.length; i++) hash = (hash * 31 + base.charCodeAt(i)) >>> 0;
+  const short = hash.toString(36).slice(0, 8);
+  return `LEAD-${origen.replace(/\s+/g, "")}-${short}`;
 }
 
-function parseProbFactor(probNombre: string, estadoKey: string) {
-  if (estadoKey === "CERRADO_GANADO") return 1;
-  if (estadoKey === "NO_GANADO" || estadoKey === "CERRADO_PERDIDO") return 0;
+function normalizeLeadRowWeb(r: Row): { folio: string; division: string } {
+  const origen = "WEB";
+  const razon = pick(r, "razon_social", "razon", "empresa", "nombre_razon_social");
+  const mail = pick(r, "mail", "correo", "email", "e_mail");
+  const fechaContacto = pick(r, "fecha_contacto", "fecha", "created_at");
+  const division = (pick(r, "division", "prefijo") || "").trim().toUpperCase();
 
-  const matches = String(probNombre || "").match(/(\d+)\s*%/g);
-  if (!matches || matches.length === 0) return 0;
-
-  const values = matches
-    .map((x) => Number(String(x).replace(/[^\d]/g, "")))
-    .filter((n) => Number.isFinite(n));
-
-  if (!values.length) return 0;
-
-  const avg = values.reduce((a, b) => a + b, 0) / values.length;
-  return Math.max(0, Math.min(1, avg / 100));
+  const folio = pick(r, "folio") || makeFolio(origen, razon, mail, fechaContacto);
+  return { folio: (folio || "").trim(), division: division || "—" };
 }
 
 /** =========================
- * Buckets fecha/prob
+ * ✅ Buckets: prob y fecha cierre
  * ========================= */
 function bucketProb(probNombre: string) {
   const raw = (probNombre || "").trim();
@@ -234,28 +230,48 @@ function seriesFromCountMap(m: Record<string, number>) {
     .sort((a, b) => b.value - a.value);
 }
 
-/** =========================
- * Folio determinístico para WEB
- * (para comparar BD_WEB vs CRM_DB)
- * ========================= */
-function makeFolio(origen: string, razon: string, mail: string, fecha: string) {
-  const base = `${origen}|${razon}|${mail}|${fecha}`.toLowerCase();
-  let hash = 0;
-  for (let i = 0; i < base.length; i++) hash = (hash * 31 + base.charCodeAt(i)) >>> 0;
-  const short = hash.toString(36).slice(0, 8);
-  return `LEAD-${origen.replace(/\s+/g, "")}-${short}`;
+async function fetchCsvRows(url: string, label: string): Promise<Row[]> {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`No se pudo leer ${label} (${res.status})`);
+  const text = await res.text();
+  if (text.trim().startsWith("<")) {
+    throw new Error(`${label} no devuelve CSV (Google devolvió HTML). Revisa permisos del sheet.`);
+  }
+  return parseCsv(text);
 }
 
-function normalizeLeadRowWeb(r: Row): { folio: string; division: string } {
-  const origen = "WEB";
-  const razon = pick(r, "razon_social", "razon", "empresa", "nombre_razon_social");
-  const mail = pick(r, "mail", "correo", "email", "e_mail");
-  const fechaContacto = pick(r, "fecha_contacto", "fecha", "created_at");
-  const divisionRaw = pick(r, "division", "prefijo");
-  const division = normalizeDivisionPrefijo(divisionRaw) || "—";
+/** =========================
+ * ✅ Ejecutivos: map email->division y supervisor->divisiones
+ * Headers esperadas: nombre,email,zona,gerencia,supervisor,cargo,division
+ * ========================= */
+function buildEjecutivosIndex(rows: Row[]) {
+  const emailToDivision: Record<string, string> = {};
+  const supervisorToDivs: Record<string, Set<string>> = {};
 
-  const folio = pick(r, "folio") || makeFolio(origen, razon, mail, fechaContacto);
-  return { folio: (folio || "").trim(), division };
+  for (const r of rows) {
+    const email = lowerEmail(pick(r, "email"));
+    const division = (pick(r, "division") || "").trim().toUpperCase();
+    const supervisor = lowerEmail(pick(r, "supervisor"));
+
+    if (email && division) emailToDivision[email] = division;
+
+    if (supervisor && division) {
+      if (!supervisorToDivs[supervisor]) supervisorToDivs[supervisor] = new Set();
+      supervisorToDivs[supervisor].add(division);
+    }
+  }
+
+  return { emailToDivision, supervisorToDivs };
+}
+
+function inferDivisionFromCRMRow(r: Row, emailToDivision: Record<string, string>) {
+  const rawDiv = (pick(r, "division") || "").trim().toUpperCase();
+  if (rawDiv) return rawDiv;
+
+  const ej = lowerEmail(pick(r, "asignado_a", "ejecutivo_email"));
+  if (ej && emailToDivision[ej]) return emailToDivision[ej];
+
+  return "—";
 }
 
 export async function GET(req: Request) {
@@ -264,7 +280,9 @@ export async function GET(req: Request) {
 
     const from = searchParams.get("from") || "";
     const to = searchParams.get("to") || "";
-    const divisionParam = searchParams.get("division") || "";
+
+    // "division" acá es un filtro explícito del UI (si seleccionan una)
+    const explicitDivision = (searchParams.get("division") || "").trim().toUpperCase();
 
     const ejecutivo = (searchParams.get("ejecutivo") || "").trim().toLowerCase();
     const origen = (searchParams.get("origen") || "").trim().toUpperCase();
@@ -274,18 +292,32 @@ export async function GET(req: Request) {
     const includeAssigned = searchParams.get("includeAssigned") !== "0";
 
     const viewerEmail = lowerEmail(searchParams.get("viewerEmail") || "");
+    const isJorge = viewerEmail === "jorge.beltran@spartan.cl";
 
     const dFrom = from ? parseIsoDate(from) : null;
     const dTo = to ? parseIsoDate(to) : null;
 
-    const isJorge = viewerEmail === "jorge.beltran@spartan.cl";
-    const allowedScope = isJorge
-      ? null
-      : new Set((JEFATURA_SCOPE_PREFIJOS[viewerEmail] || []).map((x) => x.toUpperCase()));
+    /** 0) Ejecutivos (para scope real de jefatura + inferir división si CRM_DB viene vacío) */
+    const ejecutivosRows = await fetchCsvRows(
+      sheetCsvUrl(SHEET_ID_EJECUTIVOS, EJECUTIVOS_GID),
+      "EJECUTIVOS"
+    );
+    const { emailToDivision, supervisorToDivs } = buildEjecutivosIndex(ejecutivosRows);
 
-    const requestedDiv = normalizeDivisionPrefijo(divisionParam);
-    const effectiveDivision =
-      isJorge ? requestedDiv : requestedDiv && allowedScope?.has(requestedDiv) ? requestedDiv : "";
+    // scopeDivs:
+    // - si es Jorge => sin scope
+    // - si no, tomamos divisiones donde "supervisor" == viewerEmail
+    // - si no existen, fallback: la división del propio viewer (si está en la hoja)
+    const scopeDivs: Set<string> = new Set();
+    if (!isJorge) {
+      const setFromSupervisor = supervisorToDivs[viewerEmail];
+      if (setFromSupervisor && setFromSupervisor.size) {
+        setFromSupervisor.forEach((d) => scopeDivs.add(d));
+      } else {
+        const selfDiv = emailToDivision[viewerEmail];
+        if (selfDiv) scopeDivs.add(selfDiv);
+      }
+    }
 
     /** 1) CRM_DB */
     const res = await fetch(CSV_CRM_DB_URL, { cache: "no-store" });
@@ -295,35 +327,37 @@ export async function GET(req: Request) {
     const text = await res.text();
     const rows = parseCsv(text);
 
-    // index por folio para comparar con BD_WEB (asignación real)
-    const crmByFolio: Record<string, { estadoKey: string; asignadoA: string; division: string }> = {};
+    // index por folio (para comparar con WEB)
+    const crmByFolio: Record<string, { estadoKey: string; asignadoA: string }> = {};
     for (const r of rows) {
       const folio = (pick(r, "folio") || "").trim();
       if (!folio) continue;
-
       crmByFolio[folio] = {
         estadoKey: normalizeEstadoToKey(pick(r, "estado")),
         asignadoA: lowerEmail(pick(r, "asignado_a")),
-        division: normalizeDivisionPrefijo(pick(r, "division")) || "",
       };
     }
 
-    /** 2) Filtrar CRM_DB (para TODO el reporte) */
+    /** 2) Filtrar CRM_DB (con scope real) */
     const filtered = rows.filter((r) => {
       const created = parseIsoDate(pick(r, "created_at"));
+
       if (dFrom && (!created || created < dFrom)) return false;
       if (dTo && (!created || created > dTo)) return false;
 
-      const divPref = normalizeDivisionPrefijo(pick(r, "division"));
-      if (!isJorge && allowedScope && divPref && !allowedScope.has(divPref)) return false;
+      // ✅ división efectiva (CRM_DB o inferida por Ejecutivos)
+      const divEff = inferDivisionFromCRMRow(r, emailToDivision);
 
-      if (effectiveDivision) {
-        if (divPref !== effectiveDivision) return false;
-      }
+      // ✅ filtro explícito del select (si seleccionan una)
+      if (explicitDivision && divEff !== explicitDivision) return false;
+
+      // ✅ si NO hay división seleccionada, aplicamos scope (excepto Jorge)
+      if (!explicitDivision && !isJorge && scopeDivs.size > 0 && !scopeDivs.has(divEff)) return false;
 
       const ej = (pick(r, "asignado_a", "ejecutivo_email") || "").trim().toLowerCase();
       if (ejecutivo && ej !== ejecutivo) return false;
 
+      // ojo: "origen" (query) es opcional. Si no viene, NO filtramos.
       const org = (pick(r, "origen_prospecto") || "").trim().toUpperCase();
       if (origen && org !== origen) return false;
 
@@ -338,7 +372,7 @@ export async function GET(req: Request) {
       return true;
     });
 
-    /** 3) Agregaciones CRM_DB */
+    /** 3) Agregaciones CRM_DB (incluye TODOS los orígenes) */
     let total = 0;
     let asignados = 0;
     let contactados = 0;
@@ -349,6 +383,8 @@ export async function GET(req: Request) {
     let forecastMonto = 0;
 
     const countByEstado: Record<string, number> = {};
+    const countByOrigen: Record<string, number> = {};
+
     const countByFechaCierre: Record<string, number> = {};
     const countByProbCierre: Record<string, number> = {};
 
@@ -362,6 +398,11 @@ export async function GET(req: Request) {
 
       const estadoKey = normalizeEstadoToKey(pick(r, "estado"));
       countByEstado[estadoKey] = (countByEstado[estadoKey] || 0) + 1;
+
+      // ✅ origen: si falta origen_prospecto, usamos "fuente" como fallback
+      const org =
+        (pick(r, "origen_prospecto") || pick(r, "fuente") || "—").trim().toUpperCase();
+      countByOrigen[org] = (countByOrigen[org] || 0) + 1;
 
       const fechaNombre = bucketFechaCierre(pick(r, "fecha_cierre_nombre"));
       countByFechaCierre[fechaNombre] = (countByFechaCierre[fechaNombre] || 0) + 1;
@@ -388,8 +429,8 @@ export async function GET(req: Request) {
       if (!byEjecutivo[ej]) {
         byEjecutivo[ej] = { ejecutivo: ej, count: 0, pipeline: 0, forecast: 0, ganados: 0, noGanados: 0 };
       }
-      byEjecutivo[ej].count += 1;
 
+      byEjecutivo[ej].count += 1;
       if (!isClosed) {
         byEjecutivo[ej].pipeline += monto;
         byEjecutivo[ej].forecast += forecast;
@@ -399,41 +440,28 @@ export async function GET(req: Request) {
       }
     }
 
-    /** 4) ✅ Pendientes por asignar desde BD_WEB (SOLO estos 2 campos) */
+    /** 4) ✅ Pendientes desde BD_WEB (SOLO para los 2 campos: KPI + tabla) */
+    const webRows = await fetchCsvRows(sheetCsvUrl(SHEET_ID_WEB, WEB_GID), "BD_WEB");
+
     let pendientesWeb = 0;
     const pendientesWebByDivision: Record<string, number> = {};
 
-    const resWeb = await fetch(sheetCsvUrl(WEB_GID), { cache: "no-store" });
-    if (resWeb.ok) {
-      const textWeb = await resWeb.text();
-      if (!textWeb.trim().startsWith("<")) {
-        const webRows = parseCsv(textWeb);
+    for (const wr of webRows) {
+      const { folio, division: divWeb } = normalizeLeadRowWeb(wr);
+      if (!folio) continue;
 
-        for (const wr of webRows) {
-          const { folio, division: divWebPref } = normalizeLeadRowWeb(wr);
-          if (!folio) continue;
+      // si seleccionan explícitamente una división => filtra
+      if (explicitDivision && divWeb !== explicitDivision) continue;
 
-          // scope por jefatura (si NO es Jorge)
-          if (!isJorge && allowedScope) {
-            if (divWebPref && divWebPref !== "—" && !allowedScope.has(divWebPref)) continue;
-          }
+      // si NO hay explícita, aplica scope (excepto Jorge)
+      if (!explicitDivision && !isJorge && scopeDivs.size > 0 && !scopeDivs.has(divWeb)) continue;
 
-          // filtro división si el usuario eligió una (effectiveDivision ya viene “validada”)
-          if (effectiveDivision && divWebPref !== effectiveDivision) continue;
+      const crm = crmByFolio[folio];
+      const isPending = !crm || (crm.estadoKey === "PENDIENTE_ASIGNACION" && !crm.asignadoA);
 
-          const crm = crmByFolio[folio];
-
-          // ✅ regla pendientes:
-          // - si no existe en CRM_DB => pendiente
-          // - si existe pero está PENDIENTE_ASIGNACION y sin asignado_a => pendiente
-          const isPending = !crm || (crm.estadoKey === "PENDIENTE_ASIGNACION" && !crm.asignadoA);
-
-          if (isPending) {
-            pendientesWeb += 1;
-            const k = divWebPref || "—";
-            pendientesWebByDivision[k] = (pendientesWebByDivision[k] || 0) + 1;
-          }
-        }
+      if (isPending) {
+        pendientesWeb += 1;
+        pendientesWebByDivision[divWeb] = (pendientesWebByDivision[divWeb] || 0) + 1;
       }
     }
 
@@ -443,6 +471,8 @@ export async function GET(req: Request) {
       name: ESTADOS_LABEL[k] || k,
       value: countByEstado[k] || 0,
     }));
+
+    const origenSeries = seriesFromCountMap(countByOrigen);
 
     const ejecutivoSeries = Object.values(byEjecutivo)
       .map((x) => ({
@@ -455,20 +485,23 @@ export async function GET(req: Request) {
       }))
       .sort((a, b) => b.pipeline - a.pipeline);
 
+    const fechaCierreSeries = seriesFromCountMap(countByFechaCierre);
+    const probCierreSeries = seriesFromCountMap(countByProbCierre);
+    const pendientesWebPorDivision = seriesFromCountMap(pendientesWebByDivision);
+
     return NextResponse.json({
       ok: true,
       filters: {
         from,
         to,
-        division: effectiveDivision,
-        requestedDivision: divisionParam,
+        division: explicitDivision, // lo que seleccionó el usuario (si seleccionó)
         ejecutivo,
         origen,
         onlyAssigned,
         onlyClosed,
         includeAssigned,
         viewerEmail,
-        scope: isJorge ? "ALL" : Array.from(allowedScope || []),
+        scopeDivs: isJorge ? ["TODOS"] : Array.from(scopeDivs),
       },
       kpis: {
         total,
@@ -478,23 +511,21 @@ export async function GET(req: Request) {
         noGanado,
         pipelineMonto: Math.round(pipelineMonto),
         forecastMonto: Math.round(forecastMonto),
-
-        // ✅ SOLO desde BD_WEB
-        pendientesWeb,
+        pendientesWeb, // ✅ viene de BD_WEB
       },
       charts: {
-        estados: estadoSeries,
+        estados: estadoSeries, // ✅ para la mini tabla
+        origenes: origenSeries,
         ejecutivos: ejecutivoSeries,
-        fechaCierre: seriesFromCountMap(countByFechaCierre),
-        probCierre: seriesFromCountMap(countByProbCierre),
-
-        // ✅ SOLO desde BD_WEB
-        pendientesWebPorDivision: seriesFromCountMap(pendientesWebByDivision),
+        fechaCierre: fechaCierreSeries,
+        probCierre: probCierreSeries,
+        pendientesWebPorDivision, // ✅ viene de BD_WEB
       },
       debug: {
         crmRows: rows.length,
-        filteredRows: filtered.length,
-        pendientesWebDivs: Object.keys(pendientesWebByDivision).length,
+        crmFiltered: filtered.length,
+        webRows: webRows.length,
+        ejecutivosRows: ejecutivosRows.length,
       },
     });
   } catch (e: unknown) {
