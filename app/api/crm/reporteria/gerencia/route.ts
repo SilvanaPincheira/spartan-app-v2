@@ -1,71 +1,44 @@
 // app/api/crm/reporteria/gerencia/route.ts
 import { NextResponse } from "next/server";
 
-export const runtime = "nodejs";
-
 /** =========================
- *  FUENTES
- * ========================= */
+ *  CRM_DB
+ *  ========================= */
 const CSV_CRM_DB_URL =
   process.env.CRM_CRM_DB_CSV_URL ||
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vR6D9j1ZjygWJKRXLV22AMb2oMYKVQWlly1KdAIKRm9jBAOIvIxNd9jqhEi2Zc-7LnjLe2wfhKrfsEW/pub?gid=0&single=true&output=csv";
 
-/** ✅ BD_WEB (Sheet directo) */
-const WEB_SHEET_ID = "1xHT48r3asID6PCrgXTCpjbwujdnu6E7aev29BHq7U9w";
-const WEB_GID = "0";
+/** =========================
+ *  Ejecutivos (Sheet)
+ *  =========================
+ * Cabeceras: nombre | email | zona | gerencia | supervisor | cargo | division
+ */
+const EJECUTIVOS_SHEET_ID =
+  process.env.CRM_EJECUTIVOS_SHEET_ID || "1VwCOaGlF7uXJH8wbPX6V81gLm3PMAonaG6Ts-_ye6rY";
+const EJECUTIVOS_GID = process.env.CRM_EJECUTIVOS_GID || "0";
 
-/** ✅ EJECUTIVOS (Sheet maestro) */
-const EJECUTIVOS_SHEET_ID = "1VwCOaGlF7uXJH8wbPX6V81gLm3PMAonaG6Ts-_ye6rY";
-const EJECUTIVOS_GID = "0";
-
-function sheetCsvUrl(sheetId: string, gid: string) {
-  // gviz/tq csv funciona con sheets NO "publish" (siempre que esté compartido para lectura)
+function gsheetCsvUrl(sheetId: string, gid: string) {
+  // gviz/tq funciona con sheets normales (sin publicar)
   return `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`;
 }
 
 /** =========================
- *  ACL (SERVER-SIDE)
- * ========================= */
+ *  Seguridad: scopes jefaturas
+ *  (API debe ENFORZAR, no confiar solo en el page)
+ *  ========================= */
 const JEFATURA_SCOPE_PREFIJOS: Record<string, string[]> = {
   "claudia.borquez@spartan.cl": ["IN", "FB"],
-  "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND", "BSC"], // gerente general
+  "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND"], // gerente general (igual bypass total)
   "alberto.damm@spartan.cl": ["IND"],
   "nelson.norambuena@spartan.cl": ["BSC"],
   "carlos.avendano@spartan.cl": ["HC"],
 };
 
-function lowerEmail(s: string) {
-  return (s || "").trim().toLowerCase();
-}
-
-function normalizeDivisionRaw(raw: string) {
-  const s = (raw || "").trim().toUpperCase();
-  if (!s) return "";
-
-  // normalizaciones comunes (ajusta si tienes otras)
-  if (s === "FOOD" || s === "F&B" || s.includes("F&B")) return "FB";
-  if (s.includes("FB")) return "FB";
-  if (s.includes("INST") && s.includes("FB")) return "FB"; // FB/INST -> FB (si tú lo consideras FB)
-  if (s.includes("IN")) return "IN";
-  if (s.includes("HC")) return "HC";
-  if (s.includes("IND")) return "IND";
-  if (s.includes("BSC")) return "BSC";
-
-  return s;
-}
-
-function parseDivList(raw: string) {
-  const s = (raw || "").trim();
-  if (!s) return [];
-  return s
-    .split(/[,;/|]+/g)
-    .map((x) => normalizeDivisionRaw(x))
-    .filter(Boolean);
-}
+const GERENTE_GENERAL = "jorge.beltran@spartan.cl";
 
 /** =========================
  *  CSV helpers
- * ========================= */
+ *  ========================= */
 type Row = Record<string, string>;
 
 function normalizeHeader(h: string) {
@@ -141,6 +114,10 @@ function pick(r: Row, ...keys: string[]) {
   return "";
 }
 
+function lowerEmail(s: string) {
+  return (s || "").trim().toLowerCase();
+}
+
 function normUpper(s: string) {
   return (s || "")
     .trim()
@@ -162,28 +139,8 @@ function parseIsoDate(s: string) {
 }
 
 /** =========================
- *  Prob/Forecast
- * ========================= */
-function parseProbFactor(probNombre: string, estadoKey: string) {
-  if (estadoKey === "CERRADO_GANADO") return 1;
-  if (estadoKey === "NO_GANADO" || estadoKey === "CERRADO_PERDIDO") return 0;
-
-  const matches = String(probNombre || "").match(/(\d+)\s*%/g);
-  if (!matches || matches.length === 0) return 0;
-
-  const values = matches
-    .map((x) => Number(String(x).replace(/[^\d]/g, "")))
-    .filter((n) => Number.isFinite(n));
-
-  if (!values.length) return 0;
-
-  const avg = values.reduce((a, b) => a + b, 0) / values.length;
-  return Math.max(0, Math.min(1, avg / 100));
-}
-
-/** =========================
- *  Estados
- * ========================= */
+ *  Estados / labels
+ *  ========================= */
 const ESTADOS_ORDER = [
   "PENDIENTE_ASIGNACION",
   "ASIGNADO",
@@ -216,7 +173,7 @@ function normalizeEstadoToKey(estadoRaw: string) {
   if (n === "PENDIENTE_ASIGNACION") return "PENDIENTE_ASIGNACION";
   if (n === "EN_GESTION") return "EN_GESTION";
   if (n === "CERRADO_GANADO") return "CERRADO_GANADO";
-  if (n === "NO_GANADO") return "NO_GANADO";
+  if (n === "NO_GANADO" || n === "CERRADO_PERDIDO") return "NO_GANADO";
   if (n === "REUNION") return "REUNION";
   if (n === "LEVANTAMIENTO") return "LEVANTAMIENTO";
   if (n === "PROPUESTA") return "PROPUESTA";
@@ -231,30 +188,28 @@ function normalizeEstadoToKey(estadoRaw: string) {
 }
 
 /** =========================
- * ✅ Folio determinístico (WEB)
- * ========================= */
-function makeFolio(origen: string, razon: string, mail: string, fecha: string) {
-  const base = `${origen}|${razon}|${mail}|${fecha}`.toLowerCase();
-  let hash = 0;
-  for (let i = 0; i < base.length; i++) hash = (hash * 31 + base.charCodeAt(i)) >>> 0;
-  const short = hash.toString(36).slice(0, 8);
-  return `LEAD-${origen.replace(/\s+/g, "")}-${short}`;
-}
+ *  Probabilidad (forecast)
+ *  ========================= */
+function parseProbFactor(probNombre: string, estadoKey: string) {
+  if (estadoKey === "CERRADO_GANADO") return 1;
+  if (estadoKey === "NO_GANADO") return 0;
 
-function normalizeLeadRowWeb(r: Row): { folio: string; division: string } {
-  const origen = "WEB";
-  const razon = pick(r, "razon_social", "razon", "empresa", "nombre_razon_social");
-  const mail = pick(r, "mail", "correo", "email", "e_mail");
-  const fechaContacto = pick(r, "fecha_contacto", "fecha", "created_at");
-  const division = normalizeDivisionRaw(pick(r, "division", "prefijo", "area"));
+  const matches = String(probNombre || "").match(/(\d+)\s*%/g);
+  if (!matches || matches.length === 0) return 0;
 
-  const folio = pick(r, "folio") || makeFolio(origen, razon, mail, fechaContacto);
-  return { folio: (folio || "").trim(), division: division || "—" };
+  const values = matches
+    .map((x) => Number(String(x).replace(/[^\d]/g, "")))
+    .filter((n) => Number.isFinite(n));
+
+  if (!values.length) return 0;
+
+  const avg = values.reduce((a, b) => a + b, 0) / values.length;
+  return Math.max(0, Math.min(1, avg / 100));
 }
 
 /** =========================
- * ✅ Buckets: prob y fecha cierre
- * ========================= */
+ *  Buckets (tablas)
+ *  ========================= */
 function bucketProb(probNombre: string) {
   const raw = (probNombre || "").trim();
   if (!raw) return "Sin dato";
@@ -267,6 +222,7 @@ function bucketProb(probNombre: string) {
 
   if (nums.length >= 2) return `Entre ${nums[0]}% y ${nums[1]}%`;
   if (nums.length === 1) return `${nums[0]}%`;
+
   return raw;
 }
 
@@ -282,74 +238,66 @@ function seriesFromCountMap(m: Record<string, number>) {
 }
 
 /** =========================
- * ✅ Leer maestro de ejecutivos
- * ========================= */
-type ExecMap = Record<string, string[]>;
+ *  Ejecutivos map: email -> division
+ *  ========================= */
+async function loadEjecutivosDivisionMap() {
+  const url = gsheetCsvUrl(EJECUTIVOS_SHEET_ID, EJECUTIVOS_GID);
+  const res = await fetch(url, { cache: "no-store" });
 
-async function fetchExecMap(): Promise<{ ok: boolean; map: ExecMap; error?: string }> {
-  try {
-    const url = sheetCsvUrl(EJECUTIVOS_SHEET_ID, EJECUTIVOS_GID);
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) return { ok: false, map: {}, error: `No se pudo leer EJECUTIVOS (${res.status})` };
-
-    const text = await res.text();
-    if (text.trim().startsWith("<")) {
-      return { ok: false, map: {}, error: "EJECUTIVOS no devuelve CSV (Google devolvió HTML). Revisa permisos." };
-    }
-
-    const rows = parseCsv(text);
-
-    const map: ExecMap = {};
-    for (const r of rows) {
-      const email = lowerEmail(pick(r, "email", "correo", "mail", "ejecutivo", "ejecutivo_email", "usuario"));
-      if (!email) continue;
-
-      // puede venir como division, area, prefijo, scope, etc.
-      const rawDiv = pick(r, "division", "divisiones", "prefijo", "area", "scope");
-      const divs = parseDivList(rawDiv);
-
-      // fallback: si solo viene una división “simple”
-      const single = normalizeDivisionRaw(rawDiv);
-      const finalDivs = divs.length ? divs : single ? [single] : [];
-
-      if (!finalDivs.length) continue;
-      map[email] = Array.from(new Set(finalDivs));
-    }
-
-    return { ok: true, map };
-  } catch (e: any) {
-    return { ok: false, map: {}, error: e?.message || "Error leyendo EJECUTIVOS" };
+  if (!res.ok) {
+    throw new Error(`No se pudo leer Sheet Ejecutivos (status=${res.status}). Revisa permisos.`);
   }
+
+  const text = await res.text();
+  if (text.trim().startsWith("<")) {
+    throw new Error("Sheet Ejecutivos no devolvió CSV (Google devolvió HTML). Revisa permisos del sheet.");
+  }
+
+  const rows = parseCsv(text);
+
+  // email -> division
+  const map: Record<string, string> = {};
+  for (const r of rows) {
+    const email = lowerEmail(pick(r, "email", "correo", "mail"));
+    const division = (pick(r, "division") || "").trim().toUpperCase();
+    if (email) map[email] = division || "—";
+  }
+
+  return { map, total: rows.length };
 }
 
 /** =========================
- * ✅ Resolver división(es) del lead
- * ========================= */
-function resolveLeadDivisions(r: Row, execMap: ExecMap): string[] {
-  const divLead = normalizeDivisionRaw(pick(r, "division"));
-  if (divLead) return [divLead];
+ *  División del prospecto = división del EJECUTIVO (regla)
+ *  ========================= */
+function getDivisionFromRow(r: Row, execDivisionMap: Record<string, string>) {
+  const execEmail = lowerEmail(pick(r, "ejecutivo_email", "asignado_a", "ejecutivo", "owner"));
+  const mapDiv = execEmail ? (execDivisionMap[execEmail] || "").trim().toUpperCase() : "";
+  if (mapDiv) return mapDiv;
 
-  const ej = lowerEmail(pick(r, "asignado_a", "ejecutivo_email"));
-  const divs = execMap[ej] || [];
-  return divs.length ? divs : [];
+  // fallback (por si viene, pero NO es fuente de verdad)
+  const legacy = (pick(r, "division") || "").trim().toUpperCase();
+  return legacy || "—";
 }
 
-function intersects(a: string[], b: string[]) {
-  if (!a.length || !b.length) return false;
-  const setB = new Set(b);
-  return a.some((x) => setB.has(x));
+function getFuenteKey(r: Row) {
+  // en tu sheet aparece "fuente" (MANUAL, WEB, CSV_PIA, etc.)
+  const f = normUpper(pick(r, "fuente", "origen_prospecto"));
+  return f || "—";
 }
 
 /** =========================
  *  GET
- * ========================= */
+ *  ========================= */
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
 
     const from = searchParams.get("from") || "";
     const to = searchParams.get("to") || "";
-    const divisionParam = normalizeDivisionRaw(searchParams.get("division") || "");
+
+    // este "division" ya NO filtra por columna division del prospecto,
+    // filtra por "división del ejecutivo" (desde Sheet Ejecutivos)
+    const divisionFilter = (searchParams.get("division") || "").trim().toUpperCase();
 
     const ejecutivo = lowerEmail(searchParams.get("ejecutivo") || "");
     const origen = (searchParams.get("origen") || "").trim().toUpperCase();
@@ -358,100 +306,69 @@ export async function GET(req: Request) {
     const onlyClosed = searchParams.get("onlyClosed") === "1";
     const includeAssigned = searchParams.get("includeAssigned") !== "0";
 
+    // seguridad: viewerEmail define scope real en API
     const viewerEmail = lowerEmail(searchParams.get("viewerEmail") || "");
 
-    // ✅ scope server-side
-    const canSeeAll = viewerEmail === "jorge.beltran@spartan.cl";
-    const allowedDivs = canSeeAll ? [] : (JEFATURA_SCOPE_PREFIJOS[viewerEmail] || []).map((x) => x.toUpperCase());
-
-    // si no es Jorge y no tiene scope -> 403
-    if (!canSeeAll && allowedDivs.length === 0) {
-      return NextResponse.json(
-        { ok: false, error: "Sin permisos para reportería de gerencia (scope vacío)." },
-        { status: 403 }
-      );
-    }
-
-    // si viene división explícita y está fuera del scope -> 403
-    if (!canSeeAll && divisionParam && !allowedDivs.includes(divisionParam)) {
-      return NextResponse.json(
-        { ok: false, error: `División no permitida para tu scope: ${divisionParam}` },
-        { status: 403 }
-      );
-    }
-
+    // rangos
     const dFrom = from ? parseIsoDate(from) : null;
     const dTo = to ? parseIsoDate(to) : null;
 
-    /** 0) Maestro ejecutivos */
-    const execRes = await fetchExecMap();
-    if (!execRes.ok) {
-      return NextResponse.json({ ok: false, error: execRes.error || "Error EJECUTIVOS" }, { status: 500 });
-    }
-    const execMap = execRes.map;
+    // 1) cargar Ejecutivos -> división
+    const { map: execDivisionMap, total: ejecutivosRows } = await loadEjecutivosDivisionMap();
 
-    /** 1) CRM_DB */
+    // 2) definir allowed divisions por jefatura
+    const isGerenteGeneral = viewerEmail === GERENTE_GENERAL;
+    const allowedDivs = isGerenteGeneral ? [] : (JEFATURA_SCOPE_PREFIJOS[viewerEmail] || []).map((x) => x.toUpperCase());
+
+    // 3) leer CRM_DB
     const res = await fetch(CSV_CRM_DB_URL, { cache: "no-store" });
     if (!res.ok) {
       return NextResponse.json({ ok: false, error: `No se pudo leer CRM_DB (${res.status})` }, { status: 500 });
     }
+
     const text = await res.text();
     const rows = parseCsv(text);
 
-    // index por folio (para comparar con WEB)
-    const crmByFolio: Record<string, { estadoKey: string; asignadoA: string }> = {};
-    for (const r of rows) {
-      const folio = (pick(r, "folio") || "").trim();
-      if (!folio) continue;
-      crmByFolio[folio] = {
-        estadoKey: normalizeEstadoToKey(pick(r, "estado")),
-        asignadoA: lowerEmail(pick(r, "asignado_a")),
-      };
-    }
-
-    /** 2) Filtrar CRM_DB (con scope real) */
+    // 4) filtrar CRM_DB (con scope por división del ejecutivo)
     const filtered = rows.filter((r) => {
       const created = parseIsoDate(pick(r, "created_at"));
-
       if (dFrom && (!created || created < dFrom)) return false;
       if (dTo && (!created || created > dTo)) return false;
 
-      // filtro ejecutivo
-      const ej = lowerEmail(pick(r, "asignado_a", "ejecutivo_email"));
+      // filtrar por ejecutivo explícito (si viene)
+      const ej = lowerEmail(pick(r, "ejecutivo_email", "asignado_a", "ejecutivo"));
       if (ejecutivo && ej !== ejecutivo) return false;
 
-      // filtro origen
+      // filtrar por origen (si viene)
       const org = (pick(r, "origen_prospecto") || "").trim().toUpperCase();
       if (origen && org !== origen) return false;
 
-      // filtros estado
+      // estado rules
       const estadoKey = normalizeEstadoToKey(pick(r, "estado"));
       const isAssigned = estadoKey === "ASIGNADO" || !!pick(r, "asignado_a");
       const isClosed = estadoKey === "CERRADO_GANADO" || estadoKey === "NO_GANADO";
+
       if (!includeAssigned && isAssigned) return false;
       if (onlyAssigned && !isAssigned) return false;
       if (onlyClosed && !isClosed) return false;
 
-      // ✅ división efectiva: por lead.division o por maestro ejecutivos
-      const leadDivs = resolveLeadDivisions(r, execMap);
+      // ✅ scope real: división del ejecutivo
+      const divExec = getDivisionFromRow(r, execDivisionMap);
 
-      // si el lead no tiene división resoluble y no eres Jorge: lo excluimos (para evitar “filtración”)
-      if (!canSeeAll && leadDivs.length === 0) return false;
+      // filtro por selector "División" del page (ya es div del ejecutivo)
+      if (divisionFilter && divExec !== divisionFilter) return false;
 
-      // aplica scope
-      if (!canSeeAll && allowedDivs.length) {
-        if (!intersects(leadDivs, allowedDivs)) return false;
-      }
-
-      // si usuario eligió división puntual, exige que el lead esté en esa división
-      if (divisionParam) {
-        if (!leadDivs.includes(divisionParam)) return false;
+      // si NO es gerente general, aplicar allowedDivs
+      if (allowedDivs.length > 0) {
+        // si no encontramos división, por seguridad NO lo mostramos
+        if (!divExec || divExec === "—") return false;
+        if (!allowedDivs.includes(divExec)) return false;
       }
 
       return true;
     });
 
-    /** 3) Agregaciones CRM_DB */
+    // 5) agregaciones
     let total = 0;
     let asignados = 0;
     let contactados = 0;
@@ -463,6 +380,7 @@ export async function GET(req: Request) {
 
     const countByEstado: Record<string, number> = {};
     const countByOrigen: Record<string, number> = {};
+
     const countByFechaCierre: Record<string, number> = {};
     const countByProbCierre: Record<string, number> = {};
 
@@ -470,6 +388,11 @@ export async function GET(req: Request) {
       string,
       { ejecutivo: string; count: number; pipeline: number; forecast: number; ganados: number; noGanados: number }
     > = {};
+
+    // ✅ Por asignar (WEB) desde CRM_DB
+    // regla: fuente=WEB y (sin asignado_a OR estado=PENDIENTE_ASIGNACION)
+    let pendientesWeb = 0;
+    const pendientesWebByDivision: Record<string, number> = {};
 
     for (const r of filtered) {
       total++;
@@ -480,11 +403,12 @@ export async function GET(req: Request) {
       const org = (pick(r, "origen_prospecto") || "—").trim().toUpperCase();
       countByOrigen[org] = (countByOrigen[org] || 0) + 1;
 
+      // tablas
       const fechaNombre = bucketFechaCierre(pick(r, "fecha_cierre_nombre"));
       countByFechaCierre[fechaNombre] = (countByFechaCierre[fechaNombre] || 0) + 1;
 
-      const probBucket = bucketProb(pick(r, "prob_cierre_nombre"));
-      countByProbCierre[probBucket] = (countByProbCierre[probBucket] || 0) + 1;
+      const probNombreBucket = bucketProb(pick(r, "prob_cierre_nombre"));
+      countByProbCierre[probNombreBucket] = (countByProbCierre[probNombreBucket] || 0) + 1;
 
       const monto = toMontoNumber(pick(r, "monto_proyectado"));
       const factor = parseProbFactor(pick(r, "prob_cierre_nombre"), estadoKey);
@@ -501,7 +425,7 @@ export async function GET(req: Request) {
       if (estadoKey === "CERRADO_GANADO") cerradosGanado++;
       if (estadoKey === "NO_GANADO") noGanado++;
 
-      const ej = lowerEmail(pick(r, "asignado_a", "ejecutivo_email")) || "—";
+      const ej = lowerEmail(pick(r, "ejecutivo_email", "asignado_a")) || "—";
       if (!byEjecutivo[ej]) {
         byEjecutivo[ej] = { ejecutivo: ej, count: 0, pipeline: 0, forecast: 0, ganados: 0, noGanados: 0 };
       }
@@ -514,61 +438,30 @@ export async function GET(req: Request) {
         if (estadoKey === "CERRADO_GANADO") byEjecutivo[ej].ganados += 1;
         if (estadoKey === "NO_GANADO") byEjecutivo[ej].noGanados += 1;
       }
-    }
 
-    /** 4) Pendientes desde BD_WEB (scope aplicado) */
-    const resWeb = await fetch(sheetCsvUrl(WEB_SHEET_ID, WEB_GID), { cache: "no-store" });
-    if (!resWeb.ok) {
-      return NextResponse.json(
-        { ok: false, error: `No se pudo leer BD_WEB (gid=0) status=${resWeb.status}` },
-        { status: 500 }
-      );
-    }
+      // ✅ pendientes web por división (división del ejecutivo)
+      const fuenteKey = getFuenteKey(r);
+      const asignadoA = lowerEmail(pick(r, "asignado_a"));
+      const divExec = getDivisionFromRow(r, execDivisionMap);
 
-    const textWeb = await resWeb.text();
-    if (textWeb.trim().startsWith("<")) {
-      return NextResponse.json(
-        { ok: false, error: "BD_WEB no devuelve CSV (Google devolvió HTML). Revisa permisos del sheet." },
-        { status: 500 }
-      );
-    }
+      const isPendienteWeb =
+        fuenteKey === "WEB" && (estadoKey === "PENDIENTE_ASIGNACION" || !asignadoA);
 
-    const webRows = parseCsv(textWeb);
-
-    let pendientesWeb = 0;
-    const pendientesWebByDivision: Record<string, number> = {};
-
-    for (const wr of webRows) {
-      const { folio, division: divWebRaw } = normalizeLeadRowWeb(wr);
-      const divWeb = normalizeDivisionRaw(divWebRaw);
-
-      if (!folio) continue;
-
-      // scope: si no es Jorge, solo contar divisiones permitidas
-      if (!canSeeAll) {
-        if (!divWeb) continue;
-        if (allowedDivs.length && !allowedDivs.includes(divWeb)) continue;
-      }
-
-      // filtro por división seleccionada
-      if (divisionParam && divWeb !== divisionParam) continue;
-
-      const crm = crmByFolio[folio];
-      const isPending = !crm || (crm.estadoKey === "PENDIENTE_ASIGNACION" && !crm.asignadoA);
-
-      if (isPending) {
+      if (isPendienteWeb) {
         pendientesWeb += 1;
-        const key = divWeb || "—";
-        pendientesWebByDivision[key] = (pendientesWebByDivision[key] || 0) + 1;
+        const kDiv = divExec || "—";
+        pendientesWebByDivision[kDiv] = (pendientesWebByDivision[kDiv] || 0) + 1;
       }
     }
 
-    /** 5) Series */
+    // 6) series (lo que consume el page)
     const estadoSeries = ESTADOS_ORDER.map((k) => ({
       key: k,
       name: ESTADOS_LABEL[k] || k,
       value: countByEstado[k] || 0,
     }));
+
+    const origenSeries = seriesFromCountMap(countByOrigen);
 
     const ejecutivoSeries = Object.values(byEjecutivo)
       .map((x) => ({
@@ -581,19 +474,23 @@ export async function GET(req: Request) {
       }))
       .sort((a, b) => b.pipeline - a.pipeline);
 
+    const fechaCierreSeries = seriesFromCountMap(countByFechaCierre);
+    const probCierreSeries = seriesFromCountMap(countByProbCierre);
+    const pendientesWebPorDivision = seriesFromCountMap(pendientesWebByDivision);
+
     return NextResponse.json({
       ok: true,
       filters: {
         from,
         to,
-        division: divisionParam,
+        division: divisionFilter,
         ejecutivo,
         origen,
         onlyAssigned,
         onlyClosed,
         includeAssigned,
         viewerEmail,
-        scope: canSeeAll ? "ALL" : allowedDivs,
+        allowedDivs: isGerenteGeneral ? "ALL" : allowedDivs,
       },
       kpis: {
         total,
@@ -606,17 +503,27 @@ export async function GET(req: Request) {
         pendientesWeb,
       },
       charts: {
+        // mini tabla etapas
+        estados: estadoSeries,
+
+        // opcional por si lo usas después
+        origenes: origenSeries,
+
+        // chart principal
         ejecutivos: ejecutivoSeries,
-        fechaCierre: seriesFromCountMap(countByFechaCierre),
-        probCierre: seriesFromCountMap(countByProbCierre),
-        pendientesWebPorDivision: seriesFromCountMap(pendientesWebByDivision),
-        estados: estadoSeries, // 👈 para tu mini tabla de etapas
+
+        // tablas
+        fechaCierre: fechaCierreSeries,
+        probCierre: probCierreSeries,
+
+        // por asignar (web) desde CRM_DB
+        pendientesWebPorDivision,
       },
       debug: {
         crmRows: rows.length,
         filteredRows: filtered.length,
-        webRows: webRows.length,
-        ejecutivosMapCount: Object.keys(execMap).length,
+        ejecutivosSheetRows: ejecutivosRows,
+        pendientesWeb,
       },
     });
   } catch (e: unknown) {
