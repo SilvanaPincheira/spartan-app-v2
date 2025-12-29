@@ -12,6 +12,39 @@ function sheetCsvUrl(gid: string) {
   return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${gid}`;
 }
 
+/** =========================
+ * ✅ ACL JEFATURAS (SERVER)
+ * ========================= */
+const JEFATURAS = new Set(
+  [
+    "claudia.borquez@spartan.cl",
+    "jorge.beltran@spartan.cl",
+    "alberto.damm@spartan.cl",
+    "nelson.norambuena@spartan.cl",
+    "carlos.avendano@spartan.cl",
+  ].map((x) => x.trim().toLowerCase())
+);
+
+const JEFATURA_SCOPE_PREFIJOS: Record<string, string[]> = {
+  "claudia.borquez@spartan.cl": ["IN", "FB"],
+  "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND"], // gerente general: ve todo
+  "alberto.damm@spartan.cl": ["IND"],
+  "nelson.norambuena@spartan.cl": ["BSC"],
+  "carlos.avendano@spartan.cl": ["HC"],
+};
+
+function lowerEmail(s: string) {
+  return (s || "").trim().toLowerCase();
+}
+
+function getScope(viewerEmailRaw: string) {
+  const viewerEmail = lowerEmail(viewerEmailRaw);
+  const isJefatura = JEFATURAS.has(viewerEmail);
+  const canSeeAll = viewerEmail === "jorge.beltran@spartan.cl";
+  const allowedDivs = (JEFATURA_SCOPE_PREFIJOS[viewerEmail] || []).map((x) => String(x).toUpperCase());
+  return { viewerEmail, isJefatura, canSeeAll, allowedDivs };
+}
+
 type Row = Record<string, string>;
 
 function normalizeHeader(h: string) {
@@ -95,10 +128,6 @@ function normUpper(s: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^A-Z0-9]+/g, "_")
     .replace(/^_|_$/g, "");
-}
-
-function lowerEmail(s: string) {
-  return (s || "").trim().toLowerCase();
 }
 
 function toMontoNumber(raw: string) {
@@ -203,15 +232,15 @@ function bucketProb(probNombre: string) {
   const raw = (probNombre || "").trim();
   if (!raw) return "Sin dato";
 
-  const nums = raw
-    .match(/\d+/g)
-    ?.map((x) => Number(x))
-    .filter((n) => Number.isFinite(n)) || [];
+  const nums =
+    raw
+      .match(/\d+/g)
+      ?.map((x) => Number(x))
+      .filter((n) => Number.isFinite(n)) || [];
 
   if (nums.length >= 2) return `Entre ${nums[0]}% y ${nums[1]}%`;
   if (nums.length === 1) return `${nums[0]}%`;
 
-  // si viene texto tipo "ALTA" etc.
   return raw;
 }
 
@@ -232,7 +261,9 @@ export async function GET(req: Request) {
 
     const from = searchParams.get("from") || "";
     const to = searchParams.get("to") || "";
-    let division = searchParams.get("division") || "";
+
+    // ⚠️ lo que pide el front (se valida contra scope)
+    const requestedDivision = (searchParams.get("division") || "").trim().toUpperCase();
 
     const ejecutivo = (searchParams.get("ejecutivo") || "").trim().toLowerCase();
     const origen = (searchParams.get("origen") || "").trim().toUpperCase();
@@ -241,9 +272,21 @@ export async function GET(req: Request) {
     const onlyClosed = searchParams.get("onlyClosed") === "1";
     const includeAssigned = searchParams.get("includeAssigned") !== "0";
 
-    // ✅ gerente general ve todo
-    const viewerEmail = lowerEmail(searchParams.get("viewerEmail") || "");
-    if (viewerEmail === "jorge.beltran@spartan.cl") division = "";
+    // ✅ scope server (obligatorio)
+    const scope = getScope(searchParams.get("viewerEmail") || "");
+    if (!scope.isJefatura) {
+      return NextResponse.json({ ok: false, error: "Sin permisos (solo jefaturas)." }, { status: 403 });
+    }
+
+    // ✅ división efectiva
+    // - Jorge: puede ver todo, puede filtrar si quiere
+    // - otros: solo scope; si pidieron una división fuera del scope, se ignora (queda "")
+    const divisionEffective =
+      scope.canSeeAll
+        ? requestedDivision
+        : requestedDivision && scope.allowedDivs.includes(requestedDivision)
+          ? requestedDivision
+          : "";
 
     const dFrom = from ? parseIsoDate(from) : null;
     const dTo = to ? parseIsoDate(to) : null;
@@ -257,17 +300,18 @@ export async function GET(req: Request) {
     const rows = parseCsv(text);
 
     // index por folio (para comparar con WEB)
-    const crmByFolio: Record<string, { estadoKey: string; asignadoA: string }> = {};
+    const crmByFolio: Record<string, { estadoKey: string; asignadoA: string; division: string }> = {};
     for (const r of rows) {
       const folio = (pick(r, "folio") || "").trim();
       if (!folio) continue;
       crmByFolio[folio] = {
         estadoKey: normalizeEstadoToKey(pick(r, "estado")),
         asignadoA: lowerEmail(pick(r, "asignado_a")),
+        division: (pick(r, "division") || "").trim().toUpperCase(),
       };
     }
 
-    /** 2) Filtrar CRM_DB */
+    /** 2) Filtrar CRM_DB con SCOPE */
     const filtered = rows.filter((r) => {
       const created = parseIsoDate(pick(r, "created_at"));
 
@@ -275,7 +319,14 @@ export async function GET(req: Request) {
       if (dTo && (!created || created > dTo)) return false;
 
       const div = (pick(r, "division") || "").trim().toUpperCase();
-      if (division && div !== division.toUpperCase()) return false;
+
+      // ✅ scope (si no es Jorge)
+      if (!scope.canSeeAll) {
+        if (scope.allowedDivs.length && !scope.allowedDivs.includes(div)) return false;
+      }
+
+      // ✅ filtro por division puntual (si aplica)
+      if (divisionEffective && div !== divisionEffective) return false;
 
       const ej = (pick(r, "asignado_a", "ejecutivo_email") || "").trim().toLowerCase();
       if (ejecutivo && ej !== ejecutivo) return false;
@@ -306,7 +357,6 @@ export async function GET(req: Request) {
 
     const countByEstado: Record<string, number> = {};
     const countByOrigen: Record<string, number> = {};
-
     const countByFechaCierre: Record<string, number> = {};
     const countByProbCierre: Record<string, number> = {};
 
@@ -324,12 +374,11 @@ export async function GET(req: Request) {
       const org = (pick(r, "origen_prospecto") || "—").trim().toUpperCase();
       countByOrigen[org] = (countByOrigen[org] || 0) + 1;
 
-      // ✅ tablas que faltaban
       const fechaNombre = bucketFechaCierre(pick(r, "fecha_cierre_nombre"));
       countByFechaCierre[fechaNombre] = (countByFechaCierre[fechaNombre] || 0) + 1;
 
-      const probNombre = bucketProb(pick(r, "prob_cierre_nombre"));
-      countByProbCierre[probNombre] = (countByProbCierre[probNombre] || 0) + 1;
+      const probNombreBucket = bucketProb(pick(r, "prob_cierre_nombre"));
+      countByProbCierre[probNombreBucket] = (countByProbCierre[probNombreBucket] || 0) + 1;
 
       const monto = toMontoNumber(pick(r, "monto_proyectado"));
       const factor = parseProbFactor(pick(r, "prob_cierre_nombre"), estadoKey);
@@ -361,7 +410,7 @@ export async function GET(req: Request) {
       }
     }
 
-    /** 4) ✅ Pendientes desde BD_WEB */
+    /** 4) ✅ Pendientes desde BD_WEB (con SCOPE) */
     const resWeb = await fetch(sheetCsvUrl(WEB_GID), { cache: "no-store" });
     if (!resWeb.ok) {
       return NextResponse.json(
@@ -387,7 +436,13 @@ export async function GET(req: Request) {
       const { folio, division: divWeb } = normalizeLeadRowWeb(wr);
       if (!folio) continue;
 
-      if (division && divWeb !== division.toUpperCase()) continue;
+      // ✅ scope (si no es Jorge)
+      if (!scope.canSeeAll) {
+        if (scope.allowedDivs.length && !scope.allowedDivs.includes(divWeb)) continue;
+      }
+
+      // ✅ filtro por division puntual si aplica
+      if (divisionEffective && divWeb !== divisionEffective) continue;
 
       const crm = crmByFolio[folio];
 
@@ -420,12 +475,18 @@ export async function GET(req: Request) {
 
     const fechaCierreSeries = seriesFromCountMap(countByFechaCierre);
     const probCierreSeries = seriesFromCountMap(countByProbCierre);
-
     const pendientesWebPorDivision = seriesFromCountMap(pendientesWebByDivision);
 
     return NextResponse.json({
       ok: true,
-      filters: { from, to, division, ejecutivo, origen, onlyAssigned, onlyClosed, includeAssigned, viewerEmail },
+      scope: {
+        viewerEmail: scope.viewerEmail,
+        canSeeAll: scope.canSeeAll,
+        allowedDivs: scope.allowedDivs,
+        requestedDivision,
+        divisionApplied: divisionEffective,
+      },
+      filters: { from, to, division: divisionEffective, ejecutivo, origen, onlyAssigned, onlyClosed, includeAssigned },
       kpis: {
         total,
         asignados,
@@ -437,15 +498,11 @@ export async function GET(req: Request) {
         pendientesWeb,
       },
       charts: {
-        estados: estadoSeries,
+        estados: estadoSeries, // ✅ para tabla mini de etapas
         origenes: origenSeries,
         ejecutivos: ejecutivoSeries,
-
-        // ✅ ya salen en el page
         fechaCierre: fechaCierreSeries,
         probCierre: probCierreSeries,
-
-        // ✅ pendientes desde WEB
         pendientesWebPorDivision,
       },
       debug: {
