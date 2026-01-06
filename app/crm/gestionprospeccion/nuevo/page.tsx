@@ -64,6 +64,7 @@ const CRM_DIVISIONES = [
   { value: "FOOD", label: "Food" },
   { value: "INSTITUCIONAL", label: "Institucional" },
   { value: "HC", label: "HC" },
+  { value: "BSC", label: "BSC"},
 ] as const;
 
 /** =========================
