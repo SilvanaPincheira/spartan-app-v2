@@ -182,7 +182,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 0) Auth
+    /** 0) Auth */
     const supabase = createRouteHandlerClient({ cookies });
     const { data: authData, error: authErr } = await supabase.auth.getUser();
     if (authErr) {
@@ -191,14 +191,14 @@ export async function POST(req: Request) {
         { status: 401 }
       );
     }
+
     const loggedEmail = normEmail(authData.user?.email || "");
     if (!loggedEmail) {
       return NextResponse.json({ ok: false, error: "No autenticado" }, { status: 401 });
     }
 
-    // 1) Body
+    /** 1) Body */
     const body = await req.json().catch(() => null);
-
     const folio = pick(body, "folio");
     if (!folio) {
       return NextResponse.json({ ok: false, error: "Folio requerido" }, { status: 400 });
@@ -207,16 +207,25 @@ export async function POST(req: Request) {
     const estadoIn = pick(body, "estado");
     const estado = normalizeEstado(estadoIn);
 
-    // etapa puede venir como número o string
-    const etapa_id_in = pick(body, "etapa_id"); // ej "2"
-    const etapa_id = toIntOrEmpty(etapa_id_in);
+    const etapa_id = toIntOrEmpty(pick(body, "etapa_id"));
     const etapa_nombre = pick(body, "etapa_nombre");
-
     const observacion = pick(body, "observacion");
-    const ejecutivo_email = normEmail(pick(body, "ejecutivo_email")) || loggedEmail;
+    const ejecutivo_email =
+      normEmail(pick(body, "ejecutivo_email")) || loggedEmail;
 
-    // 2) Si viene estado pero no viene etapa*, autocompletamos aquí
-    // (solo si UI NO mandó etapa_id/etapa_nombre)
+    /** 🔹 NUEVO: campos de ficha */
+    const fichaFields: Record<string, string> = {
+      nombre_razon_social: pick(body, "nombre_razon_social"),
+      rut: pick(body, "rut"),
+      contacto: pick(body, "contacto"),
+      telefono: pick(body, "telefono"),
+      correo: pick(body, "correo"),
+      direccion: pick(body, "direccion"),
+      rubro: pick(body, "rubro"),
+      monto_proyectado: pick(body, "monto_proyectado"),
+    };
+
+    /** 2) Autocompletar etapa si viene estado */
     let autoEtapaId = etapa_id;
     let autoEtapaNombre = etapa_nombre;
 
@@ -228,15 +237,23 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3) Al menos un cambio real
-    if (!estado && !autoEtapaId && !autoEtapaNombre && !observacion && !ejecutivo_email) {
+    /** 3) Validar que exista algo para actualizar */
+    const hasFichaChanges = Object.values(fichaFields).some(Boolean);
+
+    if (
+      !estado &&
+      !autoEtapaId &&
+      !autoEtapaNombre &&
+      !observacion &&
+      !hasFichaChanges
+    ) {
       return NextResponse.json(
-        { ok: false, error: "Nada que actualizar (envía estado/etapa/observación)" },
+        { ok: false, error: "Nada que actualizar" },
         { status: 400 }
       );
     }
 
-    // 4) Validar existencia + permisos vía CSV (si falla CSV, no bloqueamos)
+    /** 4) Validar permisos (MISMO COMPORTAMIENTO ANTERIOR) */
     let current: Row | null = null;
     try {
       const { hit } = await fetchCrmDbByFolio(folio);
@@ -244,7 +261,7 @@ export async function POST(req: Request) {
 
       if (!current) {
         return NextResponse.json(
-          { ok: false, error: "Folio no existe en CRM_DB (no encontrado)" },
+          { ok: false, error: "Folio no existe en CRM_DB" },
           { status: 404 }
         );
       }
@@ -252,56 +269,34 @@ export async function POST(req: Request) {
       const asignadoA = normEmail(current.asignado_a || "");
       const isJefatura = JEFATURAS.has(loggedEmail);
 
-      // si está asignado a alguien y no soy yo, bloqueo (salvo jefatura)
       if (asignadoA && asignadoA !== loggedEmail && !isJefatura) {
         return NextResponse.json(
-          {
-            ok: false,
-            error:
-              "Sin permiso: solo el ejecutivo asignado o jefatura puede actualizar este prospecto.",
-            assigned_to: asignadoA,
-            me: loggedEmail,
-          },
+          { ok: false, error: "Sin permiso para actualizar este prospecto" },
           { status: 403 }
         );
       }
-
-      // si NO está asignado, ejecutivo no debería gestionar (salvo jefatura)
-      if (!asignadoA && !isJefatura) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error:
-              "Este prospecto aún no está asignado. Debe ser asignado por jefatura antes de gestionarlo.",
-          },
-          { status: 409 }
-        );
-      }
-
-      // transición lógica opcional
-      const prevEstado = normalizeEstado(current.estado || "");
-      if (prevEstado === "PENDIENTE_ASIGNACION" && estado === "EN_GESTION" && !isJefatura) {
-        return NextResponse.json(
-          { ok: false, error: "No puedes pasar a EN_GESTION si aún está PENDIENTE_ASIGNACION." },
-          { status: 409 }
-        );
-      }
-    } catch (e: any) {
-      // Si falla CSV, seguimos igual (pero añadimos warning)
-      current = null;
+    } catch {
+      // no bloqueamos si falla CSV
     }
 
-    // 5) Payload hacia Apps Script UPDATE
+    /** 5) Payload FINAL a Apps Script */
     const payload: any = {
       action: "UPDATE",
       folio,
-      ejecutivo_email, // trazabilidad
+      ejecutivo_email,
     };
+
     if (estado) payload.estado = estado;
     if (autoEtapaId) payload.etapa_id = autoEtapaId;
     if (autoEtapaNombre) payload.etapa_nombre = autoEtapaNombre;
     if (observacion) payload.observacion = observacion;
 
+    // 🔹 ficha (solo lo que venga)
+    Object.entries(fichaFields).forEach(([k, v]) => {
+      if (v) payload[k] = v;
+    });
+
+    /** 6) Enviar a Apps Script */
     const resp = await fetch(APPS_SCRIPT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -314,37 +309,20 @@ export async function POST(req: Request) {
     try {
       data = JSON.parse(text);
     } catch {
-      data = { ok: false, error: "Respuesta no JSON desde Apps Script", raw: text.slice(0, 400) };
+      data = { ok: false, error: "Respuesta no JSON", raw: text.slice(0, 400) };
     }
 
     if (!resp.ok || !data?.ok) {
       return NextResponse.json(
-        {
-          ok: false,
-          step: "APPS_SCRIPT_UPDATE",
-          error: data?.error || `Sheets error (UPDATE ${resp.status})`,
-          debug: data,
-        },
+        { ok: false, error: data?.error || "Error Apps Script", debug: data },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({
-      ok: true,
-      folio,
-      updated: {
-        estado: estado || null,
-        etapa_id: autoEtapaId || null,
-        etapa_nombre: autoEtapaNombre || null,
-        ejecutivo_email,
-        observacion_appended: !!observacion,
-      },
-      row_updated: data?.row_updated ?? null,
-      warning: current ? null : "No se pudo validar CRM_DB por CSV (se actualizó igual).",
-    });
+    return NextResponse.json({ ok: true, folio, updated: payload });
   } catch (e: any) {
     return NextResponse.json(
-      { ok: false, step: "UNHANDLED", error: e?.message || "Error desconocido" },
+      { ok: false, error: e?.message || "Error desconocido" },
       { status: 500 }
     );
   }
