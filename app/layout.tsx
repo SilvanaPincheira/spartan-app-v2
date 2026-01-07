@@ -32,24 +32,36 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   // 🔹 Cargar sesión y perfil desde Supabase
   useEffect(() => {
     const supabase = createClientComponentClient();
-
+  
     async function cargarDatos() {
       const { data } = await supabase.auth.getSession();
-      setSession(data.session);
-
-      if (data.session?.user) {
+      const session = data.session;
+  
+      // 🔐 Validación identidad SpartanOne
+      const email = session?.user?.email?.toLowerCase() || "";
+      if (email && !email.endsWith("@spartan.cl")) {
+        console.warn("🚫 Sesión no Spartan detectada:", email);
+        await supabase.auth.signOut({ scope: "global" });
+        window.location.href = "/login";
+        return;
+      }
+  
+      setSession(session);
+  
+      if (session?.user) {
         const { data: perfilData } = await supabase
           .from("profiles")
           .select("role, department, display_name, email")
-          .eq("id", data.session.user.id)
+          .eq("id", session.user.id)
           .single();
-
+  
         if (perfilData) setPerfil(perfilData);
       }
     }
-
+  
     cargarDatos();
   }, []);
+  
 
   const loggedEmail = useMemo(
     () => normalizeEmail(perfil?.email || session?.user?.email || ""),
