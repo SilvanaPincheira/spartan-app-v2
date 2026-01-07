@@ -26,7 +26,7 @@ const JEFATURAS = new Set(
 const JEFATURA_SCOPE_PREFIJOS: Record<string, string[]> = {
   "claudia.borquez@spartan.cl": ["IN", "FB"],
   "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND"], // gerente general
-  "alberto.damm@spartan.cl": ["IND"],
+  "alberto.damm@spartan.cl": ["IND", "BSC"],
   "nelson.norambuena@spartan.cl": ["BSC"],
   "carlos.avendano@spartan.cl": ["HC"],
 };

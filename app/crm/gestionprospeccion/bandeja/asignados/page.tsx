@@ -3,6 +3,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { useSearchParams } from "next/navigation";
+import ModalActualizarFicha from './ModalActualizarFicha';
+
 
 /** =========================
  *  CONFIG
@@ -212,6 +214,11 @@ export default function BandejaAsignadosPage() {
   const [ficha, setFicha] = useState<Record<string, string>>({});
   const [fichaMissing, setFichaMissing] = useState<Array<{ key: string; label: string }>>([]);
 
+  // modal nuevo para actualizar ficha directamente
+const [modalOpen, setModalOpen] = useState(false);
+const [prospectoActivo, setProspectoActivo] = useState<RowAny | null>(null);
+
+
   // ✅ scroll/highlight
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
   const [highlightFolio, setHighlightFolio] = useState<string | null>(null);
@@ -347,6 +354,12 @@ export default function BandejaAsignadosPage() {
 
     setOpenFicha(true);
   }
+
+  function abrirModalActualizar(r: RowAny) {
+    setProspectoActivo(r);
+    setModalOpen(true);
+  }
+  
 
   async function postUpdate(payload: any) {
     const resp = await fetch("/api/crm/prospectos/update", {
@@ -699,6 +712,24 @@ export default function BandejaAsignadosPage() {
                           >
                             Ver gestión
                           </button>
+
+                          <button
+  type="button"
+  onClick={() => abrirModalActualizar(r)}
+  disabled={!folio || busy}
+  style={{
+    padding: "8px 10px",
+    borderRadius: 10,
+    border: "1px solid #2563eb",
+    background: "#DBEAFE",
+    cursor: busy ? "not-allowed" : "pointer",
+    height: 36,
+    fontWeight: 800,
+  }}
+>
+  Actualizar datos
+</button>
+
 
                           <button
   type="button"
@@ -1071,7 +1102,39 @@ export default function BandejaAsignadosPage() {
             </div>
           </div>
         </div>
+
+
       )}
+      {modalOpen && prospectoActivo?.folio && (
+  <ModalActualizarFicha
+    abierto={modalOpen}
+    prospecto={{
+      folio: prospectoActivo.folio,
+      nombre_razon_social: prospectoActivo.nombre_razon_social || "",
+      rut: prospectoActivo.rut || "",
+      contacto: prospectoActivo.contacto || "",
+      telefono: prospectoActivo.telefono || "",
+      correo: prospectoActivo.correo || "",
+      direccion: prospectoActivo.direccion || "",
+      rubro: prospectoActivo.rubro || "",
+      monto_proyectado: prospectoActivo.monto_proyectado || "",
+      fecha_cierre: prospectoActivo.fecha_cierre_id || "",
+      probabilidad_cierre: prospectoActivo.prob_cierre_id || "",
+      etapa: prospectoActivo.etapa_nombre || "",
+      observacion: prospectoActivo.observacion || "",
+    }}
+    loggedEmail={loggedEmail}
+    onCerrar={() => {
+      setModalOpen(false);
+      setProspectoActivo(null);
+    }}
+    onGuardado={() => {
+      reload(); // refresca tabla con datos nuevos
+    }}
+  />
+)}
+
+
     </div>
   );
 }
