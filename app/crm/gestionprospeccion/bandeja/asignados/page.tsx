@@ -713,23 +713,7 @@ const [prospectoActivo, setProspectoActivo] = useState<RowAny | null>(null);
                             Ver gestión
                           </button>
 
-                          <button
-  type="button"
-  onClick={() => abrirModalActualizar(r)}
-  disabled={!folio || busy}
-  style={{
-    padding: "8px 10px",
-    borderRadius: 10,
-    border: "1px solid #2563eb",
-    background: "#DBEAFE",
-    cursor: busy ? "not-allowed" : "pointer",
-    height: 36,
-    fontWeight: 800,
-  }}
->
-  Actualizar datos
-</button>
-
+                          
 
                           <button
   type="button"
