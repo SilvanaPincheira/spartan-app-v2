@@ -4,22 +4,18 @@ import { NextResponse } from "next/server";
    CONFIG
    ========================= */
 
-// CRM_DB (prospectos)
+// CRM_DB
 const CRM_DB_CSV =
   process.env.CRM_DB_CSV_URL ||
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vR6D9j1ZjygWJKRXLV22AMb2oMYKVQWlly1KdAIKRm9jBAOIvIxNd9jqhEi2Zc-7LnjLe2wfhKrfsEW/pub?gid=0&single=true&output=csv";
 
-// HOJA EJECUTIVOS (jerarquía)
+// HOJA EJECUTIVOS
 const EJECUTIVOS_CSV =
-  process.env.EJECUTIVOS_CSV_URL ||
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vR1esuJvNYKb5vxOOJSfemBHYOasEb4YvjTMM52NXTvmPWIs6phGHha7ZMt_yv-fw7G3-rPUI4UGBZW/pub?gid=0&single=true&output=csv";
 
 // gerente general
 const GERENTE_GENERAL = "jorge.beltran@spartan.cl";
 
-/* =========================
-   HELPERS
-   ========================= */
 function normalize(s = "") {
   return s.trim().toLowerCase();
 }
@@ -37,6 +33,7 @@ function parseCSV(text: string): Record<string, string>[] {
     row.push(cur);
     cur = "";
   };
+
   const pushRow = () => {
     rows.push(row);
     row = [];
@@ -51,35 +48,44 @@ function parseCSV(text: string): Record<string, string>[] {
       i++;
       continue;
     }
+
     if (ch === '"') {
       inQuotes = !inQuotes;
       continue;
     }
+
     if (ch === "," && !inQuotes) {
       pushCell();
       continue;
     }
+
     if ((ch === "\n" || ch === "\r") && !inQuotes) {
       if (ch === "\r" && next === "\n") i++;
       pushCell();
       pushRow();
       continue;
     }
+
     cur += ch;
   }
+
   pushCell();
   pushRow();
 
   if (rows.length < 2) return [];
 
   const headers = rows[0].map((h) =>
-    h.replace(/^\uFEFF/, "").trim().toLowerCase().replace(/\s+/g, "_")
+    h
+      .replace(/^\uFEFF/, "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_")
   );
 
   return rows.slice(1).map((cells) => {
     const obj: Record<string, string> = {};
-    headers.forEach((h, i) => {
-      obj[h] = (cells[i] ?? "").trim();
+    headers.forEach((h, idx) => {
+      obj[h] = (cells[idx] ?? "").trim();
     });
     return obj;
   });
@@ -101,21 +107,19 @@ export async function GET(req: Request) {
     }
 
     /* =========================
-       1️⃣ Cargar hoja EJECUTIVOS
+       1️⃣ Cargar EJECUTIVOS
        ========================= */
     const execResp = await fetch(EJECUTIVOS_CSV, { cache: "no-store" });
     if (!execResp.ok) {
-      throw new Error(`Error leyendo Ejecutivos (${execResp.status})`);
+      throw new Error(`Error leyendo hoja Ejecutivos (${execResp.status})`);
     }
 
-    const ejecutivosCsv = await execResp.text();
-    const ejecutivosRows = parseCSV(ejecutivosCsv);
+    const execCsv = await execResp.text();
+    const ejecutivosRaw = parseCSV(execCsv);
 
-    const ejecutivos = ejecutivosRows.map((r) => ({
-      email: normalize(r.email),
-      gerencia: normalize(r.gerencia),
-      supervisor: normalize(r.supervisor),
-      division: (r.division || "").toUpperCase(),
+    const ejecutivos = ejecutivosRaw.map((e) => ({
+      email: normalize(e.email),
+      division: (e.division || "").toUpperCase(),
     }));
 
     /* =========================
@@ -124,23 +128,22 @@ export async function GET(req: Request) {
     let allowedExecutives: string[];
 
     if (viewerEmail === GERENTE_GENERAL) {
-      // 👑 gerente general ve todo
+      // Jorge ve todo
       allowedExecutives = ejecutivos.map((e) => e.email);
     } else {
-      allowedExecutives = ejecutivos
-        .filter(
-          (e) =>
-            e.gerencia === viewerEmail ||
-            e.supervisor === viewerEmail
-        )
-        .map((e) => e.email);
-    }
+      // divisiones del viewer
+      const viewerDivs = ejecutivos
+        .filter((e) => e.email === viewerEmail)
+        .map((e) => e.division);
 
-    if (allowedExecutives.length === 0) {
-      return NextResponse.json({
-        ok: true,
-        rows: [],
-      });
+      if (viewerDivs.length === 0) {
+        // no encontrado en hoja → no ve nada
+        return NextResponse.json({ ok: true, rows: [] });
+      }
+
+      allowedExecutives = ejecutivos
+        .filter((e) => viewerDivs.includes(e.division))
+        .map((e) => e.email);
     }
 
     /* =========================
@@ -155,27 +158,27 @@ export async function GET(req: Request) {
     const crmRows = parseCSV(crmCsv);
 
     /* =========================
-       4️⃣ Normalizar y filtrar prospectos
+       4️⃣ Map + filtro final
        ========================= */
     const data = crmRows
-      .map((r) => ({
-        folio: r.folio || "",
-        nombre_razon_social: r.nombre_razon_social || "",
-        ejecutivo_email: normalize(r.asignado_a || r.ejecutivo_email || ""),
-        estado: (r.estado || "").trim(),
-        etapa_nombre: r.etapa_nombre || "",
-        monto_proyectado: Number(r.monto_proyectado || 0),
-        updated_at:
-          r.updated_at ||
-          r.asignado_at ||
-          r.created_at ||
-          "",
-        division: (r.division || "").toUpperCase(),
-      }))
-      .filter((r) => {
-        if (!r.ejecutivo_email) return false;
-        return allowedExecutives.includes(r.ejecutivo_email);
-      });
+      .map((r) => {
+        const ejecutivo = normalize(r.asignado_a || r.ejecutivo_email || "");
+
+        return {
+          folio: r.folio || "",
+          nombre_razon_social: r.nombre_razon_social || "",
+          ejecutivo_email: ejecutivo,
+          estado: (r.estado || "").trim(),
+          etapa_nombre: r.etapa_nombre || "",
+          monto_proyectado: Number(r.monto_proyectado || 0),
+          updated_at:
+            r.updated_at ||
+            r.asignado_at ||
+            r.created_at ||
+            "",
+        };
+      })
+      .filter((r) => r.ejecutivo_email && allowedExecutives.includes(r.ejecutivo_email));
 
     return NextResponse.json({
       ok: true,
