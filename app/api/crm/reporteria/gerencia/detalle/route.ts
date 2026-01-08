@@ -86,12 +86,16 @@ export async function GET(req: Request) {
         division: (r.division || "").toUpperCase(),
       }))
       .filter((r) => {
-        // solo prospectos asignados
+        // si tiene ejecutivo, mostrarlo (asignado, contactado, etc.)
         if (!r.ejecutivo_email) return false;
-
-        // filtrar por scope de jefatura
-        return scope.some((pref) => r.division?.startsWith(pref));
+      
+        // si NO tiene división, igual mostrarlo (muy común en CRM_DB)
+        if (!r.division) return true;
+      
+        // si tiene división, validar scope
+        return scope.some((pref) => r.division.startsWith(pref));
       });
+      
 
     return NextResponse.json({
       ok: true,
