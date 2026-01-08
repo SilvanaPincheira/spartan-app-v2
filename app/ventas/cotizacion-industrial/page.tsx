@@ -518,10 +518,10 @@ useEffect(() => {
         if (descCalc > 20) {
           // 🚫 no permitir >20% descuento
           alert(
-            `❌ Precio inferior al 80% del precio base.\n\n` +
+            `❌ Precio inferior al 72% del precio base.\n\n` +
               `Precio base de comparación: ${money(baseComparacion)}\n` +
               `Digitado: ${money(pv)}\n\n` +
-              `El descuento calculado sería ${descCalc.toFixed(2)}%, lo que supera el máximo permitido (20%).\n\n` +
+              `El descuento calculado sería ${descCalc.toFixed(2)}%, lo que supera el máximo permitido (28%).\n\n` +
               `El precio será restablecido al valor base.`
           );
           row.precioVenta = baseComparacion; // restablecer al base correspondiente
@@ -531,17 +531,17 @@ useEffect(() => {
           // sincroniza % desc (puede ser negativo si sube el precio)
           row.descuento = Math.round((baseComparacion - pv) / baseComparacion * 100);
           // clamp sólo para visualización; no alerta si es < -20
-          row.descuento = clamp(row.descuento, -20, 20);
+          row.descuento = clamp(row.descuento, -20, 28);
         }
       } else if (field === "descuento") {
         // Usuario edita % desc
         let d = Math.round(num(value));
-        if (d > 20) {
+        if (d > 28) {
           alert("❌ Descuento máximo permitido es 20%. Se restablece al precio base.");
           d = 0;
           row.precioVenta = baseComparacion;
         } else {
-          d = clamp(d, -20, 20); // permite -20% (recargo) hasta +20% (rebaja)
+          d = clamp(d, -20, 28); // permite -20% (recargo) hasta +20% (rebaja)
           // aplica al precio
           const precio = Math.round(baseComparacion * (1 - d / 100));
           row.precioVenta = precio;
@@ -561,7 +561,7 @@ useEffect(() => {
           const basePres = Math.round((num(row.priceBase) || 0) * (num(row.kilos) || 1));
           const pv = Math.round(num(row.precioVenta));
           const descCalc = basePres > 0 ? ((basePres - pv) / basePres) * 100 : 0;
-          if (descCalc > 20) {
+          if (descCalc > 28) {
             alert(
               `❌ El precio por presentación quedó bajo el 80% del precio base al cambiar los Kg.\n\n` +
                 `Nuevo base presentación: ${money(basePres)}\n` +
@@ -573,7 +573,7 @@ useEffect(() => {
           } else {
             // sincroniza el % desc frente a cambio de kilos
             row.descuento = Math.round((basePres - pv) / basePres * 100);
-            row.descuento = clamp(row.descuento, -20, 20);
+            row.descuento = clamp(row.descuento, -20, 28);
           }
         }
       }
@@ -657,7 +657,7 @@ useEffect(() => {
           const descCalc = baseComparacion > 0 ? ((baseComparacion - pv) / baseComparacion) * 100 : 0;
           return { l, descCalc };
         })
-        .filter(({ descCalc }) => descCalc > 20);
+        .filter(({ descCalc }) => descCalc > 28);
 
       if (descuentosInvalidos.length > 0) {
         const detalle = descuentosInvalidos
@@ -1225,7 +1225,7 @@ const resMail = await fetch("/api/send-cotizacion", {
                           }}
                           onBlur={(e) => updateLine(i, "descuento", e.target.value)}
                         />
-                        <div className="text-[10px] text-zinc-500 mt-1">[-20%, +20%]</div>
+                        <div className="text-[10px] text-zinc-500 mt-1">[-20%, +28%]</div>
                       </td>
 
                       {/* Precio Venta */}
