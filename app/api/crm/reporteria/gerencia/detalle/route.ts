@@ -4,11 +4,10 @@ import { NextResponse } from "next/server";
    CONFIG
    ========================= */
 
-// URL CSV CRM_DB (la misma que usas en otros módulos)
+// URL CSV CRM_DB
 const CRM_DB_CSV =
   process.env.CRM_DB_CSV_URL ||
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vR6D9j1ZjygWJKRXLV22AMb2oMYKVQWlly1KdAIKRm9jBAOIvIxNd9jqhEi2Zc-7LnjLe2wfhKrfsEW/pub?gid=0&single=true&output=csv";
-  
 
 // mismas reglas que frontend
 const JEFATURA_SCOPE_PREFIJOS: Record<string, string[]> = {
@@ -25,19 +24,74 @@ function normalize(s = "") {
 }
 
 /* =========================
-   CSV PARSER SIMPLE
+   CSV PARSER ROBUSTO
+   (respeta comillas, comas y textos largos)
    ========================= */
 function parseCSV(text: string): Record<string, string>[] {
-  const [header, ...lines] = text.split(/\r?\n/).filter(Boolean);
-  const headers = header.split(",").map((h) => h.trim());
+  const rows: string[][] = [];
+  let cur = "";
+  let inQuotes = false;
+  let row: string[] = [];
 
-  return lines.map((line) => {
-    const cols = line.split(",");
-    const row: Record<string, string> = {};
-    headers.forEach((h, i) => {
-      row[h] = (cols[i] || "").trim();
+  const pushCell = () => {
+    row.push(cur);
+    cur = "";
+  };
+
+  const pushRow = () => {
+    rows.push(row);
+    row = [];
+  };
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const next = text[i + 1];
+
+    if (ch === '"' && next === '"') {
+      cur += '"';
+      i++;
+      continue;
+    }
+
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (ch === "," && !inQuotes) {
+      pushCell();
+      continue;
+    }
+
+    if ((ch === "\n" || ch === "\r") && !inQuotes) {
+      if (ch === "\r" && next === "\n") i++;
+      pushCell();
+      pushRow();
+      continue;
+    }
+
+    cur += ch;
+  }
+
+  pushCell();
+  pushRow();
+
+  if (rows.length < 2) return [];
+
+  const headers = rows[0].map((h) =>
+    h
+      .replace(/^\uFEFF/, "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_")
+  );
+
+  return rows.slice(1).map((cells) => {
+    const obj: Record<string, string> = {};
+    headers.forEach((h, idx) => {
+      obj[h] = (cells[idx] ?? "").trim();
     });
-    return row;
+    return obj;
   });
 }
 
@@ -57,7 +111,6 @@ export async function GET(req: Request) {
     }
 
     const scope = JEFATURA_SCOPE_PREFIJOS[viewerEmail];
-
     if (!scope) {
       return NextResponse.json(
         { ok: false, error: "No autorizado (no es jefatura)" },
@@ -65,7 +118,9 @@ export async function GET(req: Request) {
       );
     }
 
-    // 1️⃣ Descargar CRM_DB
+    /* =========================
+       1️⃣ Descargar CRM_DB
+       ========================= */
     const resp = await fetch(CRM_DB_CSV, { cache: "no-store" });
     if (!resp.ok) {
       throw new Error(`Error leyendo CRM_DB (${resp.status})`);
@@ -74,29 +129,38 @@ export async function GET(req: Request) {
     const csv = await resp.text();
     const rows = parseCSV(csv);
 
-    // 2️⃣ Normalizar y filtrar por scope
+    /* =========================
+       2️⃣ Normalizar + filtrar
+       ========================= */
     const data = rows
-      .map((r) => ({
-        folio: r.folio,
-        nombre_razon_social: r.nombre_razon_social,
-        ejecutivo_email: normalize(r.asignado_a),
-        estado: r.estado,
-        etapa_nombre: r.etapa,
-        monto_proyectado: Number(r.monto_proyectado || 0),
-        updated_at: r.updated_at || r.fecha_actualizacion || "",
-        division: (r.division || "").toUpperCase(),
-      }))
+      .map((r) => {
+        const division = (r.division || "").toUpperCase();
+
+        return {
+          folio: r.folio || "",
+          nombre_razon_social: r.nombre_razon_social || "",
+          ejecutivo_email: normalize(r.asignado_a || r.ejecutivo_email || ""),
+          estado: (r.estado || "").trim(),
+          etapa_nombre: r.etapa_nombre || "",
+          monto_proyectado: Number(r.monto_proyectado || 0),
+          updated_at:
+            r.updated_at ||
+            r.asignado_at ||
+            r.created_at ||
+            "",
+          division,
+        };
+      })
       .filter((r) => {
-        // si tiene ejecutivo, mostrarlo (asignado, contactado, etc.)
+        // debe tener ejecutivo asignado
         if (!r.ejecutivo_email) return false;
-      
-        // si NO tiene división, igual mostrarlo (muy común en CRM_DB)
+
+        // si no tiene división, se muestra igual
         if (!r.division) return true;
-      
-        // si tiene división, validar scope
+
+        // si tiene división, validar contra scope de jefatura
         return scope.some((pref) => r.division.startsWith(pref));
       });
-      
 
     return NextResponse.json({
       ok: true,
