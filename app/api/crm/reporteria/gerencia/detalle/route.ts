@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
 // URL CSV CRM_DB (la misma que usas en otros módulos)
 const CRM_DB_CSV =
   process.env.CRM_DB_CSV_URL ||
-  "PEGA_AQUI_TU_URL_PUBLICA_DE_CRM_DB_CSV";
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vR6D9j1ZjygWJKRXLV22AMb2oMYKVQWlly1KdAIKRm9jBAOIvIxNd9jqhEi2Zc-7LnjLe2wfhKrfsEW/pub?gid=0&single=true&output=csv";
 
 // mismas reglas que frontend
 const JEFATURA_SCOPE_PREFIJOS: Record<string, string[]> = {
