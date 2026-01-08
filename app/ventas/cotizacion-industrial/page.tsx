@@ -515,7 +515,7 @@ useEffect(() => {
         const pv = value === "" || value === undefined ? 0 : Math.round(num(value));
         const descCalc = baseComparacion > 0 ? ((baseComparacion - pv) / baseComparacion) * 100 : 0;
 
-        if (descCalc > 20) {
+        if (descCalc > 28 ) {
           // 🚫 no permitir >20% descuento
           alert(
             `❌ Precio inferior al 72% del precio base.\n\n` +
