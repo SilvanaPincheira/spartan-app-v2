@@ -40,6 +40,7 @@ const JEFATURA_SCOPE_PREFIJOS: Record<string, string[]> = {
   "alberto.damm@spartan.cl": ["IND"],
   "nelson.norambuena@spartan.cl": ["BSC"], // ajusta
   "carlos.avendano@spartan.cl": ["HC"],
+  "hernan.lopez@spartan.cl": ["IND_HL"],
 };
 
 type Row = Record<string, string>;
