@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
 
 /* =========================
    CONFIG JEFATURAS (igual que resumen)
@@ -54,9 +55,15 @@ function norm(s: string) {
   return (s || "").trim().toLowerCase();
 }
 
+function normU(s: string) {
+  return (s || "").trim().toUpperCase().replace(/\s+/g, "_");
+}
+
 /* =========================
    UI helpers
    ========================= */
+const BRAND_BLUE = "#2563eb";
+
 function cardStyle() {
   return {
     border: "1px solid #e5e7eb",
@@ -107,10 +114,10 @@ function badge(bg: string, color = "#111827") {
 }
 
 function estadoBadgeStyle(estadoRaw: string) {
-  const e = (estadoRaw || "").trim().toUpperCase().replace(/\s+/g, "_");
-  if (e === "ASIGNADO") return { bg: "#E0F2FE", color: "#0369A1" };
+  const e = normU(estadoRaw);
+  if (e === "ASIGNADO") return { bg: "#FEE2E2", color: "#7F1D1D" }; // 🔴 asignado rojo (pedido)
   if (e === "EN_GESTION") return { bg: "#FEF9C3", color: "#854D0E" };
-  if (e === "CONTACTADO") return { bg: "#DCFCE7", color: "#166534" };
+  if (e === "CONTACTADO") return { bg: "#FEF9C3", color: "#854D0E" }; // 🟡 contactado amarillo (pedido)
   if (e === "REUNION") return { bg: "#EDE9FE", color: "#5B21B6" };
   if (e === "LEVANTAMIENTO") return { bg: "#FDF2F8", color: "#9D174D" };
   if (e === "PROPUESTA") return { bg: "#FFEDD5", color: "#9A3412" };
@@ -217,11 +224,8 @@ export default function CRMReporteriaGerenciaDetallePage() {
       try {
         json = JSON.parse(raw);
       } catch {
-        // típico: HTML de 404/500 -> "<!DOCTYPE ..."
         const preview = raw?.slice(0, 220)?.replace(/\s+/g, " ") || "";
-        throw new Error(
-          `Respuesta no JSON (posible 404/500). HTTP ${resp.status}. Preview: ${preview}`
-        );
+        throw new Error(`Respuesta no JSON (posible 404/500). HTTP ${resp.status}. Preview: ${preview}`);
       }
 
       if (!resp.ok || !json?.ok) {
@@ -326,12 +330,10 @@ export default function CRMReporteriaGerenciaDetallePage() {
       const va: any = getVal(a);
       const vb: any = getVal(b);
 
-      // numbers
       if (typeof va === "number" && typeof vb === "number") {
         return sortDir === "asc" ? va - vb : vb - va;
       }
 
-      // strings
       const sa = String(va ?? "");
       const sb = String(vb ?? "");
       return sortDir === "asc" ? sa.localeCompare(sb) : sb.localeCompare(sa);
@@ -346,7 +348,6 @@ export default function CRMReporteriaGerenciaDetallePage() {
         setSortDir("desc");
         return k;
       }
-      // mismo key -> alterna dir
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
       return cur;
     });
@@ -357,6 +358,7 @@ export default function CRMReporteriaGerenciaDetallePage() {
      ========================= */
   const kpis = useMemo(() => {
     const total = filtered.length;
+
     const stale = filtered.filter((r) => {
       const d = daysBetween(r.updated_at);
       return typeof d === "number" && d >= 7;
@@ -364,13 +366,46 @@ export default function CRMReporteriaGerenciaDetallePage() {
 
     const monto = filtered.reduce((acc, r) => acc + (Number(r.monto_proyectado) || 0), 0);
 
-    return { total, stale, monto };
+    const ganados = filtered.filter((r) => normU(r.estado) === "CERRADO_GANADO").length;
+
+    // conteo por estado para el pie
+    const byEstado: Record<string, number> = {};
+    for (const r of filtered) {
+      const key = normU(r.estado || "");
+      if (!key) continue;
+      byEstado[key] = (byEstado[key] || 0) + 1;
+    }
+
+    return { total, stale, monto, ganados, byEstado };
   }, [filtered]);
+
+  /* =========================
+     PIE CHART DATA
+     (pedido: contactado amarillo, asignado rojo)
+     ========================= */
+  const pieData = useMemo(() => {
+    const by = kpis.byEstado;
+
+    const items = [
+      { key: "CONTACTADO", name: "Contactado", value: by["CONTACTADO"] || 0, color: "#FACC15" }, // amarillo
+      { key: "ASIGNADO", name: "Asignado", value: by["ASIGNADO"] || 0, color: "#EF4444" }, // rojo
+      { key: "EN_GESTION", name: "En gestión", value: by["EN_GESTION"] || 0, color: "#3B82F6" },
+      { key: "REUNION", name: "Reunión", value: by["REUNION"] || 0, color: "#8B5CF6" },
+      { key: "LEVANTAMIENTO", name: "Levantamiento", value: by["LEVANTAMIENTO"] || 0, color: "#EC4899" },
+      { key: "PROPUESTA", name: "Propuesta", value: by["PROPUESTA"] || 0, color: "#F97316" },
+      { key: "CERRADO_GANADO", name: "Cerrado ganado", value: by["CERRADO_GANADO"] || 0, color: "#22C55E" },
+      { key: "NO_GANADO", name: "No ganado", value: by["NO_GANADO"] || 0, color: "#991B1B" },
+      { key: "INSTALADO_1OC", name: "Instalado 1° O/C", value: by["INSTALADO_1OC"] || 0, color: "#10B981" },
+      { key: "INSTALADO_1_O_C", name: "Instalado 1° O/C", value: by["INSTALADO_1_O_C"] || 0, color: "#10B981" },
+    ];
+
+    return items.filter((x) => x.value > 0);
+  }, [kpis.byEstado]);
 
   if (authLoading) {
     return (
       <div style={{ padding: 16 }}>
-        <h2 style={{ fontWeight: 900, margin: 0 }}>CRM · Reportería en Detalle</h2>
+        <h2 style={{ fontWeight: 900, margin: 0, color: BRAND_BLUE }}>CRM · Reportería en Detalle</h2>
         <div style={{ opacity: 0.7, marginTop: 8 }}>Cargando usuario…</div>
       </div>
     );
@@ -379,7 +414,7 @@ export default function CRMReporteriaGerenciaDetallePage() {
   if (!isJefatura) {
     return (
       <div style={{ padding: 16, maxWidth: 900 }}>
-        <h2 style={{ fontWeight: 900, margin: 0 }}>CRM · Reportería en Detalle</h2>
+        <h2 style={{ fontWeight: 900, margin: 0, color: BRAND_BLUE }}>CRM · Reportería en Detalle</h2>
         <div style={{ marginTop: 10, color: "crimson", fontWeight: 900 }}>
           No tienes permisos para este módulo (solo jefaturas).
         </div>
@@ -395,7 +430,9 @@ export default function CRMReporteriaGerenciaDetallePage() {
       {/* Header + acciones */}
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>CRM · Reportería en Detalle</h2>
+          <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0, color: BRAND_BLUE }}>
+            CRM · Reportería en Detalle
+          </h2>
           <div style={{ fontSize: 12, opacity: 0.8, marginTop: 6 }}>
             Jefatura: <b>{loggedEmail}</b> {" · "} Scope:{" "}
             <b>{allowedDivs.length ? allowedDivs.join(", ") : "TODOS"}</b>
@@ -407,25 +444,30 @@ export default function CRMReporteriaGerenciaDetallePage() {
         </button>
       </div>
 
-      {/* KPIs */}
+      {/* KPIs + Pie */}
       <div
         style={{
           marginTop: 14,
           display: "grid",
           gap: 10,
-          gridTemplateColumns: "repeat(3, minmax(220px, 1fr))",
+          gridTemplateColumns: "repeat(4, minmax(220px, 1fr))",
+          alignItems: "stretch",
         }}
       >
         <div style={cardStyle()}>
-          <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>Registros (filtrados)</div>
+          <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900, color: BRAND_BLUE }}>
+            Registros (filtrados)
+          </div>
           <div style={{ marginTop: 6, fontSize: 26, fontWeight: 900 }}>{kpis.total}</div>
           <div style={{ marginTop: 8 }}>
-            <span style={badge("rgba(37,99,235,0.12)")}>Vista interactiva</span>
+            <span style={badge("rgba(37,99,235,0.12)", BRAND_BLUE)}>Vista interactiva</span>
           </div>
         </div>
 
         <div style={cardStyle()}>
-          <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>Sin gestión ≥ 7 días</div>
+          <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900, color: BRAND_BLUE }}>
+            Sin gestión ≥ 7 días
+          </div>
           <div style={{ marginTop: 6, fontSize: 26, fontWeight: 900 }}>{kpis.stale}</div>
           <div style={{ marginTop: 8, fontSize: 12, opacity: 0.75 }}>
             Consejo: marca el checkbox para enfocarte solo en estos.
@@ -433,10 +475,59 @@ export default function CRMReporteriaGerenciaDetallePage() {
         </div>
 
         <div style={cardStyle()}>
-          <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>Monto total (filtrado)</div>
+          <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900, color: BRAND_BLUE }}>
+            Monto total (filtrado)
+          </div>
           <div style={{ marginTop: 6, fontSize: 20, fontWeight: 900 }}>{moneyCLP(kpis.monto)}</div>
           <div style={{ marginTop: 8, fontSize: 12, opacity: 0.75 }}>
             Depende de <b>monto_proyectado</b>.
+          </div>
+        </div>
+
+        {/* 🏆 Card ganados */}
+        <div style={{ ...cardStyle(), display: "grid", placeItems: "center", textAlign: "center" }}>
+          <div style={{ fontSize: 36, lineHeight: "40px" }}>🏆</div>
+          <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900, marginTop: 6, color: BRAND_BLUE }}>
+            Cerrados ganados
+          </div>
+          <div style={{ fontSize: 30, fontWeight: 900, marginTop: 4, color: "#14532D" }}>
+            {kpis.ganados}
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <span style={badge("rgba(34,197,94,0.18)", "#14532D")}>Top performance</span>
+          </div>
+        </div>
+
+        {/* Pie chart (ocupa 2 columnas en pantallas grandes) */}
+        <div style={{ ...cardStyle(), gridColumn: "span 2" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
+            <div style={{ fontWeight: 900, color: BRAND_BLUE }}>Distribución por estado</div>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>Contactado (🟡) · Asignado (🔴)</div>
+          </div>
+
+          <div style={{ width: "100%", height: 220, marginTop: 8 }}>
+            {pieData.length === 0 ? (
+              <div style={{ fontSize: 12, opacity: 0.75 }}>Sin datos para el gráfico (según filtros).</div>
+            ) : (
+              <ResponsiveContainer>
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={55}
+                    outerRadius={85}
+                    paddingAngle={2}
+                  >
+                    {pieData.map((entry, idx) => (
+                      <Cell key={`cell_${idx}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                  <Legend verticalAlign="middle" align="right" layout="vertical" />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
       </div>
@@ -524,7 +615,9 @@ export default function CRMReporteriaGerenciaDetallePage() {
                   onClick={() => toggleSort("ejecutivo")}
                   title="Ordenar por ejecutivo"
                 >
-                  Ejecutivo {sortKey === "ejecutivo" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  <span style={{ color: BRAND_BLUE, fontWeight: 900 }}>
+                    Ejecutivo {sortKey === "ejecutivo" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  </span>
                 </th>
 
                 <th
@@ -532,7 +625,9 @@ export default function CRMReporteriaGerenciaDetallePage() {
                   onClick={() => toggleSort("razon")}
                   title="Ordenar por razón social"
                 >
-                  Razón social {sortKey === "razon" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  <span style={{ color: BRAND_BLUE, fontWeight: 900 }}>
+                    Razón social {sortKey === "razon" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  </span>
                 </th>
 
                 <th
@@ -540,7 +635,9 @@ export default function CRMReporteriaGerenciaDetallePage() {
                   onClick={() => toggleSort("estado")}
                   title="Ordenar por estado"
                 >
-                  Estado {sortKey === "estado" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  <span style={{ color: BRAND_BLUE, fontWeight: 900 }}>
+                    Estado {sortKey === "estado" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  </span>
                 </th>
 
                 <th
@@ -548,7 +645,9 @@ export default function CRMReporteriaGerenciaDetallePage() {
                   onClick={() => toggleSort("etapa")}
                   title="Ordenar por etapa"
                 >
-                  Etapa {sortKey === "etapa" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  <span style={{ color: BRAND_BLUE, fontWeight: 900 }}>
+                    Etapa {sortKey === "etapa" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  </span>
                 </th>
 
                 <th
@@ -556,7 +655,9 @@ export default function CRMReporteriaGerenciaDetallePage() {
                   onClick={() => toggleSort("monto")}
                   title="Ordenar por monto"
                 >
-                  Monto {sortKey === "monto" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  <span style={{ color: BRAND_BLUE, fontWeight: 900 }}>
+                    Monto {sortKey === "monto" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  </span>
                 </th>
 
                 <th
@@ -564,7 +665,9 @@ export default function CRMReporteriaGerenciaDetallePage() {
                   onClick={() => toggleSort("updated_at")}
                   title="Ordenar por última gestión"
                 >
-                  Última gestión {sortKey === "updated_at" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  <span style={{ color: BRAND_BLUE, fontWeight: 900 }}>
+                    Última gestión {sortKey === "updated_at" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  </span>
                 </th>
 
                 <th
@@ -572,7 +675,9 @@ export default function CRMReporteriaGerenciaDetallePage() {
                   onClick={() => toggleSort("dias")}
                   title="Ordenar por días sin gestión"
                 >
-                  Días {sortKey === "dias" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  <span style={{ color: BRAND_BLUE, fontWeight: 900 }}>
+                    Días {sortKey === "dias" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  </span>
                 </th>
               </tr>
             </thead>
@@ -654,4 +759,3 @@ export default function CRMReporteriaGerenciaDetallePage() {
     </div>
   );
 }
-
