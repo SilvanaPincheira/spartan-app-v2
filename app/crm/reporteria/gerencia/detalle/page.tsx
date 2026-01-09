@@ -152,6 +152,13 @@ type ApiResp = {
 type SortKey = "ejecutivo" | "razon" | "estado" | "etapa" | "monto" | "updated_at" | "dias";
 type SortDir = "asc" | "desc";
 
+type TopEjecutivo = {
+  ejecutivo: string;
+  oportunidades: number;
+  ganados: number;
+  pipeline: number;
+};
+
 /* =========================
    PAGE
    ========================= */
@@ -217,7 +224,6 @@ export default function CRMReporteriaGerenciaDetallePage() {
         cache: "no-store",
       });
 
-      // 👇 IMPORTANTE: primero leemos texto para capturar HTML/errores
       const raw = await resp.text();
       let json: ApiResp | null = null;
 
@@ -380,6 +386,37 @@ export default function CRMReporteriaGerenciaDetallePage() {
   }, [filtered]);
 
   /* =========================
+     TOP 5 EJECUTIVOS (FIX)
+     ========================= */
+  const topEjecutivos = useMemo<TopEjecutivo[]>(() => {
+    const map: Record<string, TopEjecutivo> = {};
+
+    for (const r of filtered) {
+      const ej = r.ejecutivo_email || "—";
+
+      if (!map[ej]) {
+        map[ej] = {
+          ejecutivo: ej,
+          oportunidades: 0,
+          ganados: 0,
+          pipeline: 0,
+        };
+      }
+
+      map[ej].oportunidades += 1;
+      map[ej].pipeline += Number(r.monto_proyectado || 0);
+
+      if (normU(r.estado) === "CERRADO_GANADO") {
+        map[ej].ganados += 1;
+      }
+    }
+
+    return Object.values(map)
+      .sort((a, b) => b.ganados - a.ganados || b.oportunidades - a.oportunidades)
+      .slice(0, 5);
+  }, [filtered]);
+
+  /* =========================
      PIE CHART DATA
      (pedido: contactado amarillo, asignado rojo)
      ========================= */
@@ -444,7 +481,7 @@ export default function CRMReporteriaGerenciaDetallePage() {
         </button>
       </div>
 
-      {/* KPIs + Pie */}
+      {/* KPIs + Pie + Top 5 */}
       <div
         style={{
           marginTop: 14,
@@ -476,7 +513,7 @@ export default function CRMReporteriaGerenciaDetallePage() {
 
         <div style={cardStyle()}>
           <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900, color: BRAND_BLUE }}>
-            Monto total (filtrado)
+            Pipeline (filtrado)
           </div>
           <div style={{ marginTop: 6, fontSize: 20, fontWeight: 900 }}>{moneyCLP(kpis.monto)}</div>
           <div style={{ marginTop: 8, fontSize: 12, opacity: 0.75 }}>
@@ -498,7 +535,55 @@ export default function CRMReporteriaGerenciaDetallePage() {
           </div>
         </div>
 
-        {/* Pie chart (ocupa 2 columnas en pantallas grandes) */}
+        {/* TOP 5 EJECUTIVOS (más horizontal que alto) */}
+        <div style={{ ...cardStyle(), gridColumn: "span 2" }}>
+          <div style={{ fontWeight: 900, color: BRAND_BLUE }}>🏆 Top 5 Ejecutivos</div>
+
+          <div
+            style={{
+              marginTop: 10,
+              display: "flex",
+              gap: 10,
+              overflowX: "auto",
+              paddingBottom: 6,
+            }}
+          >
+            {topEjecutivos.length === 0 ? (
+              <div style={{ fontSize: 12, opacity: 0.75 }}>Sin datos (según filtros).</div>
+            ) : (
+              topEjecutivos.map((e, idx) => (
+                <div
+                  key={e.ejecutivo}
+                  style={{
+                    minWidth: 230,
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 12,
+                    padding: 10,
+                    background: "#fafafa",
+                  }}
+                >
+                  <div style={{ fontWeight: 900, fontSize: 13, color: BRAND_BLUE }}>#{idx + 1}</div>
+
+                  <div style={{ fontSize: 12, marginTop: 4, fontWeight: 900 }}>{e.ejecutivo}</div>
+
+                  <div style={{ marginTop: 6, fontSize: 12 }}>
+                    Oportunidades: <b>{e.oportunidades}</b>
+                  </div>
+
+                  <div style={{ fontSize: 12 }}>
+                    🏆 Ganados: <b>{e.ganados}</b>
+                  </div>
+
+                  <div style={{ fontSize: 12, marginTop: 4 }}>
+                    Pipeline: <b>{moneyCLP(e.pipeline)}</b>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Pie chart */}
         <div style={{ ...cardStyle(), gridColumn: "span 2" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
             <div style={{ fontWeight: 900, color: BRAND_BLUE }}>Distribución por estado</div>
