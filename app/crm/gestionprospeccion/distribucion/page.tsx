@@ -36,8 +36,8 @@ const JEFATURAS = new Set(
 /** ✅ Scope fijo por jefatura (SIN Supabase) */
 const JEFATURA_SCOPE_PREFIJOS: Record<string, string[]> = {
   "claudia.borquez@spartan.cl": ["IN", "FB"],
-  "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND"], // ajusta
-  "alberto.damm@spartan.cl": ["IND"],
+  "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND", "IND_HL"], // ajusta
+  "alberto.damm@spartan.cl": ["IND", "BSC", "IND_HL"],
   "nelson.norambuena@spartan.cl": ["BSC"], // ajusta
   "carlos.avendano@spartan.cl": ["HC"],
   "hernan.lopez@spartan.cl": ["IND_HL"],

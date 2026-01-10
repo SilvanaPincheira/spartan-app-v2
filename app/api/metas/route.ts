@@ -61,8 +61,8 @@ export async function GET() {
         obj["cumplimiento_dinero"] = row["Cumplimiento $"];
       if (row["Cumplimiento %"] !== undefined)
         obj["cumplimiento_porcentaje"] = row["Cumplimiento %"];
-      if (row["META_DICIEMBRE_2025"] !== undefined)
-        obj["meta_diciembre_2025"] = row["META_DICIEMBRE_2025"];
+      if (row["META_ENERO_2026"] !== undefined)
+        obj["meta_enero_2026"] = row["META_ENERO_2026"];
 
       return obj;
     });
@@ -82,7 +82,7 @@ export async function GET() {
       "entrega",
       "total_quimicos",
       "no_son_equipo_venta",
-      "meta_diciembre_2025",
+      "meta_enero_2026",
       "cumplimiento_dinero",
       "cumplimiento_porcentaje",
     ];
