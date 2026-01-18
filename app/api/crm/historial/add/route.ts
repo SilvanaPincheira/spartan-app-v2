@@ -1,26 +1,9 @@
-import type { NextApiRequest, NextApiResponse } from 'next'
+import { NextResponse } from 'next/server'
 
-const CRM_APPS_SCRIPT_URL = process.env.CRM_HISTORIAL_APPS_SCRIPT_URL as string
-
-type Rol = 'ejecutivo' | 'jefatura' | 'sistema'
-type Accion =
-  | 'CAMBIO_ESTADO'
-  | 'CAMBIO_ETAPA'
-  | 'UPDATE_DATOS'
-  | 'OBSERVACION'
-  | 'MENSAJE_JEFATURA'
-  | 'AUTO_ESTADO'
-  | 'AUTO_ETAPA'
-
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse
-) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ ok: false, error: 'Método no permitido' })
-  }
-
+export async function POST(req: Request) {
   try {
+    const body = await req.json()
+
     const {
       folio,
       accion,
@@ -31,71 +14,52 @@ export default async function handler(
       usuario_email,
       rol,
       visible_ejecutivo = true,
-    } = req.body as {
-      folio: string
-      accion: Accion
-      campo?: string
-      valor_anterior?: string
-      valor_nuevo?: string
-      mensaje?: string
-      usuario_email: string
-      rol: Rol
-      visible_ejecutivo?: boolean
-    }
+    } = body
 
-    // -------------------------
     // Validaciones base
-    // -------------------------
     if (!folio || !accion || !usuario_email || !rol) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Faltan campos obligatorios',
-      })
+      return NextResponse.json(
+        { ok: false, error: 'Faltan campos obligatorios' },
+        { status: 400 }
+      )
     }
 
-    // -------------------------
     // Validación por rol
-    // -------------------------
     if (rol === 'jefatura' && accion !== 'MENSAJE_JEFATURA') {
-      return res.status(403).json({
-        ok: false,
-        error: 'La jefatura solo puede dejar mensajes',
-      })
+      return NextResponse.json(
+        { ok: false, error: 'La jefatura solo puede dejar mensajes' },
+        { status: 403 }
+      )
     }
 
     if (rol === 'ejecutivo' && accion === 'MENSAJE_JEFATURA') {
-      return res.status(403).json({
-        ok: false,
-        error: 'El ejecutivo no puede dejar mensajes de jefatura',
-      })
+      return NextResponse.json(
+        { ok: false, error: 'El ejecutivo no puede dejar mensajes de jefatura' },
+        { status: 403 }
+      )
     }
 
-    // -------------------------
     // Validación por acción
-    // -------------------------
     if (
-      ['MENSAJE_JEFATURA', 'OBSERVACION'].includes(accion) &&
+      (accion === 'MENSAJE_JEFATURA' || accion === 'OBSERVACION') &&
       !mensaje
     ) {
-      return res.status(400).json({
-        ok: false,
-        error: 'El mensaje es obligatorio para esta acción',
-      })
+      return NextResponse.json(
+        { ok: false, error: 'El mensaje es obligatorio' },
+        { status: 400 }
+      )
     }
 
     if (
-      ['CAMBIO_ESTADO', 'CAMBIO_ETAPA'].includes(accion) &&
+      (accion === 'CAMBIO_ESTADO' || accion === 'CAMBIO_ETAPA') &&
       (!valor_anterior || !valor_nuevo)
     ) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Debe indicar valor anterior y nuevo',
-      })
+      return NextResponse.json(
+        { ok: false, error: 'Debe indicar valor anterior y nuevo' },
+        { status: 400 }
+      )
     }
 
-    // -------------------------
-    // Construcción del registro
-    // -------------------------
     const id = `HIST-${Date.now()}-${Math.floor(Math.random() * 10000)}`
     const fecha = new Date().toISOString()
 
@@ -116,29 +80,25 @@ export default async function handler(
       },
     }
 
-    // -------------------------
-    // Envío a Apps Script
-    // -------------------------
-    const response = await fetch(CRM_APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
+    const response = await fetch(
+      process.env.CRM_HISTORIAL_APPS_SCRIPT_URL as string,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }
+    )
 
     if (!response.ok) {
       const text = await response.text()
       throw new Error(text)
     }
 
-    return res.status(200).json({
-      ok: true,
-      id,
-    })
+    return NextResponse.json({ ok: true, id })
   } catch (error: any) {
-    console.error('[CRM_HISTORIAL_ADD]', error)
-    return res.status(500).json({
-      ok: false,
-      error: error.message || 'Error interno',
-    })
+    return NextResponse.json(
+      { ok: false, error: error.message || 'Error interno' },
+      { status: 500 }
+    )
   }
 }
