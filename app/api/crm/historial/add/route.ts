@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
 
+const APPS_SCRIPT_URL =
+  process.env.CRM_HISTORIAL_APPS_SCRIPT_URL as string
+
 export async function POST(req: Request) {
   try {
     const body = await req.json()
@@ -16,7 +19,6 @@ export async function POST(req: Request) {
       visible_ejecutivo = true,
     } = body
 
-    // Validaciones base
     if (!folio || !accion || !usuario_email || !rol) {
       return NextResponse.json(
         { ok: false, error: 'Faltan campos obligatorios' },
@@ -24,7 +26,6 @@ export async function POST(req: Request) {
       )
     }
 
-    // Validación por rol
     if (rol === 'jefatura' && accion !== 'MENSAJE_JEFATURA') {
       return NextResponse.json(
         { ok: false, error: 'La jefatura solo puede dejar mensajes' },
@@ -32,30 +33,12 @@ export async function POST(req: Request) {
       )
     }
 
-    if (rol === 'ejecutivo' && accion === 'MENSAJE_JEFATURA') {
-      return NextResponse.json(
-        { ok: false, error: 'El ejecutivo no puede dejar mensajes de jefatura' },
-        { status: 403 }
-      )
-    }
-
-    // Validación por acción
     if (
       (accion === 'MENSAJE_JEFATURA' || accion === 'OBSERVACION') &&
       !mensaje
     ) {
       return NextResponse.json(
-        { ok: false, error: 'El mensaje es obligatorio' },
-        { status: 400 }
-      )
-    }
-
-    if (
-      (accion === 'CAMBIO_ESTADO' || accion === 'CAMBIO_ETAPA') &&
-      (!valor_anterior || !valor_nuevo)
-    ) {
-      return NextResponse.json(
-        { ok: false, error: 'Debe indicar valor anterior y nuevo' },
+        { ok: false, error: 'Mensaje obligatorio' },
         { status: 400 }
       )
     }
@@ -80,14 +63,11 @@ export async function POST(req: Request) {
       },
     }
 
-    const response = await fetch(
-      process.env.CRM_HISTORIAL_APPS_SCRIPT_URL as string,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }
-    )
+    const response = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
 
     if (!response.ok) {
       const text = await response.text()
