@@ -3,6 +3,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
+import { Eye } from "lucide-react";
+
 
 /* =========================
    CONFIG JEFATURAS (igual que resumen)
@@ -188,6 +190,10 @@ export default function CRMReporteriaGerenciaDetallePage() {
   // modal observación (faltaban)
   const [openObs, setOpenObs] = useState(false);
   const [observacionActiva, setObservacionActiva] = useState<string>("");
+  const [obsEdit, setObsEdit] = useState<string>("");
+const [savingObs, setSavingObs] = useState(false);
+const [selectedFolio, setSelectedFolio] = useState<string | null>(null);
+
 
   /* =========================
      AUTH
@@ -742,6 +748,17 @@ export default function CRMReporteriaGerenciaDetallePage() {
                 </th>
 
                 <th
+  style={{
+    padding: 12,
+    borderBottom: "1px solid #e5e7eb",
+    textAlign: "center",
+  }}
+>
+  Obs
+</th>
+
+
+                <th
                   style={{ padding: 12, borderBottom: "1px solid #e5e7eb", cursor: "pointer", textAlign: "right" }}
                   onClick={() => toggleSort("monto")}
                   title="Ordenar por monto"
@@ -827,6 +844,28 @@ export default function CRMReporteriaGerenciaDetallePage() {
                             {r.estado || "—"}
                           </span>
                         </td>
+
+                        <td style={{ padding: 12, textAlign: "center" }}>
+  {r.observacion ? (
+    <span
+    title="Ver observación"
+    style={{ cursor: "pointer", display: "inline-flex" }}
+    onClick={() => {
+      setSelectedFolio(r.folio);
+      setObservacionActiva(r.observacion || "");
+      setObsEdit(r.observacion || "");
+      setOpenObs(true);
+    }}
+    
+  >
+    <Eye size={18} color={BRAND_BLUE} />
+  </span>
+  
+  ) : (
+    <span style={{ opacity: 0.35 }}>—</span>
+  )}
+</td>
+
   
                         <td style={{ padding: 12 }}>
                           {r.etapa_nombre || "—"}
@@ -891,15 +930,83 @@ export default function CRMReporteriaGerenciaDetallePage() {
             >
               <h3 style={{ fontWeight: 900 }}>Observación</h3>
   
-              <div style={{ marginTop: 10, fontSize: 13, whiteSpace: "pre-wrap" }}>
-                {observacionActiva || "Sin observación"}
-              </div>
+              <textarea
+  value={obsEdit}
+  onChange={(e) => setObsEdit(e.target.value)}
+  placeholder="Escribe la observación..."
+  rows={6}
+  style={{
+    width: "100%",
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 10,
+    border: "1px solid #e5e7eb",
+    resize: "vertical",
+    fontSize: 13,
+  }}
+/>
+ 
   
-              <div style={{ marginTop: 16, textAlign: "right" }}>
-                <button onClick={() => setOpenObs(false)} style={btnStyle()}>
-                  Cerrar
-                </button>
-              </div>
+<div
+  style={{
+    marginTop: 16,
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: 10,
+  }}
+>
+  <button
+    type="button"
+    style={btnStyle(false)}
+    onClick={() => setOpenObs(false)}
+    disabled={savingObs}
+  >
+    Cerrar
+  </button>
+
+  <button
+    type="button"
+    style={btnStyle(true)}
+    disabled={savingObs || !selectedFolio}
+    onClick={async () => {
+      if (!selectedFolio) return;
+
+      try {
+        setSavingObs(true);
+
+        await fetch("/api/crm/prospectos/update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            folio: selectedFolio,
+            observacion: obsEdit,
+          }),
+        });
+
+        // actualiza la tabla sin recargar
+        setRows((prev) =>
+          prev.map((r) =>
+            r.folio === selectedFolio
+              ? { ...r, observacion: obsEdit }
+              : r
+          )
+        );
+
+        setOpenObs(false);
+        setObsEdit("");
+        setObservacionActiva("");
+        setSelectedFolio(null);
+      } catch (e) {
+        alert("Error al guardar la observación");
+      } finally {
+        setSavingObs(false);
+      }
+    }}
+  >
+    {savingObs ? "Guardando…" : "Guardar"}
+  </button>
+</div>
+
             </div>
           </div>
         )}
