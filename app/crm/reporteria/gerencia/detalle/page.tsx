@@ -3,6 +3,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
+import HistorialGestionModal from "../../../../components/crm/HistorialGestionModal";
+
+
 
 /* =========================
    CONFIG JEFATURAS (igual que resumen)
@@ -182,6 +185,10 @@ export default function CRMReporteriaGerenciaDetallePage() {
   // sort
   const [sortKey, setSortKey] = useState<SortKey>("dias");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  const [openHistorial, setOpenHistorial] = useState(false);
+const [folioActivo, setFolioActivo] = useState<string | null>(null);
+
 
   /* =========================
      AUTH
@@ -829,6 +836,30 @@ export default function CRMReporteriaGerenciaDetallePage() {
                       <td style={{ padding: 12, textAlign: "right" }}>
                         <span style={diasBadge}>{typeof dias === "number" ? `${dias} d` : "—"}</span>
                       </td>
+
+                      <td style={{ padding: 12 }}>
+  <button
+    type="button"
+    onClick={() => {
+      setFolioActivo(r.folio);
+      setOpenHistorial(true);
+    }}
+    style={{
+      padding: "6px 10px",
+      borderRadius: 10,
+      border: "1px solid #e5e7eb",
+      background: "white",
+      fontSize: 12,
+      fontWeight: 900,
+      cursor: "pointer",
+      boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+    }}
+  >
+    Ver historial
+  </button>
+</td>
+
+
                     </tr>
                   );
                 })
