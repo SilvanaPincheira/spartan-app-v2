@@ -846,25 +846,25 @@ const [selectedFolio, setSelectedFolio] = useState<string | null>(null);
                         </td>
 
                         <td style={{ padding: 12, textAlign: "center" }}>
-  {r.observacion ? (
-    <span
-    title="Ver observación"
-    style={{ cursor: "pointer", display: "inline-flex" }}
+                        
+  <span
+    title={r.observacion ? "Editar observación" : "Agregar observación"}
+    style={{
+      cursor: "pointer",
+      display: "inline-flex",
+      opacity: r.observacion ? 1 : 0.35,
+    }}
     onClick={() => {
       setSelectedFolio(r.folio);
       setObservacionActiva(r.observacion || "");
       setObsEdit(r.observacion || "");
       setOpenObs(true);
     }}
-    
   >
     <Eye size={18} color={BRAND_BLUE} />
   </span>
-  
-  ) : (
-    <span style={{ opacity: 0.35 }}>—</span>
-  )}
 </td>
+
 
   
                         <td style={{ padding: 12 }}>
