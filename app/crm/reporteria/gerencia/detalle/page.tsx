@@ -4,8 +4,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
 
-
-
 /* =========================
    CONFIG JEFATURAS (igual que resumen)
    ========================= */
@@ -140,6 +138,8 @@ type RowDetalle = {
   etapa_nombre: string;
   monto_proyectado: number;
   updated_at?: string;
+  // opcional (para el modal). Si tu API no lo trae, se muestra "—"
+  observacion?: string;
 };
 
 type ApiResp = {
@@ -184,6 +184,10 @@ export default function CRMReporteriaGerenciaDetallePage() {
   // sort
   const [sortKey, setSortKey] = useState<SortKey>("dias");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  // modal observación (faltaban)
+  const [openObs, setOpenObs] = useState(false);
+  const [observacionActiva, setObservacionActiva] = useState<string>("");
 
   /* =========================
      AUTH
@@ -388,7 +392,7 @@ export default function CRMReporteriaGerenciaDetallePage() {
   }, [filtered]);
 
   /* =========================
-     TOP 5 EJECUTIVOS (FIX)
+     TOP 5 EJECUTIVOS
      ========================= */
   const topEjecutivos = useMemo<TopEjecutivo[]>(() => {
     const map: Record<string, TopEjecutivo> = {};
@@ -426,8 +430,8 @@ export default function CRMReporteriaGerenciaDetallePage() {
     const by = kpis.byEstado;
 
     const items = [
-      { key: "CONTACTADO", name: "Contactado", value: by["CONTACTADO"] || 0, color: "#FACC15" }, // amarillo
-      { key: "ASIGNADO", name: "Asignado", value: by["ASIGNADO"] || 0, color: "#EF4444" }, // rojo
+      { key: "CONTACTADO", name: "Contactado", value: by["CONTACTADO"] || 0, color: "#FACC15" },
+      { key: "ASIGNADO", name: "Asignado", value: by["ASIGNADO"] || 0, color: "#EF4444" },
       { key: "EN_GESTION", name: "En gestión", value: by["EN_GESTION"] || 0, color: "#3B82F6" },
       { key: "REUNION", name: "Reunión", value: by["REUNION"] || 0, color: "#8B5CF6" },
       { key: "LEVANTAMIENTO", name: "Levantamiento", value: by["LEVANTAMIENTO"] || 0, color: "#EC4899" },
@@ -537,7 +541,7 @@ export default function CRMReporteriaGerenciaDetallePage() {
           </div>
         </div>
 
-        {/* TOP 5 EJECUTIVOS (más horizontal que alto) */}
+        {/* TOP 5 EJECUTIVOS */}
         <div style={{ ...cardStyle(), gridColumn: "span 2" }}>
           <div style={{ fontWeight: 900, color: BRAND_BLUE }}>🏆 Top 5 Ejecutivos</div>
 
@@ -678,7 +682,7 @@ export default function CRMReporteriaGerenciaDetallePage() {
           <div style={{ marginTop: 6, fontSize: 12, whiteSpace: "pre-wrap" }}>{err}</div>
           <div style={{ marginTop: 10, fontSize: 12, opacity: 0.85 }}>
             Si el preview muestra <b>&lt;!DOCTYPE</b>, el endpoint está devolviendo HTML (404/500). Revisa que exista
-            `/api/crm/reporteria/gerencia/detalle` en producción y que responda JSON.
+            <b> /api/crm/reporteria/gerencia/detalle</b> en producción y que responda JSON.
           </div>
         </div>
       )}
@@ -755,95 +759,151 @@ export default function CRMReporteriaGerenciaDetallePage() {
                   <span style={{ color: BRAND_BLUE, fontWeight: 900 }}>
                     Última gestión {sortKey === "updated_at" ? (sortDir === "asc" ? "▲" : "▼") : ""}
                   </span>
-                </th>
-
-                <th
-                  style={{ padding: 12, borderBottom: "1px solid #e5e7eb", cursor: "pointer", textAlign: "right" }}
-                  onClick={() => toggleSort("dias")}
-                  title="Ordenar por días sin gestión"
-                >
-                  <span style={{ color: BRAND_BLUE, fontWeight: 900 }}>
-                    Días {sortKey === "dias" ? (sortDir === "asc" ? "▲" : "▼") : ""}
-                  </span>
-                </th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={7} style={{ padding: 14, opacity: 0.75 }}>
-                    Cargando…
-                  </td>
+                  </th>
+  
+                  <th
+                    style={{ padding: 12, borderBottom: "1px solid #e5e7eb", cursor: "pointer", textAlign: "right" }}
+                    onClick={() => toggleSort("dias")}
+                    title="Ordenar por días sin gestión"
+                  >
+                    <span style={{ color: BRAND_BLUE, fontWeight: 900 }}>
+                      Días {sortKey === "dias" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                    </span>
+                  </th>
                 </tr>
-              ) : sorted.length === 0 ? (
-                <tr>
-                  <td colSpan={7} style={{ padding: 14, opacity: 0.75 }}>
-                    Sin registros.
-                  </td>
-                </tr>
-              ) : (
-                sorted.map((r, i) => {
-                  const zebra = i % 2 === 0 ? "white" : "#fcfcfc";
-                  const est = estadoBadgeStyle(r.estado);
-                  const dias = daysBetween(r.updated_at);
-
-                  const diasBadge =
-                    typeof dias === "number"
-                      ? dias >= 14
-                        ? badge("rgba(239,68,68,0.18)", "#7F1D1D")
-                        : dias >= 7
-                        ? badge("rgba(245,158,11,0.18)", "#92400E")
-                        : badge("rgba(16,185,129,0.14)", "#065F46")
-                      : badge("rgba(148,163,184,0.22)", "#334155");
-
-                  return (
-                    <tr
-                      key={`${r.folio || "x"}_${i}`}
-                      style={{
-                        borderBottom: "1px solid #f3f4f6",
-                        background: zebra,
-                      }}
-                    >
-                      <td style={{ padding: 12, fontWeight: 900 }}>{r.ejecutivo_email || "—"}</td>
-
-                      <td style={{ padding: 12 }}>
-                        <div style={{ fontWeight: 900 }}>{r.nombre_razon_social || "—"}</div>
-                        <div style={{ marginTop: 4, fontSize: 12, opacity: 0.7 }}>
-                          Folio: <b>{r.folio || "—"}</b>
-                        </div>
-                      </td>
-
-                      <td style={{ padding: 12 }}>
-                        <span style={badge(est.bg, est.color)}>{r.estado || "—"}</span>
-                      </td>
-
-                      <td style={{ padding: 12 }}>{r.etapa_nombre || "—"}</td>
-
-                      <td style={{ padding: 12, textAlign: "right", fontWeight: 900 }}>
-                        {r.monto_proyectado ? moneyCLP(Number(r.monto_proyectado)) : "—"}
-                      </td>
-
-                      <td style={{ padding: 12 }}>
-                        {r.updated_at ? new Date(r.updated_at).toLocaleString("es-CL") : "—"}
-                      </td>
-
-                      <td style={{ padding: 12, textAlign: "right" }}>
-                        <span style={diasBadge}>{typeof dias === "number" ? `${dias} d` : "—"}</span>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+              </thead>
+  
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td colSpan={7} style={{ padding: 14, opacity: 0.75 }}>
+                      Cargando…
+                    </td>
+                  </tr>
+                ) : sorted.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} style={{ padding: 14, opacity: 0.75 }}>
+                      Sin registros.
+                    </td>
+                  </tr>
+                ) : (
+                  sorted.map((r, i) => {
+                    const zebra = i % 2 === 0 ? "white" : "#fcfcfc";
+                    const est = estadoBadgeStyle(r.estado);
+                    const dias = daysBetween(r.updated_at);
+  
+                    const diasBadge =
+                      typeof dias === "number"
+                        ? dias >= 14
+                          ? badge("rgba(239,68,68,0.18)", "#7F1D1D")
+                          : dias >= 7
+                          ? badge("rgba(245,158,11,0.18)", "#92400E")
+                          : badge("rgba(16,185,129,0.14)", "#065F46")
+                        : badge("rgba(148,163,184,0.22)", "#334155");
+  
+                    return (
+                      <tr
+                        key={`${r.folio || "x"}_${i}`}
+                        style={{
+                          borderBottom: "1px solid #f3f4f6",
+                          background: zebra,
+                        }}
+                      >
+                        <td style={{ padding: 12, fontWeight: 900 }}>
+                          {r.ejecutivo_email || "—"}
+                        </td>
+  
+                        <td style={{ padding: 12 }}>
+                          <div style={{ fontWeight: 900 }}>
+                            {r.nombre_razon_social || "—"}
+                          </div>
+                          <div style={{ marginTop: 4, fontSize: 12, opacity: 0.7 }}>
+                            Folio: <b>{r.folio || "—"}</b>
+                          </div>
+                        </td>
+  
+                        <td style={{ padding: 12 }}>
+                          <span style={badge(est.bg, est.color)}>
+                            {r.estado || "—"}
+                          </span>
+                        </td>
+  
+                        <td style={{ padding: 12 }}>
+                          {r.etapa_nombre || "—"}
+                        </td>
+  
+                        <td style={{ padding: 12, textAlign: "right", fontWeight: 900 }}>
+                          {r.monto_proyectado
+                            ? moneyCLP(Number(r.monto_proyectado))
+                            : "—"}
+                        </td>
+  
+                        <td style={{ padding: 12 }}>
+                          {r.updated_at
+                            ? new Date(r.updated_at).toLocaleString("es-CL")
+                            : "—"}
+                        </td>
+  
+                        <td style={{ padding: 12, textAlign: "right" }}>
+                          <span style={diasBadge}>
+                            {typeof dias === "number" ? `${dias} d` : "—"}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
+  
+        <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
+          Tip: haz click en los títulos de la tabla para ordenar. Fuente:{" "}
+          <b>CRM_DB</b> + permisos por <b>viewerEmail</b>.
+        </div>
+  
+        {/* MODAL OBSERVACIÓN */}
+        {openObs && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.35)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+              zIndex: 50,
+            }}
+            onClick={() => setOpenObs(false)}
+          >
+            <div
+              style={{
+                width: "min(720px, 100%)",
+                background: "white",
+                borderRadius: 14,
+                border: "1px solid #e5e7eb",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
+                padding: 16,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 style={{ fontWeight: 900 }}>Observación</h3>
+  
+              <div style={{ marginTop: 10, fontSize: 13, whiteSpace: "pre-wrap" }}>
+                {observacionActiva || "Sin observación"}
+              </div>
+  
+              <div style={{ marginTop: 16, textAlign: "right" }}>
+                <button onClick={() => setOpenObs(false)} style={btnStyle()}>
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-
-      <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-        Tip: haz click en los títulos de la tabla para ordenar. Fuente: <b>CRM_DB</b> + permisos por <b>viewerEmail</b>.
-      </div>
-    </div>
-  );
-}
-
+    );
+  }
+  

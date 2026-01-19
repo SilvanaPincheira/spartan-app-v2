@@ -4,6 +4,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { useSearchParams } from "next/navigation";
 import ModalActualizarFicha from './ModalActualizarFicha';
+import ModalGestionObservacion from "../../../../components/crm/ModalGestionObservacion";
+
+
 
 
 /** =========================
