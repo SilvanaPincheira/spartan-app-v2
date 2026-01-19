@@ -166,6 +166,7 @@ export async function GET(req: Request) {
         ejecutivo_email: normalize(r.asignado_a || r.ejecutivo_email || ""),
         estado: (r.estado || "").trim(),
         etapa_nombre: r.etapa_nombre || "",
+        observacion: r.observacion || "",
         monto_proyectado: Number(r.monto_proyectado || 0),
         updated_at:
           r.updated_at ||
