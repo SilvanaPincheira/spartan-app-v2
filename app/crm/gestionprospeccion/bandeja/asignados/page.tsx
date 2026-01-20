@@ -626,21 +626,6 @@ const [prospectoActivo, setProspectoActivo] = useState<RowAny | null>(null);
     <div style={{ fontWeight: 900, fontSize: 15, lineHeight: "18px" }}>
       {r.nombre_razon_social || "—"}
     </div>
-
-    {/* 🔴 Punto rojo: mensaje de jefatura pendiente */}
-    {r.obs_jefatura_flag === "TRUE" &&
-      r.obs_jefatura_vista !== "TRUE" && (
-        <span
-          title="Tienes un mensaje de jefatura"
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: 999,
-            background: "#ef4444",
-            display: "inline-block",
-          }}
-        />
-      )}
   </div>
 </td>
 
@@ -719,20 +704,39 @@ const [prospectoActivo, setProspectoActivo] = useState<RowAny | null>(null);
                           </button>
 
                           <button
-                            type="button"
-                            onClick={() => openGestionObs(r)}
-                            disabled={!folio || busy}
-                            style={{
-                              padding: "8px 10px",
-                              borderRadius: 10,
-                              border: "1px solid #d1d5db",
-                              background: "white",
-                              cursor: busy ? "not-allowed" : "pointer",
-                              height: 36,
-                            }}
-                          >
-                            Ver gestión
-                          </button>
+  type="button"
+  onClick={() => openGestionObs(r)}
+  disabled={!folio || busy}
+  style={{
+    padding: "8px 10px",
+    borderRadius: 10,
+    border: "1px solid #d1d5db",
+    background: "white",
+    cursor: busy ? "not-allowed" : "pointer",
+    height: 36,
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+  }}
+>
+  <span>Ver gestión</span>
+
+  {/* 🔴 Punto rojo: mensaje de jefatura pendiente */}
+  {r.obs_jefatura_flag === "TRUE" &&
+    r.obs_jefatura_vista !== "TRUE" && (
+      <span
+        title="Tienes un mensaje de jefatura"
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: 999,
+          background: "#ef4444",
+          display: "inline-block",
+        }}
+      />
+    )}
+</button>
+
 
                           
 
