@@ -622,10 +622,28 @@ const [prospectoActivo, setProspectoActivo] = useState<RowAny | null>(null);
                       }}
                     >
                       <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
-                        <div style={{ fontWeight: 900, fontSize: 15, lineHeight: "18px" }}>
-                          {r.nombre_razon_social || "—"}
-                        </div>
-                      </td>
+  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+    <div style={{ fontWeight: 900, fontSize: 15, lineHeight: "18px" }}>
+      {r.nombre_razon_social || "—"}
+    </div>
+
+    {/* 🔴 Punto rojo: mensaje de jefatura pendiente */}
+    {r.obs_jefatura_flag === "TRUE" &&
+      r.obs_jefatura_vista !== "TRUE" && (
+        <span
+          title="Tienes un mensaje de jefatura"
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: 999,
+            background: "#ef4444",
+            display: "inline-block",
+          }}
+        />
+      )}
+  </div>
+</td>
+
 
                       <td style={{ padding: 10, borderBottom: "1px solid #f3f4f6" }}>
                         <div style={{ fontWeight: 700, fontSize: 13 }}>{r.correo || "—"}</div>
