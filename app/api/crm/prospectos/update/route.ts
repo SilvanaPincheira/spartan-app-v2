@@ -291,11 +291,13 @@ export async function POST(req: Request) {
     if (autoEtapaNombre) payload.etapa_nombre = autoEtapaNombre;
     if (observacion) payload.observacion = observacion;
 
-    // 🔴 FLAG observación de jefatura (para punto rojo)
+    // ✅ Si quien escribe es jefatura y viene observación, marcar "mensaje pendiente"
 if (observacion && JEFATURAS.has(loggedEmail)) {
   payload.obs_jefatura_flag = "TRUE";
   payload.obs_jefatura_vista = "FALSE";
+  payload.obs_jefatura_by = loggedEmail;
 }
+
 
 
     // 🔹 ficha (solo lo que venga)
