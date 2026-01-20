@@ -291,6 +291,13 @@ export async function POST(req: Request) {
     if (autoEtapaNombre) payload.etapa_nombre = autoEtapaNombre;
     if (observacion) payload.observacion = observacion;
 
+    // 🔴 FLAG observación de jefatura (para punto rojo)
+if (observacion && JEFATURAS.has(loggedEmail)) {
+  payload.obs_jefatura_flag = "TRUE";
+  payload.obs_jefatura_vista = "FALSE";
+}
+
+
     // 🔹 ficha (solo lo que venga)
     Object.entries(fichaFields).forEach(([k, v]) => {
       if (v) payload[k] = v;
