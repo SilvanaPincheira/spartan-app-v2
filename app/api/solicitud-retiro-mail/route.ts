@@ -11,7 +11,7 @@ export async function POST(req: Request) {
       (Array.isArray(body.to) && body.to.length && body.to) ||
       (typeof body.to === "string" && body.to.trim()) ||
       // 👇 correo por defecto del área que atiende retiros
-      "jorge.palma@spartan.cl";
+      "leonardo.vega@spartan.cl";
 
     const cc = body.cc
       ? Array.isArray(body.cc) ? body.cc : [String(body.cc)]
