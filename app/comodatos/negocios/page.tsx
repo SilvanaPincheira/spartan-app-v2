@@ -984,6 +984,28 @@ async function guardarEnHistorial() {
               Limpiar
             </button>
           </div>
+          
+          {/* % Viabilidad (solo Administradora) */}
+{adminLevel === 2 && (
+  <div className="mb-4 rounded-2xl border p-4 shadow-sm bg-white">
+    <div className="text-sm font-semibold text-[#2B6CFF]">
+      % Viabilidad del negocio
+    </div>
+
+    <div
+      className={`mt-2 text-4xl font-extrabold ${
+        isViable ? "text-green-700" : "text-red-700"
+      }`}
+    >
+      {pct(calc.mgnFinalPct)}
+    </div>
+
+    <div className="mt-1 text-xs text-zinc-500">
+      Umbral mínimo: {pct(VIABILITY_THRESHOLD)}
+    </div>
+  </div>
+)}
+
 
           {/* KPIs */}
           <div className="mt-3 grid gap-3 md:grid-cols-5">
