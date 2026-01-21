@@ -316,13 +316,32 @@ const [prospectoActivo, setProspectoActivo] = useState<RowAny | null>(null);
     return () => window.clearTimeout(t);
   }, [folioParam, loading, assignedToMe.length]);
 
-  function openGestionObs(r: RowAny) {
+  async function openGestionObs(r: RowAny) {
     const folio = (r.folio || "").trim();
+    if (!folio) return;
+  
     setObsFolio(folio);
-    setObsHistory(r.observacion || ""); // 👈 muestra historial existente
-    setObsText("");                     // 👈 nueva nota para agregar
+    setObsHistory(r.observacion || ""); // historial existente
+    setObsText("");                     // nueva nota
     setOpenObs(true);
+  
+    // 🔴➡️⚪ Si hay mensaje de jefatura pendiente, marcar como visto
+    if (r.obs_jefatura_flag === "TRUE" && r.obs_jefatura_vista !== "TRUE") {
+      try {
+        await postUpdate({
+          folio,
+          obs_jefatura_vista: "TRUE",
+          updated_by: loggedEmail,
+        });
+  
+        // refresca datos para que desaparezca el punto rojo
+        await reload();
+      } catch (err) {
+        console.error("Error marcando obs_jefatura_vista", err);
+      }
+    }
   }
+  
   
 
   function openCompletarFicha(r: RowAny) {
