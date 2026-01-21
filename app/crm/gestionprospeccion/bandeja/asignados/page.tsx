@@ -320,27 +320,28 @@ const [prospectoActivo, setProspectoActivo] = useState<RowAny | null>(null);
     const folio = (r.folio || "").trim();
     if (!folio) return;
   
+    // 👉 abrir modal inmediatamente (UX rápida)
     setObsFolio(folio);
-    setObsHistory(r.observacion || ""); // historial existente
-    setObsText("");                     // nueva nota
+    setObsHistory(r.observacion || "");
+    setObsText("");
     setOpenObs(true);
   
-    // 🔴➡️⚪ Si hay mensaje de jefatura pendiente, marcar como visto
+    // 🔴➡️⚪ marcar como leído
     if (r.obs_jefatura_flag === "TRUE" && r.obs_jefatura_vista !== "TRUE") {
       try {
         await postUpdate({
           folio,
-          obs_jefatura_vista: "TRUE",
+          obs_jefatura_vista: "TRUE", // 👈 EN MAYÚSCULA
           updated_by: loggedEmail,
         });
   
-        // refresca datos para que desaparezca el punto rojo
-        await reload();
+        await reload(); // refresca tabla y quita punto rojo
       } catch (err) {
         console.error("Error marcando obs_jefatura_vista", err);
       }
     }
   }
+  
   
   
 
