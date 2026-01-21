@@ -210,6 +210,7 @@ export async function POST(req: Request) {
     const etapa_id = toIntOrEmpty(pick(body, "etapa_id"));
     const etapa_nombre = pick(body, "etapa_nombre");
     const observacion = pick(body, "observacion");
+    const obs_jefatura_vista = pick(body, "obs_jefatura_vista");
     const ejecutivo_email =
       normEmail(pick(body, "ejecutivo_email")) || loggedEmail;
 
@@ -240,13 +241,17 @@ export async function POST(req: Request) {
     /** 3) Validar que exista algo para actualizar */
     const hasFichaChanges = Object.values(fichaFields).some(Boolean);
 
-    if (
-      !estado &&
-      !autoEtapaId &&
-      !autoEtapaNombre &&
-      !observacion &&
-      !hasFichaChanges
-    ) {
+    const hasObsVista = obs_jefatura_vista === "TRUE";
+
+if (
+  !estado &&
+  !autoEtapaId &&
+  !autoEtapaNombre &&
+  !observacion &&
+  !hasFichaChanges &&
+  !hasObsVista
+) {
+
       return NextResponse.json(
         { ok: false, error: "Nada que actualizar" },
         { status: 400 }
@@ -296,6 +301,11 @@ if (observacion && JEFATURAS.has(loggedEmail)) {
   payload.obs_jefatura_flag = "TRUE";
   payload.obs_jefatura_vista = "FALSE";
   payload.obs_jefatura_by = loggedEmail;
+}
+
+// 👁️ Ejecutivo leyó mensaje de jefatura → marcar como visto
+if (body.obs_jefatura_vista === "TRUE") {
+  payload.obs_jefatura_vista = "TRUE";
 }
 
 
