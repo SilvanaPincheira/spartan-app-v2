@@ -77,6 +77,9 @@ type Division = (typeof CRM_DIVISIONES)[number]["value"];
 type RowAny = Record<string, string>;
 type PiaRow = RowAny;
 type CrmRow = RowAny;
+type RubroRow = { division: string; rubro: string;
+
+}
 
 type ProspectoForm = {
   fecha: string;
@@ -301,7 +304,10 @@ export default function ProspeccionPage() {
   const [fuente, setFuente] = useState<FuenteDatos>("MANUAL");
 
   //Rubros
-  const [rubros, setRubros] = useState<{ value: string; label: string }[]>([]);
+  const [rubros, setRubros] = useState<RubroRow[]>([]);
+
+
+
 
 
   // BD Pía
@@ -460,20 +466,24 @@ export default function ProspeccionPage() {
         const rows = parseCsv(text);
   
         // Espera columnas: division | rubro
-        const opts = rows
-          .filter((r) => r.rubro)
+        const parsed: RubroRow[] = rows
+          .filter((r) => r.division && r.rubro)
           .map((r) => ({
-            value: r.rubro,
-            label: r.rubro,
+            division: r.division.trim().toUpperCase(),
+            rubro: r.rubro.trim(),
           }));
   
-        setRubros(opts);
+        setRubros(parsed);
       } catch (e) {
         console.error("Error cargando rubros", e);
         setRubros([]);
       }
     })();
   }, []);
+  
+  
+
+
   
 
   /** 6) Al cambiar fuente, refresca metadatos del registro */
@@ -712,6 +722,22 @@ export default function ProspeccionPage() {
       setSaving(false);
     }
   }
+
+  const rubrosFiltrados = useMemo(() => {
+    if (!form.division) return [];
+  
+    const div = form.division.toUpperCase();
+  
+    return rubros
+      .filter((r) => r.division === div)
+      .map((r) => ({
+        value: r.rubro,
+        label: r.rubro,
+      }));
+  }, [form.division, rubros]);
+  
+  
+  
 
   /** 10) Vista: últimos 5 creados por mí */
   const myLast5 = useMemo(() => {
@@ -966,9 +992,10 @@ export default function ProspeccionPage() {
   error={errors.rubro}
   options={[
     { value: "", label: "Selecciona un rubro" },
-    ...rubros,
+    ...rubrosFiltrados,
   ]}
 />
+
 
 
           <Field
