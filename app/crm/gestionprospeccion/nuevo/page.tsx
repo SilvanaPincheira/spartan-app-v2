@@ -12,6 +12,8 @@ const CSV_PIA_URL =
 const CSV_CRM_DB_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vR6D9j1ZjygWJKRXLV22AMb2oMYKVQWlly1KdAIKRm9jBAOIvIxNd9jqhEi2Zc-7LnjLe2wfhKrfsEW/pub?gid=0&single=true&output=csv";
 
+const CSV_RUBROS_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTrLu4aUYaPKyLskMR65Yvj9k2KIUUaJnzrgCUs_8oqu4C1t4SgHEwBcy7_-2Q1qMqVt_STH9S_DOYO/pub?gid=0&single=true&output=csv";
+
 const PIA_OWNER_COL_NORM = "email_col";
 
 /** =========================
@@ -298,6 +300,10 @@ export default function ProspeccionPage() {
   // UI fuente
   const [fuente, setFuente] = useState<FuenteDatos>("MANUAL");
 
+  //Rubros
+  const [rubros, setRubros] = useState<{ value: string; label: string }[]>([]);
+
+
   // BD Pía
   const [piaLoading, setPiaLoading] = useState(false);
   const [piaError, setPiaError] = useState<string | null>(null);
@@ -444,6 +450,32 @@ export default function ProspeccionPage() {
     setForm((prev) => ({ ...prev, fuenteDatos: fuente }));
   }, [fuente]);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(CSV_RUBROS_URL, { cache: "no-store" });
+        if (!res.ok) throw new Error("Error cargando rubros");
+  
+        const text = await res.text();
+        const rows = parseCsv(text);
+  
+        // Espera columnas: division | rubro
+        const opts = rows
+          .filter((r) => r.rubro)
+          .map((r) => ({
+            value: r.rubro,
+            label: r.rubro,
+          }));
+  
+        setRubros(opts);
+      } catch (e) {
+        console.error("Error cargando rubros", e);
+        setRubros([]);
+      }
+    })();
+  }, []);
+  
+
   /** 6) Al cambiar fuente, refresca metadatos del registro */
   useEffect(() => {
     setErrors({});
@@ -456,6 +488,8 @@ export default function ProspeccionPage() {
       folio: makeFolio(),
       ejecutivoEmail: loggedEmail,
       fuenteDatos: fuente,
+
+              
 
       // ✅ si viene de Pía lo tratamos como WEB (para jefatura)
       origenProspecto: fuente === "CSV_PIA" ? "WEB" : prev.origenProspecto || "Manual",
@@ -925,12 +959,17 @@ export default function ProspeccionPage() {
             error={errors.direccion}
           />
 
-          <Field
-            label="Rubro *"
-            value={form.rubro}
-            onChange={(v) => setForm((p) => ({ ...p, rubro: v }))}
-            error={errors.rubro}
-          />
+<SelectField
+  label="Rubro *"
+  value={form.rubro}
+  onChange={(v) => setForm((p) => ({ ...p, rubro: v }))}
+  error={errors.rubro}
+  options={[
+    { value: "", label: "Selecciona un rubro" },
+    ...rubros,
+  ]}
+/>
+
 
           <Field
             label="Monto proyectado (CLP) *"
