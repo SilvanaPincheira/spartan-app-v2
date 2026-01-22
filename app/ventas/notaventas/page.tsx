@@ -317,24 +317,33 @@ const nvToDuplicate = searchParams.get("duplicar");
      ========================================================================== */
   useEffect(() => setNumeroNV(generarNumeroNV()), []);
 
-  // Clientes
-  useEffect(() => {
-    (async () => {
-      const { id, gid } = normalizeGoogleSheetUrl(
-        "https://docs.google.com/spreadsheets/d/1kF0INEtwYDXhQCBPTVhU8NQI2URKoi99Hs43DTSO02I/edit?gid=161671364#gid=161671364"
-      );
-      if (!id) return;
-      const rows = await loadSheetSmart(id, gid, "Clientes");
-      const list: Client[] = rows.map((r) => ({
-        nombre: String((r as any).CardName ?? (r as any).Nombre ?? "").trim(),
-        rut: String((r as any).RUT ?? (r as any).LicTradNum ?? "").trim(),
-        ejecutivo: String((r as any)["Empleado Ventas"] ?? (r as any)["Empleado de Ventas"] ?? "").trim(),
-        codigo: String((r as any).CardCode ?? "").trim(),
-        direccion: String((r as any)["Dirección Despacho"] ?? (r as any)["Direccion Despacho"] ?? (r as any).Address ?? "").trim(),
+  // Clientes (desde backend, filtrados por ejecutivo logueado)
+useEffect(() => {
+  (async () => {
+    try {
+      const res = await fetch("/api/clientes", { cache: "no-store" });
+      const json = await res.json();
+
+      if (!res.ok || !json.success) {
+        throw new Error("No se pudieron cargar los clientes");
+      }
+
+      const list: Client[] = json.data.map((c: any) => ({
+        nombre: c.cardname,
+        rut: c.rut,
+        ejecutivo: c.ejecutivo,
+        codigo: c.cardcode,
+        direccion: c.direccion,
       }));
-      setClients(list.filter((c) => c.nombre));
-    })().catch((e) => setErrorMsg(String(e)));
-  }, []);
+
+      setClients(list);
+    } catch (e: any) {
+      console.error("❌ Error cargando clientes:", e);
+      setErrorMsg("No se pudieron cargar los clientes asignados");
+    }
+  })();
+}, []);
+
 
   // 🧭 Autocompletar correo del ejecutivo desde Supabase
 useEffect(() => {
