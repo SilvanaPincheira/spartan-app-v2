@@ -41,26 +41,47 @@ export default function PromocionesMaquinasPage() {
               gap: 10,
             }}
           >
-            <div
-              style={{
-                height: 160,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "#f9fafb",
-                borderRadius: 10,
-              }}
-            >
-              <img
-                src={m.imagen}
-                alt={m.nombre}
-                style={{
-                  maxHeight: "100%",
-                  maxWidth: "100%",
-                  objectFit: "contain",
-                }}
-              />
-            </div>
+            <a
+  href={m.imagen}
+  download
+  target="_blank"
+  rel="noopener noreferrer"
+  style={{ textDecoration: "none" }}
+>
+  <div
+    style={{
+      height: 220, // 🔼 imagen más grande
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      background: "#f9fafb",
+      borderRadius: 10,
+      cursor: "pointer",
+    }}
+  >
+    <img
+      src={m.imagen}
+      alt={m.nombre}
+      style={{
+        maxHeight: "100%",
+        maxWidth: "100%",
+        objectFit: "contain",
+      }}
+    />
+  </div>
+</a>
+
+<div
+  style={{
+    fontSize: 11,
+    color: "#2563eb",
+    textAlign: "center",
+    marginTop: 4,
+  }}
+>
+  Descargar imagen
+</div>
+
 
             <div style={{ fontWeight: 800, fontSize: 14 }}>
               {m.nombre}
