@@ -16,6 +16,7 @@ export default function PromocionesMaquinasPage() {
       <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>
         Promociones · Máquinas
       </h1>
+
       <div style={{ opacity: 0.8, marginBottom: 20 }}>
         Equipos disponibles para promoción comercial.
       </div>
@@ -41,56 +42,74 @@ export default function PromocionesMaquinasPage() {
               gap: 10,
             }}
           >
+            {/* Imagen descargable */}
             <a
-  href={m.imagen}
-  download
-  target="_blank"
-  rel="noopener noreferrer"
-  style={{ textDecoration: "none" }}
->
-  <div
-    style={{
-      height: 220, // 🔼 imagen más grande
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      background: "#f9fafb",
-      borderRadius: 10,
-      cursor: "pointer",
-    }}
-  >
-    <img
-      src={m.imagen}
-      alt={m.nombre}
-      style={{
-        maxHeight: "100%",
-        maxWidth: "100%",
-        objectFit: "contain",
-      }}
-    />
-  </div>
-</a>
+              href={m.imagen}
+              download
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ textDecoration: "none" }}
+              title="Descargar imagen"
+            >
+              <div
+                style={{
+                  height: 220,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "#f9fafb",
+                  borderRadius: 10,
+                  cursor: "pointer",
+                }}
+              >
+                <img
+                  src={m.imagen}
+                  alt={m.nombre}
+                  style={{
+                    maxHeight: "100%",
+                    maxWidth: "100%",
+                    objectFit: "contain",
+                  }}
+                />
+              </div>
+            </a>
 
-<div
-  style={{
-    fontSize: 11,
-    color: "#2563eb",
-    textAlign: "center",
-    marginTop: 4,
-  }}
->
-  Descargar imagen
-</div>
+            {/* Texto descarga */}
+            <div
+              style={{
+                fontSize: 11,
+                color: "#2563eb",
+                textAlign: "center",
+              }}
+            >
+              Descargar imagen
+            </div>
 
-
-            <div style={{ fontWeight: 800, fontSize: 14 }}>
+            {/* Nombre */}
+            <div style={{ fontWeight: 800, fontSize: 15 }}>
               {m.nombre}
             </div>
 
+            {/* Código */}
             <div style={{ fontSize: 12, opacity: 0.7 }}>
               Código: <b>{m.codigo}</b>
             </div>
 
+            {/* Descripción (preparada, justificada si luego la agregas) */}
+            {m.nombre && (
+              <div
+                style={{
+                  fontSize: 12,
+                  opacity: 0.85,
+                  textAlign: "justify",
+                  lineHeight: 1.5,
+                }}
+              >
+                {m.nombre}
+              </div>
+            )}
+
+            {/* Precio */}
             <div
               style={{
                 marginTop: "auto",
