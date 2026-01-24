@@ -1,47 +1,19 @@
-"use client";
-
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-
+// app/promociones/layout.tsx
 export default function PromocionesLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const pathname = usePathname();
-
-  const Item = ({ href, label }: { href: string; label: string }) => {
-    const active = pathname === href;
+    children,
+  }: {
+    children: React.ReactNode;
+  }) {
     return (
-      <Link
-        href={href}
+      <div
         style={{
-          padding: "8px 14px",
-          borderRadius: 10,
-          textDecoration: "none",
-          fontWeight: 700,
-          background: active ? "#111827" : "#f3f4f6",
-          color: active ? "white" : "#111827",
+          maxWidth: 1200,
+          margin: "0 auto",
+          padding: "24px 24px 40px",
         }}
       >
-        {label}
-      </Link>
-    );
-  };
-
-  return (
-    <div style={{ padding: 24 }}>
-      <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 12 }}>
-        Promociones
-      </h1>
-
-      {/* Submenú */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-        <Item href="/promociones/maquinas" label="Máquinas" />
-        <Item href="/promociones/papeles" label="Papeles" />
+        {children}
       </div>
-
-      {children}
-    </div>
-  );
-}
+    );
+  }
+  
