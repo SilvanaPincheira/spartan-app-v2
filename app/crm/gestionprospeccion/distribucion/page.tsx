@@ -30,6 +30,7 @@ const JEFATURAS = new Set(
     "carlos.avendano@spartan.cl",
     "hernan.lopez@spartan.cl",
     "walter.gonzalez@spartan.cl",
+    "patricio.roco@spartan.cl",
   ].map((x) => x.trim().toLowerCase())
 );
 
@@ -41,6 +42,7 @@ const JEFATURA_SCOPE_PREFIJOS: Record<string, string[]> = {
   "nelson.norambuena@spartan.cl": ["BSC"], // ajusta
   "carlos.avendano@spartan.cl": ["HC"],
   "hernan.lopez@spartan.cl": ["IND_HL"],
+  "patricio.roco@spartan.cl": ["IND_PC"],
 };
 
 type Row = Record<string, string>;

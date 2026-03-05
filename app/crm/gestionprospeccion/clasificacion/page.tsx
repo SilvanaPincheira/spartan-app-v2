@@ -13,7 +13,7 @@ const USUARIOS_CLASIFICACION = new Set(
   ].map((x) => x.trim().toLowerCase())
 );
 
-const DIVISIONES = ["FB", "IN", "HC", "IND", "BSC"];
+const DIVISIONES = ["FB", "IN", "HC", "IND", "BSC", "IND_HL", "IND_PC"];
 
 /* =========================
    UI helpers
