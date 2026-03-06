@@ -38,5 +38,11 @@ export type PapelPromo = {
       precio: 10090,
       imagen: "/promociones/papeles/higienico-52093.png",
     },
+    {
+      codigo: "ACN1506959",
+      nombre: "Paño Maxwipe 88 trabajo pesado",
+      precio: 49.590,
+      imagen: "/promociones/papeles/higienico-52093.png",
+    },
   ];
   
