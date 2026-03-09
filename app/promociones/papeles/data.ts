@@ -41,7 +41,7 @@ export type PapelPromo = {
     {
       codigo: "ACN1506959",
       nombre: "Paño Maxwipe 88 trabajo pesado",
-      precio: 49.590,
+      precio: 49590,
       imagen: "/promociones/papeles/paño maxwipe 88.png",
     },
   ];
