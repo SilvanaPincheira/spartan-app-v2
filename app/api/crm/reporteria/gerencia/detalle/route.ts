@@ -21,6 +21,7 @@ const JEFATURA_SCOPE_PREFIJOS: Record<string, string[]> = {
   "nelson.norambuena@spartan.cl": ["BSC"],
   "carlos.avendano@spartan.cl": ["HC"],
   "hernan.lopez@spartan.cl": ["IND_HL"],
+  "patricio.roco@spartan.cl": ["IND", "BSC", "IND_HL", "IND_PC"],
 };
 
 function normalize(s = "") {
