@@ -16,8 +16,8 @@ const EJECUTIVOS_CSV =
 /** ✅ Scope fijo por jefatura */
 const JEFATURA_SCOPE_PREFIJOS: Record<string, string[]> = {
   "claudia.borquez@spartan.cl": ["IN", "FB"],
-  "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND", "BSC", "IND_HL"],
-  "alberto.damm@spartan.cl": ["IND", "BSC", "IND_HL"],
+  "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND", "BSC", "IND_HL", "IND_PC"],
+  "alberto.damm@spartan.cl": ["IND", "BSC", "IND_HL", "IND_PC"],
   "nelson.norambuena@spartan.cl": ["BSC"],
   "carlos.avendano@spartan.cl": ["HC"],
   "hernan.lopez@spartan.cl": ["IND_HL"],
