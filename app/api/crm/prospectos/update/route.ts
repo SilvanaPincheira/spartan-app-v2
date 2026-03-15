@@ -325,6 +325,11 @@ export async function POST(req: Request) {
       if (v) payload[k] = v;
     });
 
+    console.log("loggedEmail:", loggedEmail);
+console.log("isJefatura route:", JEFATURAS.has(loggedEmail));
+console.log("payload actualizado_por:", payload.actualizado_por);
+console.log("payload obs_jefatura_by:", payload.obs_jefatura_by);
+
     const resp = await fetch(APPS_SCRIPT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
