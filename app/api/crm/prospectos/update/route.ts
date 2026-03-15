@@ -7,7 +7,6 @@ export const runtime = "nodejs";
 
 const APPS_SCRIPT_URL = process.env.CRM_APPS_SCRIPT_URL;
 
-// OJO: este CSV debe ser el publicado del CRM_DB
 const CSV_CRM_DB_URL =
   process.env.CRM_CSV_CRM_DB_URL ||
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vR6D9j1ZjygWJKRXLV22AMb2oMYKVQWlly1KdAIKRm9jBAOIvIxNd9jqhEi2Zc-7LnjLe2wfhKrfsEW/pub?gid=0&single=true&output=csv";
@@ -25,7 +24,6 @@ const JEFATURAS = new Set(
   ].map((x) => x.trim().toLowerCase())
 );
 
-/** ---------------- CSV helpers ---------------- */
 type Row = Record<string, string>;
 
 function normalizeHeader(h: string) {
@@ -49,6 +47,7 @@ function parseCsv(text: string): Row[] {
     row.push(cur);
     cur = "";
   };
+
   const pushRow = () => {
     if (row.some((c) => c.trim() !== "")) rows.push(row);
     row = [];
@@ -79,6 +78,7 @@ function parseCsv(text: string): Row[] {
     }
     cur += ch;
   }
+
   pushCell();
   pushRow();
 
@@ -87,7 +87,9 @@ function parseCsv(text: string): Row[] {
 
   return rows.slice(1).map((cells) => {
     const obj: Row = {};
-    headers.forEach((h, idx) => (obj[h] = (cells[idx] ?? "").trim()));
+    headers.forEach((h, idx) => {
+      obj[h] = (cells[idx] ?? "").trim();
+    });
     return obj;
   });
 }
@@ -104,7 +106,6 @@ function pick(obj: any, ...keys: string[]) {
   return "";
 }
 
-/** --------------- Normalización de estados --------------- */
 function normalizeEstado(input: string) {
   const s = String(input || "").trim();
   if (!s) return "";
@@ -118,32 +119,27 @@ function normalizeEstado(input: string) {
   const map: Record<string, string> = {
     "PENDIENTE ASIGNACION": "PENDIENTE_ASIGNACION",
     "PENDIENTE_ASIGNACION": "PENDIENTE_ASIGNACION",
-    "ASIGNADO": "ASIGNADO",
+    ASIGNADO: "ASIGNADO",
     "EN GESTION": "EN_GESTION",
-    "EN_GESTION": "EN_GESTION",
-    "CONTACTADO": "CONTACTADO",
-    "REUNION": "REUNION",
+    EN_GESTION: "EN_GESTION",
+    CONTACTADO: "CONTACTADO",
+    REUNION: "REUNION",
     "REUNIÓN": "REUNION",
-    "LEVANTAMIENTO": "LEVANTAMIENTO",
-    "PROPUESTA": "PROPUESTA",
+    LEVANTAMIENTO: "LEVANTAMIENTO",
+    PROPUESTA: "PROPUESTA",
     "CERRADO GANADO": "CERRADO_GANADO",
-    "CERRADO_GANADO": "CERRADO_GANADO",
+    CERRADO_GANADO: "CERRADO_GANADO",
     "INSTALADO, 1° O/C": "INSTALADO_1OC",
     "INSTALADO 1° O/C": "INSTALADO_1OC",
     "INSTALADO 1OC": "INSTALADO_1OC",
-    "INSTALADO_1OC": "INSTALADO_1OC",
+    INSTALADO_1OC: "INSTALADO_1OC",
     "NO GANADO": "NO_GANADO",
-    "NO_GANADO": "NO_GANADO",
+    NO_GANADO: "NO_GANADO",
   };
 
   return map[x] || x.replace(/\s+/g, "_");
 }
 
-/** --------------- Estado -> Etapa automática --------------- */
-/**
- * Si UI manda solo estado, aquí podemos autocompletar etapa_id/etapa_nombre.
- * (Si UI manda etapa explícita, se respeta lo que mandó UI).
- */
 const ESTADO_TO_ETAPA: Record<string, { etapa_id: number; etapa_nombre: string }> = {
   ASIGNADO: { etapa_id: 0, etapa_nombre: "Asignado" },
   EN_GESTION: { etapa_id: 1, etapa_nombre: "En gestión" },
@@ -156,7 +152,6 @@ const ESTADO_TO_ETAPA: Record<string, { etapa_id: number; etapa_nombre: string }
   NO_GANADO: { etapa_id: 8, etapa_nombre: "No ganado" },
 };
 
-/** --------------- GET CRM_DB row by folio --------------- */
 async function fetchCrmDbByFolio(folio: string) {
   const res = await fetch(CSV_CRM_DB_URL, { cache: "no-store" });
   if (!res.ok) throw new Error(`No se pudo leer CRM_DB CSV (${res.status})`);
@@ -168,7 +163,6 @@ async function fetchCrmDbByFolio(folio: string) {
   return { rows, hit };
 }
 
-/** --------------- helpers --------------- */
 function toIntOrEmpty(v: string) {
   const s = String(v || "").trim();
   if (!s) return "";
@@ -185,9 +179,9 @@ export async function POST(req: Request) {
       );
     }
 
-    /** 0) Auth */
     const supabase = createRouteHandlerClient({ cookies });
     const { data: authData, error: authErr } = await supabase.auth.getUser();
+
     if (authErr) {
       return NextResponse.json(
         { ok: false, error: `Auth error: ${authErr.message}` },
@@ -197,14 +191,20 @@ export async function POST(req: Request) {
 
     const loggedEmail = normEmail(authData.user?.email || "");
     if (!loggedEmail) {
-      return NextResponse.json({ ok: false, error: "No autenticado" }, { status: 401 });
+      return NextResponse.json(
+        { ok: false, error: "No autenticado" },
+        { status: 401 }
+      );
     }
 
-    /** 1) Body */
     const body = await req.json().catch(() => null);
     const folio = pick(body, "folio");
+
     if (!folio) {
-      return NextResponse.json({ ok: false, error: "Folio requerido" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "Folio requerido" },
+        { status: 400 }
+      );
     }
 
     const estadoIn = pick(body, "estado");
@@ -214,10 +214,7 @@ export async function POST(req: Request) {
     const etapa_nombre = pick(body, "etapa_nombre");
     const observacion = pick(body, "observacion");
     const obs_jefatura_vista = pick(body, "obs_jefatura_vista");
-    const ejecutivo_email =
-      normEmail(pick(body, "ejecutivo_email")) || loggedEmail;
 
-    /** 🔹 NUEVO: campos de ficha */
     const fichaFields: Record<string, string> = {
       nombre_razon_social: pick(body, "nombre_razon_social"),
       rut: pick(body, "rut"),
@@ -229,7 +226,6 @@ export async function POST(req: Request) {
       monto_proyectado: pick(body, "monto_proyectado"),
     };
 
-    /** 2) Autocompletar etapa si viene estado */
     let autoEtapaId = etapa_id;
     let autoEtapaNombre = etapa_nombre;
 
@@ -241,28 +237,26 @@ export async function POST(req: Request) {
       }
     }
 
-    /** 3) Validar que exista algo para actualizar */
     const hasFichaChanges = Object.values(fichaFields).some(Boolean);
-
     const hasObsVista = obs_jefatura_vista === "TRUE";
 
-if (
-  !estado &&
-  !autoEtapaId &&
-  !autoEtapaNombre &&
-  !observacion &&
-  !hasFichaChanges &&
-  !hasObsVista
-) {
-
+    if (
+      !estado &&
+      !autoEtapaId &&
+      !autoEtapaNombre &&
+      !observacion &&
+      !hasFichaChanges &&
+      !hasObsVista
+    ) {
       return NextResponse.json(
         { ok: false, error: "Nada que actualizar" },
         { status: 400 }
       );
     }
 
-    /** 4) Validar permisos (MISMO COMPORTAMIENTO ANTERIOR) */
     let current: Row | null = null;
+    let isJefatura = false;
+
     try {
       const { hit } = await fetchCrmDbByFolio(folio);
       current = hit || null;
@@ -275,7 +269,7 @@ if (
       }
 
       const asignadoA = normEmail(current.asignado_a || "");
-      const isJefatura = JEFATURAS.has(loggedEmail);
+      isJefatura = JEFATURAS.has(loggedEmail);
 
       if (asignadoA && asignadoA !== loggedEmail && !isJefatura) {
         return NextResponse.json(
@@ -287,11 +281,29 @@ if (
       // no bloqueamos si falla CSV
     }
 
-    /** 5) Payload FINAL a Apps Script */
+    const actualizado_por =
+      normEmail(
+        pick(
+          body,
+          "actualizado_por",
+          "updated_by",
+          "updatedBy",
+          "obs_jefatura_by",
+          "ejecutivo_email"
+        )
+      ) || loggedEmail;
+
+    const ejecutivo_email =
+      normEmail(pick(body, "ejecutivo_email")) ||
+      normEmail(current?.ejecutivo_email || "") ||
+      loggedEmail;
+
     const payload: any = {
       action: "UPDATE",
       folio,
       ejecutivo_email,
+      actualizado_por,
+      updated_by: actualizado_por,
     };
 
     if (estado) payload.estado = estado;
@@ -299,26 +311,20 @@ if (
     if (autoEtapaNombre) payload.etapa_nombre = autoEtapaNombre;
     if (observacion) payload.observacion = observacion;
 
-    // ✅ Si quien escribe es jefatura y viene observación, marcar "mensaje pendiente"
-if (observacion && JEFATURAS.has(loggedEmail)) {
-  payload.obs_jefatura_flag = "TRUE";
-  payload.obs_jefatura_vista = "FALSE";
-  payload.obs_jefatura_by = loggedEmail;
-}
+    if (observacion && isJefatura) {
+      payload.obs_jefatura_flag = "TRUE";
+      payload.obs_jefatura_vista = "FALSE";
+      payload.obs_jefatura_by = actualizado_por;
+    }
 
-// 👁️ Ejecutivo leyó mensaje de jefatura → marcar como visto
-if (body.obs_jefatura_vista === "TRUE") {
-  payload.obs_jefatura_vista = "TRUE";
-}
+    if (obs_jefatura_vista === "TRUE") {
+      payload.obs_jefatura_vista = "TRUE";
+    }
 
-
-
-    // 🔹 ficha (solo lo que venga)
     Object.entries(fichaFields).forEach(([k, v]) => {
       if (v) payload[k] = v;
     });
 
-    /** 6) Enviar a Apps Script */
     const resp = await fetch(APPS_SCRIPT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -328,6 +334,7 @@ if (body.obs_jefatura_vista === "TRUE") {
 
     const text = await resp.text();
     let data: any;
+
     try {
       data = JSON.parse(text);
     } catch {
@@ -336,7 +343,7 @@ if (body.obs_jefatura_vista === "TRUE") {
 
     if (!resp.ok || !data?.ok) {
       return NextResponse.json(
-        { ok: false, error: data?.error || "Error Apps Script", debug: data },
+        { ok: false, error: data?.error || "Error Apps Script", debug: data, sent: payload },
         { status: 500 }
       );
     }
