@@ -275,54 +275,62 @@ export default function CRMReporteriaGerenciaDetallePage() {
   /* =========================
      SAVE OBSERVATION
      ========================= */
-  async function handleSaveObservation() {
-    if (!selectedFolio) return;
-
-    try {
-      setSavingObs(true);
-      setObsErr(null);
-
-      const res = await fetch("/api/crm/prospectos/update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          folio: selectedFolio,
-          observacion: obsEdit,
-        }),
-      });
-
-      const raw = await res.text();
-      let data: UpdateResp | null = null;
-
+     async function handleSaveObservation() {
+      if (!selectedFolio) return;
+    
       try {
-        data = raw ? JSON.parse(raw) : null;
-      } catch {
-        const preview = raw?.slice(0, 220)?.replace(/\s+/g, " ") || "";
-        throw new Error(`Respuesta no JSON del update. HTTP ${res.status}. Preview: ${preview}`);
+        setSavingObs(true);
+        setObsErr(null);
+    
+        const actorEmail = normalizeEmail(loggedEmail);
+    
+        const res = await fetch("/api/crm/prospectos/update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            folio: selectedFolio,
+            observacion: obsEdit,
+            actualizado_por: actorEmail,
+            updated_by: actorEmail,
+            obs_jefatura_by: actorEmail,
+            obs_jefatura_flag: isJefatura ? "TRUE" : undefined,
+            obs_jefatura_vista: isJefatura ? "FALSE" : undefined,
+          }),
+        });
+    
+        const raw = await res.text();
+        let data: UpdateResp | null = null;
+    
+        try {
+          data = raw ? JSON.parse(raw) : null;
+        } catch {
+          const preview = raw?.slice(0, 220)?.replace(/\s+/g, " ") || "";
+          throw new Error(`Respuesta no JSON del update. HTTP ${res.status}. Preview: ${preview}`);
+        }
+    
+        console.log("save obs status:", res.status);
+        console.log("save obs response:", data);
+        console.log("save obs actor:", actorEmail);
+    
+        if (!res.ok || !data?.ok) {
+          throw new Error(data?.error || `No se pudo guardar la observación (HTTP ${res.status})`);
+        }
+    
+        await reload();
+    
+        setOpenObs(false);
+        setObsEdit("");
+        setObservacionActiva("");
+        setSelectedFolio(null);
+        setObsErr(null);
+      } catch (e: any) {
+        const msg = e?.message || "Error al guardar la observación";
+        console.error("Error guardando observación:", e);
+        setObsErr(msg);
+      } finally {
+        setSavingObs(false);
       }
-
-      console.log("save obs status:", res.status);
-      console.log("save obs response:", data);
-
-      if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || `No se pudo guardar la observación (HTTP ${res.status})`);
-      }
-
-      await reload();
-
-      setOpenObs(false);
-      setObsEdit("");
-      setObservacionActiva("");
-      setSelectedFolio(null);
-      setObsErr(null);
-    } catch (e: any) {
-      const msg = e?.message || "Error al guardar la observación";
-      console.error("Error guardando observación:", e);
-      setObsErr(msg);
-    } finally {
-      setSavingObs(false);
     }
-  }
 
   /* =========================
      OPTIONS
