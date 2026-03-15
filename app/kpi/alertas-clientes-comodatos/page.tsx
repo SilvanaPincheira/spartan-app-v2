@@ -73,7 +73,7 @@ export default function AlertasClientesComodatos() {
           rut: r["rut_cliente"],
           cliente: r["nombre_cliente"],
           ejecutivo: r["empleado_ventas"],
-          ventas: parseNumberCL(r["ventas_quimicos_2025"]),
+          ventas: parseNumberCL(r["ventas_quimicos_2026"]),
           comodatos: parseNumberCL(r["comodatos_activos_2021"]),
           alerta: (r["alerta_final"] || "").toUpperCase(),
           email: r["email_col"] || "",
@@ -147,7 +147,7 @@ export default function AlertasClientesComodatos() {
                 <th className="px-2 py-1">RUT</th>
                 <th className="px-2 py-1">Cliente</th>
                 <th className="px-2 py-1">Ejecutivo</th>
-                <th className="px-2 py-1 text-right">Ventas Químicos 2025</th>
+                <th className="px-2 py-1 text-right">Ventas Químicos 2026</th>
                 <th className="px-2 py-1 text-right">Comodatos Activos ≥ 2021</th>
                 <th className="px-2 py-1">Alerta</th>
               </tr>
