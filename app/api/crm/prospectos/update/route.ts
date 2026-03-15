@@ -19,6 +19,9 @@ const JEFATURAS = new Set(
     "jorge.beltran@spartan.cl",
     "alberto.damm@spartan.cl",
     "nelson.norambuena@spartan.cl",
+    "hernan.lopez@spartan.cl",
+    "carlos.avendano@spartan.cl",
+    "patricio.roco@spartan.cl",
   ].map((x) => x.trim().toLowerCase())
 );
 
