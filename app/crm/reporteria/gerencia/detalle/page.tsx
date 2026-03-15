@@ -5,7 +5,6 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
 import { Eye } from "lucide-react";
 
-
 /* =========================
    CONFIG JEFATURAS (igual que resumen)
    ========================= */
@@ -23,12 +22,12 @@ const JEFATURAS = new Set(
 
 const JEFATURA_SCOPE_PREFIJOS: Record<string, string[]> = {
   "claudia.borquez@spartan.cl": ["IN", "FB"],
-  "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND", "BSC", "IND_HL,IND_PC"],
+  "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND", "BSC", "IND_HL", "IND_PC"],
   "alberto.damm@spartan.cl": ["IND", "BSC", "IND_HL"],
   "nelson.norambuena@spartan.cl": ["BSC"],
   "carlos.avendano@spartan.cl": ["HC"],
   "hernan.lopez@spartan.cl": ["IND_HL"],
-  "patricio.roco@spartan.cl":["IND", "BSC", "IND_HL", "IND_PC"],
+  "patricio.roco@spartan.cl": ["IND", "BSC", "IND_HL", "IND_PC"],
 };
 
 function normalizeEmail(s: string) {
@@ -119,9 +118,9 @@ function badge(bg: string, color = "#111827") {
 
 function estadoBadgeStyle(estadoRaw: string) {
   const e = normU(estadoRaw);
-  if (e === "ASIGNADO") return { bg: "#FEE2E2", color: "#7F1D1D" }; // 🔴 asignado rojo (pedido)
+  if (e === "ASIGNADO") return { bg: "#FEE2E2", color: "#7F1D1D" };
   if (e === "EN_GESTION") return { bg: "#FEF9C3", color: "#854D0E" };
-  if (e === "CONTACTADO") return { bg: "#FEF9C3", color: "#854D0E" }; // 🟡 contactado amarillo (pedido)
+  if (e === "CONTACTADO") return { bg: "#FEF9C3", color: "#854D0E" };
   if (e === "REUNION") return { bg: "#EDE9FE", color: "#5B21B6" };
   if (e === "LEVANTAMIENTO") return { bg: "#FDF2F8", color: "#9D174D" };
   if (e === "PROPUESTA") return { bg: "#FFEDD5", color: "#9A3412" };
@@ -142,7 +141,6 @@ type RowDetalle = {
   etapa_nombre: string;
   monto_proyectado: number;
   updated_at?: string;
-  // opcional (para el modal). Si tu API no lo trae, se muestra "—"
   observacion?: string;
 };
 
@@ -150,6 +148,12 @@ type ApiResp = {
   ok: boolean;
   error?: string;
   rows?: RowDetalle[];
+};
+
+type UpdateResp = {
+  ok: boolean;
+  error?: string;
+  message?: string;
 };
 
 /* =========================
@@ -189,13 +193,13 @@ export default function CRMReporteriaGerenciaDetallePage() {
   const [sortKey, setSortKey] = useState<SortKey>("dias");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-  // modal observación (faltaban)
+  // modal observación
   const [openObs, setOpenObs] = useState(false);
   const [observacionActiva, setObservacionActiva] = useState<string>("");
   const [obsEdit, setObsEdit] = useState<string>("");
-const [savingObs, setSavingObs] = useState(false);
-const [selectedFolio, setSelectedFolio] = useState<string | null>(null);
-
+  const [savingObs, setSavingObs] = useState(false);
+  const [selectedFolio, setSelectedFolio] = useState<string | null>(null);
+  const [obsErr, setObsErr] = useState<string | null>(null);
 
   /* =========================
      AUTH
@@ -223,7 +227,7 @@ const [selectedFolio, setSelectedFolio] = useState<string | null>(null);
   }, [loggedEmail]);
 
   /* =========================
-     LOAD DATA (robusto ante HTML)
+     LOAD DATA
      ========================= */
   async function reload() {
     try {
@@ -267,6 +271,58 @@ const [selectedFolio, setSelectedFolio] = useState<string | null>(null);
     if (!authLoading && isJefatura && loggedEmail) reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, isJefatura, loggedEmail]);
+
+  /* =========================
+     SAVE OBSERVATION
+     ========================= */
+  async function handleSaveObservation() {
+    if (!selectedFolio) return;
+
+    try {
+      setSavingObs(true);
+      setObsErr(null);
+
+      const res = await fetch("/api/crm/prospectos/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          folio: selectedFolio,
+          observacion: obsEdit,
+        }),
+      });
+
+      const raw = await res.text();
+      let data: UpdateResp | null = null;
+
+      try {
+        data = raw ? JSON.parse(raw) : null;
+      } catch {
+        const preview = raw?.slice(0, 220)?.replace(/\s+/g, " ") || "";
+        throw new Error(`Respuesta no JSON del update. HTTP ${res.status}. Preview: ${preview}`);
+      }
+
+      console.log("save obs status:", res.status);
+      console.log("save obs response:", data);
+
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || `No se pudo guardar la observación (HTTP ${res.status})`);
+      }
+
+      await reload();
+
+      setOpenObs(false);
+      setObsEdit("");
+      setObservacionActiva("");
+      setSelectedFolio(null);
+      setObsErr(null);
+    } catch (e: any) {
+      const msg = e?.message || "Error al guardar la observación";
+      console.error("Error guardando observación:", e);
+      setObsErr(msg);
+    } finally {
+      setSavingObs(false);
+    }
+  }
 
   /* =========================
      OPTIONS
@@ -388,7 +444,6 @@ const [selectedFolio, setSelectedFolio] = useState<string | null>(null);
 
     const ganados = filtered.filter((r) => normU(r.estado) === "CERRADO_GANADO").length;
 
-    // conteo por estado para el pie
     const byEstado: Record<string, number> = {};
     for (const r of filtered) {
       const key = normU(r.estado || "");
@@ -432,7 +487,6 @@ const [selectedFolio, setSelectedFolio] = useState<string | null>(null);
 
   /* =========================
      PIE CHART DATA
-     (pedido: contactado amarillo, asignado rojo)
      ========================= */
   const pieData = useMemo(() => {
     const by = kpis.byEstado;
@@ -478,7 +532,6 @@ const [selectedFolio, setSelectedFolio] = useState<string | null>(null);
 
   return (
     <div style={{ padding: 16, maxWidth: 1500 }}>
-      {/* Header + acciones */}
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
           <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0, color: BRAND_BLUE }}>
@@ -495,7 +548,6 @@ const [selectedFolio, setSelectedFolio] = useState<string | null>(null);
         </button>
       </div>
 
-      {/* KPIs + Pie + Top 5 */}
       <div
         style={{
           marginTop: 14,
@@ -535,7 +587,6 @@ const [selectedFolio, setSelectedFolio] = useState<string | null>(null);
           </div>
         </div>
 
-        {/* 🏆 Card ganados */}
         <div style={{ ...cardStyle(), display: "grid", placeItems: "center", textAlign: "center" }}>
           <div style={{ fontSize: 36, lineHeight: "40px" }}>🏆</div>
           <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900, marginTop: 6, color: BRAND_BLUE }}>
@@ -549,7 +600,6 @@ const [selectedFolio, setSelectedFolio] = useState<string | null>(null);
           </div>
         </div>
 
-        {/* TOP 5 EJECUTIVOS */}
         <div style={{ ...cardStyle(), gridColumn: "span 2" }}>
           <div style={{ fontWeight: 900, color: BRAND_BLUE }}>🏆 Top 5 Ejecutivos</div>
 
@@ -577,17 +627,13 @@ const [selectedFolio, setSelectedFolio] = useState<string | null>(null);
                   }}
                 >
                   <div style={{ fontWeight: 900, fontSize: 13, color: BRAND_BLUE }}>#{idx + 1}</div>
-
                   <div style={{ fontSize: 12, marginTop: 4, fontWeight: 900 }}>{e.ejecutivo}</div>
-
                   <div style={{ marginTop: 6, fontSize: 12 }}>
                     Oportunidades: <b>{e.oportunidades}</b>
                   </div>
-
                   <div style={{ fontSize: 12 }}>
                     🏆 Ganados: <b>{e.ganados}</b>
                   </div>
-
                   <div style={{ fontSize: 12, marginTop: 4 }}>
                     Pipeline: <b>{moneyCLP(e.pipeline)}</b>
                   </div>
@@ -597,7 +643,6 @@ const [selectedFolio, setSelectedFolio] = useState<string | null>(null);
           </div>
         </div>
 
-        {/* Pie chart */}
         <div style={{ ...cardStyle(), gridColumn: "span 2" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
             <div style={{ fontWeight: 900, color: BRAND_BLUE }}>Distribución por estado</div>
@@ -631,7 +676,6 @@ const [selectedFolio, setSelectedFolio] = useState<string | null>(null);
         </div>
       </div>
 
-      {/* Filtros */}
       <div
         style={{
           marginTop: 12,
@@ -695,7 +739,6 @@ const [selectedFolio, setSelectedFolio] = useState<string | null>(null);
         </div>
       )}
 
-      {/* Tabla */}
       <div style={{ marginTop: 14, ...cardStyle(), padding: 0, overflow: "hidden" }}>
         <div style={{ overflowX: "auto", maxHeight: "68vh" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -750,15 +793,14 @@ const [selectedFolio, setSelectedFolio] = useState<string | null>(null);
                 </th>
 
                 <th
-  style={{
-    padding: 12,
-    borderBottom: "1px solid #e5e7eb",
-    textAlign: "center",
-  }}
->
-  Obs
-</th>
-
+                  style={{
+                    padding: 12,
+                    borderBottom: "1px solid #e5e7eb",
+                    textAlign: "center",
+                  }}
+                >
+                  Obs
+                </th>
 
                 <th
                   style={{ padding: 12, borderBottom: "1px solid #e5e7eb", cursor: "pointer", textAlign: "right" }}
@@ -778,241 +820,231 @@ const [selectedFolio, setSelectedFolio] = useState<string | null>(null);
                   <span style={{ color: BRAND_BLUE, fontWeight: 900 }}>
                     Última gestión {sortKey === "updated_at" ? (sortDir === "asc" ? "▲" : "▼") : ""}
                   </span>
-                  </th>
-  
-                  <th
-                    style={{ padding: 12, borderBottom: "1px solid #e5e7eb", cursor: "pointer", textAlign: "right" }}
-                    onClick={() => toggleSort("dias")}
-                    title="Ordenar por días sin gestión"
-                  >
-                    <span style={{ color: BRAND_BLUE, fontWeight: 900 }}>
-                      Días {sortKey === "dias" ? (sortDir === "asc" ? "▲" : "▼") : ""}
-                    </span>
-                  </th>
+                </th>
+
+                <th
+                  style={{ padding: 12, borderBottom: "1px solid #e5e7eb", cursor: "pointer", textAlign: "right" }}
+                  onClick={() => toggleSort("dias")}
+                  title="Ordenar por días sin gestión"
+                >
+                  <span style={{ color: BRAND_BLUE, fontWeight: 900 }}>
+                    Días {sortKey === "dias" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                  </span>
+                </th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={8} style={{ padding: 14, opacity: 0.75 }}>
+                    Cargando…
+                  </td>
                 </tr>
-              </thead>
-  
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan={7} style={{ padding: 14, opacity: 0.75 }}>
-                      Cargando…
-                    </td>
-                  </tr>
-                ) : sorted.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} style={{ padding: 14, opacity: 0.75 }}>
-                      Sin registros.
-                    </td>
-                  </tr>
-                ) : (
-                  sorted.map((r, i) => {
-                    const zebra = i % 2 === 0 ? "white" : "#fcfcfc";
-                    const est = estadoBadgeStyle(r.estado);
-                    const dias = daysBetween(r.updated_at);
-  
-                    const diasBadge =
-                      typeof dias === "number"
-                        ? dias >= 14
-                          ? badge("rgba(239,68,68,0.18)", "#7F1D1D")
-                          : dias >= 7
-                          ? badge("rgba(245,158,11,0.18)", "#92400E")
-                          : badge("rgba(16,185,129,0.14)", "#065F46")
-                        : badge("rgba(148,163,184,0.22)", "#334155");
-  
-                    return (
-                      <tr
-                        key={`${r.folio || "x"}_${i}`}
-                        style={{
-                          borderBottom: "1px solid #f3f4f6",
-                          background: zebra,
-                        }}
-                      >
-                        <td style={{ padding: 12, fontWeight: 900 }}>
-                          {r.ejecutivo_email || "—"}
-                        </td>
-  
-                        <td style={{ padding: 12 }}>
-                          <div style={{ fontWeight: 900 }}>
-                            {r.nombre_razon_social || "—"}
-                          </div>
-                          <div style={{ marginTop: 4, fontSize: 12, opacity: 0.7 }}>
-                            Folio: <b>{r.folio || "—"}</b>
-                          </div>
-                        </td>
-  
-                        <td style={{ padding: 12 }}>
-                          <span style={badge(est.bg, est.color)}>
-                            {r.estado || "—"}
-                          </span>
-                        </td>
+              ) : sorted.length === 0 ? (
+                <tr>
+                  <td colSpan={8} style={{ padding: 14, opacity: 0.75 }}>
+                    Sin registros.
+                  </td>
+                </tr>
+              ) : (
+                sorted.map((r, i) => {
+                  const zebra = i % 2 === 0 ? "white" : "#fcfcfc";
+                  const est = estadoBadgeStyle(r.estado);
+                  const dias = daysBetween(r.updated_at);
 
-                        <td style={{ padding: 12, textAlign: "center" }}>
-                        
-  <span
-    title={r.observacion ? "Editar observación" : "Agregar observación"}
-    style={{
-      cursor: "pointer",
-      display: "inline-flex",
-      opacity: r.observacion ? 1 : 0.35,
-    }}
-    onClick={() => {
-      setSelectedFolio(r.folio);
-      setObservacionActiva(r.observacion || "");
-      setObsEdit(r.observacion || "");
-      setOpenObs(true);
-    }}
-  >
-    <Eye size={18} color={BRAND_BLUE} />
-  </span>
-</td>
+                  const diasBadge =
+                    typeof dias === "number"
+                      ? dias >= 14
+                        ? badge("rgba(239,68,68,0.18)", "#7F1D1D")
+                        : dias >= 7
+                        ? badge("rgba(245,158,11,0.18)", "#92400E")
+                        : badge("rgba(16,185,129,0.14)", "#065F46")
+                      : badge("rgba(148,163,184,0.22)", "#334155");
 
+                  return (
+                    <tr
+                      key={`${r.folio || "x"}_${i}`}
+                      style={{
+                        borderBottom: "1px solid #f3f4f6",
+                        background: zebra,
+                      }}
+                    >
+                      <td style={{ padding: 12, fontWeight: 900 }}>{r.ejecutivo_email || "—"}</td>
 
-  
-                        <td style={{ padding: 12 }}>
-                          {r.etapa_nombre || "—"}
-                        </td>
-  
-                        <td style={{ padding: 12, textAlign: "right", fontWeight: 900 }}>
-                          {r.monto_proyectado
-                            ? moneyCLP(Number(r.monto_proyectado))
-                            : "—"}
-                        </td>
-  
-                        <td style={{ padding: 12 }}>
-                          {r.updated_at
-                            ? new Date(r.updated_at).toLocaleString("es-CL")
-                            : "—"}
-                        </td>
-  
-                        <td style={{ padding: 12, textAlign: "right" }}>
-                          <span style={diasBadge}>
-                            {typeof dias === "number" ? `${dias} d` : "—"}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                      <td style={{ padding: 12 }}>
+                        <div style={{ fontWeight: 900 }}>{r.nombre_razon_social || "—"}</div>
+                        <div style={{ marginTop: 4, fontSize: 12, opacity: 0.7 }}>
+                          Folio: <b>{r.folio || "—"}</b>
+                        </div>
+                      </td>
+
+                      <td style={{ padding: 12 }}>
+                        <span style={badge(est.bg, est.color)}>{r.estado || "—"}</span>
+                      </td>
+
+                      <td style={{ padding: 12 }}>{r.etapa_nombre || "—"}</td>
+
+                      <td style={{ padding: 12, textAlign: "center" }}>
+                        <span
+                          title={r.observacion ? "Editar observación" : "Agregar observación"}
+                          style={{
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            opacity: r.observacion ? 1 : 0.35,
+                          }}
+                          onClick={() => {
+                            setSelectedFolio(r.folio);
+                            setObservacionActiva(r.observacion || "");
+                            setObsEdit(r.observacion || "");
+                            setObsErr(null);
+                            setOpenObs(true);
+                          }}
+                        >
+                          <Eye size={18} color={BRAND_BLUE} />
+                        </span>
+                      </td>
+
+                      <td style={{ padding: 12, textAlign: "right", fontWeight: 900 }}>
+                        {r.monto_proyectado ? moneyCLP(Number(r.monto_proyectado)) : "—"}
+                      </td>
+
+                      <td style={{ padding: 12 }}>
+                        {r.updated_at ? new Date(r.updated_at).toLocaleString("es-CL") : "—"}
+                      </td>
+
+                      <td style={{ padding: 12, textAlign: "right" }}>
+                        <span style={diasBadge}>{typeof dias === "number" ? `${dias} d` : "—"}</span>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
-  
-        <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-          Tip: haz click en los títulos de la tabla para ordenar. Fuente:{" "}
-          <b>CRM_DB</b> + permisos por <b>viewerEmail</b>.
-        </div>
-  
-        {/* MODAL OBSERVACIÓN */}
-        {openObs && (
+      </div>
+
+      <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
+        Tip: haz click en los títulos de la tabla para ordenar. Fuente: <b>CRM_DB</b> + permisos por{" "}
+        <b>viewerEmail</b>.
+      </div>
+
+      {openObs && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            zIndex: 50,
+          }}
+          onClick={() => {
+            if (savingObs) return;
+            setOpenObs(false);
+          }}
+        >
           <div
             style={{
-              position: "fixed",
-              inset: 0,
-              background: "rgba(0,0,0,0.35)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
+              width: "min(720px, 100%)",
+              background: "white",
+              borderRadius: 14,
+              border: "1px solid #e5e7eb",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
               padding: 16,
-              zIndex: 50,
             }}
-            onClick={() => setOpenObs(false)}
+            onClick={(e) => e.stopPropagation()}
           >
+            <h3 style={{ fontWeight: 900, margin: 0 }}>Observación</h3>
+
+            {selectedFolio && (
+              <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>
+                Folio: <b>{selectedFolio}</b>
+              </div>
+            )}
+
+            {!!observacionActiva && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 10,
+                  borderRadius: 10,
+                  border: "1px solid #e5e7eb",
+                  background: "#f9fafb",
+                  fontSize: 12,
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                <div style={{ fontWeight: 900, marginBottom: 6 }}>Observación actual</div>
+                {observacionActiva}
+              </div>
+            )}
+
+            <textarea
+              value={obsEdit}
+              onChange={(e) => setObsEdit(e.target.value)}
+              placeholder="Escribe la observación..."
+              rows={6}
+              style={{
+                width: "100%",
+                marginTop: 12,
+                padding: 10,
+                borderRadius: 10,
+                border: "1px solid #e5e7eb",
+                resize: "vertical",
+                fontSize: 13,
+              }}
+            />
+
+            {obsErr && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 10,
+                  borderRadius: 10,
+                  border: "1px solid #fecaca",
+                  background: "#fef2f2",
+                  color: "#b91c1c",
+                  fontSize: 12,
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {obsErr}
+              </div>
+            )}
+
             <div
               style={{
-                width: "min(720px, 100%)",
-                background: "white",
-                borderRadius: 14,
-                border: "1px solid #e5e7eb",
-                boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
-                padding: 16,
+                marginTop: 16,
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 10,
               }}
-              onClick={(e) => e.stopPropagation()}
             >
-              <h3 style={{ fontWeight: 900 }}>Observación</h3>
-  
-              <textarea
-  value={obsEdit}
-  onChange={(e) => setObsEdit(e.target.value)}
-  placeholder="Escribe la observación..."
-  rows={6}
-  style={{
-    width: "100%",
-    marginTop: 10,
-    padding: 10,
-    borderRadius: 10,
-    border: "1px solid #e5e7eb",
-    resize: "vertical",
-    fontSize: 13,
-  }}
-/>
- 
-  
-<div
-  style={{
-    marginTop: 16,
-    display: "flex",
-    justifyContent: "flex-end",
-    gap: 10,
-  }}
->
-  <button
-    type="button"
-    style={btnStyle(false)}
-    onClick={() => setOpenObs(false)}
-    disabled={savingObs}
-  >
-    Cerrar
-  </button>
+              <button
+                type="button"
+                style={btnStyle(false)}
+                onClick={() => setOpenObs(false)}
+                disabled={savingObs}
+              >
+                Cerrar
+              </button>
 
-  <button
-    type="button"
-    style={btnStyle(true)}
-    disabled={savingObs || !selectedFolio}
-    onClick={async () => {
-      if (!selectedFolio) return;
-
-      try {
-        setSavingObs(true);
-
-        await fetch("/api/crm/prospectos/update", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            folio: selectedFolio,
-            observacion: obsEdit,
-          }),
-        });
-
-        // actualiza la tabla sin recargar
-        setRows((prev) =>
-          prev.map((r) =>
-            r.folio === selectedFolio
-              ? { ...r, observacion: obsEdit }
-              : r
-          )
-        );
-
-        setOpenObs(false);
-        setObsEdit("");
-        setObservacionActiva("");
-        setSelectedFolio(null);
-      } catch (e) {
-        alert("Error al guardar la observación");
-      } finally {
-        setSavingObs(false);
-      }
-    }}
-  >
-    {savingObs ? "Guardando…" : "Guardar"}
-  </button>
-</div>
-
+              <button
+                type="button"
+                style={btnStyle(true)}
+                disabled={savingObs || !selectedFolio}
+                onClick={handleSaveObservation}
+              >
+                {savingObs ? "Guardando…" : "Guardar"}
+              </button>
             </div>
           </div>
-        )}
-      </div>
-    );
-  }
-  
+        </div>
+      )}
+    </div>
+  );
+}
