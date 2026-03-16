@@ -27,7 +27,7 @@ const JEFATURAS = new Set(
 
 const JEFATURA_SCOPE_PREFIJOS: Record<string, string[]> = {
   "claudia.borquez@spartan.cl": ["IN", "FB"],
-  "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND", "BSC", "IND_HL", "IND_PC"], // gerente general
+  "jorge.beltran@spartan.cl": ["FB", "IN", "HC", "IND", "BSC", "IND_HL", "IND_PC"],
   "alberto.damm@spartan.cl": ["IND", "BSC", "IND_HL", "IND_PC"],
   "nelson.norambuena@spartan.cl": ["BSC"],
   "carlos.avendano@spartan.cl": ["HC"],
@@ -86,6 +86,43 @@ function badge(bg: string) {
   };
 }
 
+function daysBetween(iso?: string) {
+  if (!iso) return null;
+  const d = new Date(iso).getTime();
+  if (isNaN(d)) return null;
+  return Math.floor((Date.now() - d) / (1000 * 60 * 60 * 24));
+}
+
+function normU(s: string) {
+  return (s || "").trim().toUpperCase().replace(/\s+/g, "_");
+}
+
+function estadoBadgeStyle(estadoRaw: string) {
+  const e = normU(estadoRaw);
+  if (e === "ASIGNADO") return { bg: "#FEE2E2", color: "#7F1D1D" };
+  if (e === "EN_GESTION") return { bg: "#FEF9C3", color: "#854D0E" };
+  if (e === "CONTACTADO") return { bg: "#FEF9C3", color: "#854D0E" };
+  if (e === "REUNION") return { bg: "#EDE9FE", color: "#5B21B6" };
+  if (e === "LEVANTAMIENTO") return { bg: "#FDF2F8", color: "#9D174D" };
+  if (e === "PROPUESTA") return { bg: "#FFEDD5", color: "#9A3412" };
+  if (e === "CERRADO_GANADO") return { bg: "#BBF7D0", color: "#14532D" };
+  if (e === "INSTALADO_1OC" || e === "INSTALADO_1_O_C") return { bg: "#DCFCE7", color: "#166534" };
+  if (e === "NO_GANADO") return { bg: "#FEE2E2", color: "#7F1D1D" };
+  return { bg: "#F3F4F6", color: "#374151" };
+}
+
+type ResumenRow = {
+  folio: string;
+  nombre_razon_social: string;
+  ejecutivo_email: string;
+  estado: string;
+  etapa_nombre: string;
+  monto_proyectado: number;
+  created_at?: string;
+  updated_at?: string;
+  observacion?: string;
+};
+
 type ApiData = {
   ok: boolean;
   error?: string;
@@ -111,8 +148,9 @@ type ApiData = {
     fechaCierre?: { name: string; value: number }[];
     probCierre?: { name: string; value: number }[];
     pendientesWebPorDivision?: { name: string; value: number }[];
-    estados?: { key: string; name: string; value: number }[]; // ✅ NUEVO: para tabla mini
+    estados?: { key: string; name: string; value: number }[];
   };
+  rows?: ResumenRow[];
 };
 
 function formatLabel(s: string) {
@@ -222,7 +260,6 @@ function TablePro({
 }
 TablePro.displayName = "TablePro";
 
-/** ✅ Tabla compacta de etapas (para el espacio en blanco) */
 function EtapasMiniTable({
   rows,
 }: {
@@ -314,7 +351,6 @@ export default function CRMReporteriaGerenciaPage() {
   const [err, setErr] = useState<string | null>(null);
   const [data, setData] = useState<ApiData | null>(null);
 
-  // filtros
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [division, setDivision] = useState("");
@@ -322,6 +358,10 @@ export default function CRMReporteriaGerenciaPage() {
 
   const [onlyAssigned, setOnlyAssigned] = useState(false);
   const [onlyClosed, setOnlyClosed] = useState(false);
+
+  const [qDetalle, setQDetalle] = useState("");
+  const [estadoDetalle, setEstadoDetalle] = useState("");
+  const [ejecutivoDetalle, setEjecutivoDetalle] = useState("");
 
   const isJefatura = useMemo(() => JEFATURAS.has(normalizeEmail(loggedEmail)), [loggedEmail]);
 
@@ -369,8 +409,6 @@ export default function CRMReporteriaGerenciaPage() {
       if (onlyClosed) qs.set("onlyClosed", "1");
 
       qs.set("includeAssigned", "1");
-
-      // ✅ Jorge ve todo
       qs.set("viewerEmail", loggedEmail);
 
       const resp = await fetch(`/api/crm/reporteria/gerencia?${qs.toString()}`, { cache: "no-store" });
@@ -406,9 +444,45 @@ export default function CRMReporteriaGerenciaPage() {
   const pendientesWebByDiv = useMemo(() => data?.charts?.pendientesWebPorDivision || [], [data]);
   const fechaCierre = useMemo(() => data?.charts?.fechaCierre || [], [data]);
   const probCierre = useMemo(() => data?.charts?.probCierre || [], [data]);
-
-  // ✅ para la tabla mini
   const etapas = useMemo(() => data?.charts?.estados || [], [data]);
+
+  const detalleRows = useMemo(() => data?.rows || [], [data]);
+
+  const estadoDetalleOptions = useMemo(() => {
+    const uniq = Array.from(new Set((data?.rows || []).map((r) => r.estado).filter(Boolean))).sort();
+    return ["", ...uniq];
+  }, [data]);
+
+  const ejecutivoDetalleOptions = useMemo(() => {
+    const uniq = Array.from(new Set((data?.rows || []).map((r) => r.ejecutivo_email).filter(Boolean))).sort();
+    return ["", ...uniq];
+  }, [data]);
+
+  const filteredDetalleRows = useMemo(() => {
+    let base = [...detalleRows];
+
+    if (estadoDetalle) base = base.filter((r) => r.estado === estadoDetalle);
+    if (ejecutivoDetalle) base = base.filter((r) => r.ejecutivo_email === ejecutivoDetalle);
+
+    const s = normalizeEmail(qDetalle);
+    if (s) {
+      base = base.filter((r) => {
+        const blob = [
+          r.folio,
+          r.nombre_razon_social,
+          r.ejecutivo_email,
+          r.estado,
+          r.etapa_nombre,
+        ]
+          .join(" ")
+          .toLowerCase();
+
+        return blob.includes(s);
+      });
+    }
+
+    return base;
+  }, [detalleRows, estadoDetalle, ejecutivoDetalle, qDetalle]);
 
   if (authLoading) {
     return (
@@ -460,7 +534,6 @@ export default function CRMReporteriaGerenciaPage() {
         </button>
       </div>
 
-      {/* filtros */}
       <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.8 }}>Desde</div>
@@ -525,7 +598,6 @@ export default function CRMReporteriaGerenciaPage() {
 
       {err && <div style={{ marginTop: 10, color: "crimson", fontSize: 13 }}>Error: {err}</div>}
 
-      {/* KPIs */}
       <div
         style={{
           marginTop: 14,
@@ -568,7 +640,6 @@ export default function CRMReporteriaGerenciaPage() {
         </div>
       </div>
 
-      {/* Gráfico + Tablas pro */}
       <div style={{ marginTop: 14, display: "grid", gap: 10, gridTemplateColumns: "repeat(12, 1fr)" }}>
         <div style={{ ...cardStyle(), gridColumn: "span 12" }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
@@ -645,9 +716,183 @@ export default function CRMReporteriaGerenciaPage() {
           />
         </div>
 
-        {/* ✅ NUEVO: ocupa el espacio en blanco */}
         <div style={{ gridColumn: "span 6" }}>
           <EtapasMiniTable rows={etapas} />
+        </div>
+      </div>
+
+      <div style={{ marginTop: 18, ...cardStyle(), padding: 14 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 10,
+            alignItems: "baseline",
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ fontWeight: 900, fontSize: 16 }}>Detalle de prospectos</div>
+          <div style={{ fontSize: 12, opacity: 0.75 }}>
+            Vista detallada integrada en resumen
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginTop: 12,
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          <input
+            value={qDetalle}
+            onChange={(e) => setQDetalle(e.target.value)}
+            placeholder="Buscar por folio, razón social, ejecutivo, estado o etapa..."
+            style={{ ...inputStyle(), minWidth: 320, flex: 1 }}
+          />
+
+          <select
+            value={ejecutivoDetalle}
+            onChange={(e) => setEjecutivoDetalle(e.target.value)}
+            style={inputStyle()}
+          >
+            {ejecutivoDetalleOptions.map((x) => (
+              <option key={x || "ALL_EJ"} value={x}>
+                {x || "Todos los ejecutivos"}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={estadoDetalle}
+            onChange={(e) => setEstadoDetalle(e.target.value)}
+            style={inputStyle()}
+          >
+            {estadoDetalleOptions.map((x) => (
+              <option key={x || "ALL_EST"} value={x}>
+                {x || "Todos los estados"}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ marginTop: 12, overflowX: "auto", maxHeight: "68vh" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr
+                style={{
+                  textAlign: "left",
+                  background: "#fafafa",
+                  position: "sticky",
+                  top: 0,
+                  zIndex: 1,
+                }}
+              >
+                <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb" }}>Ejecutivo</th>
+                <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb" }}>Razón social</th>
+                <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb" }}>Estado</th>
+                <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb" }}>Etapa</th>
+                <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb", textAlign: "right" }}>Monto</th>
+                <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb" }}>Creado</th>
+                <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb" }}>Última gestión</th>
+                <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb", textAlign: "right" }}>Días</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {filteredDetalleRows.length === 0 ? (
+                <tr>
+                  <td colSpan={8} style={{ padding: 14, opacity: 0.75 }}>
+                    Sin registros.
+                  </td>
+                </tr>
+              ) : (
+                filteredDetalleRows.map((r, i) => {
+                  const zebra = i % 2 === 0 ? "white" : "#fcfcfc";
+                  const est = estadoBadgeStyle(r.estado);
+                  const dias = daysBetween(r.updated_at);
+
+                  const diasBg =
+                    typeof dias === "number"
+                      ? dias >= 14
+                        ? "rgba(239,68,68,0.18)"
+                        : dias >= 7
+                        ? "rgba(245,158,11,0.18)"
+                        : "rgba(16,185,129,0.14)"
+                      : "rgba(148,163,184,0.22)";
+
+                  return (
+                    <tr
+                      key={`${r.folio || "x"}_${i}`}
+                      style={{ borderBottom: "1px solid #f3f4f6", background: zebra }}
+                    >
+                      <td style={{ padding: 12, fontWeight: 900 }}>{r.ejecutivo_email || "—"}</td>
+
+                      <td style={{ padding: 12 }}>
+                        <div style={{ fontWeight: 900 }}>{r.nombre_razon_social || "—"}</div>
+                        <div style={{ marginTop: 4, fontSize: 12, opacity: 0.7 }}>
+                          Folio: <b>{r.folio || "—"}</b>
+                        </div>
+                      </td>
+
+                      <td style={{ padding: 12 }}>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            padding: "4px 10px",
+                            borderRadius: 999,
+                            fontSize: 12,
+                            fontWeight: 900,
+                            background: est.bg,
+                            color: est.color,
+                            border: "1px solid rgba(17,24,39,0.08)",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {r.estado || "—"}
+                        </span>
+                      </td>
+
+                      <td style={{ padding: 12 }}>{r.etapa_nombre || "—"}</td>
+
+                      <td style={{ padding: 12, textAlign: "right", fontWeight: 900 }}>
+                        {r.monto_proyectado ? moneyCLP(Number(r.monto_proyectado)) : "—"}
+                      </td>
+
+                      <td style={{ padding: 12 }}>
+                        {r.created_at ? new Date(r.created_at).toLocaleString("es-CL") : "—"}
+                      </td>
+
+                      <td style={{ padding: 12 }}>
+                        {r.updated_at ? new Date(r.updated_at).toLocaleString("es-CL") : "—"}
+                      </td>
+
+                      <td style={{ padding: 12, textAlign: "right" }}>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            padding: "4px 10px",
+                            borderRadius: 999,
+                            fontSize: 12,
+                            fontWeight: 900,
+                            background: diasBg,
+                            border: "1px solid rgba(17,24,39,0.08)",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {typeof dias === "number" ? `${dias} d` : "—"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 

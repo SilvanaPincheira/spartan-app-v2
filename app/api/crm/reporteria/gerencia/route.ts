@@ -133,6 +133,41 @@ function parseProbFactor(probNombre: string, estadoKey: string) {
   return Math.max(0, Math.min(1, avg / 100));
 }
 
+function parseMixedDate(input?: string) {
+  const s = String(input || "").trim();
+  if (!s) return "";
+
+  const isoTime = Date.parse(s);
+  if (!Number.isNaN(isoTime) && /^\d{4}-\d{2}-\d{2}/.test(s)) {
+    return new Date(isoTime).toISOString();
+  }
+
+  const m = s.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+  );
+
+  if (m) {
+    const dd = Number(m[1]);
+    const mm = Number(m[2]);
+    const yyyy = Number(m[3]);
+    const hh = Number(m[4] || "0");
+    const mi = Number(m[5] || "0");
+    const ss = Number(m[6] || "0");
+
+    const d = new Date(yyyy, mm - 1, dd, hh, mi, ss);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toISOString();
+    }
+  }
+
+  const fallback = new Date(s);
+  if (!Number.isNaN(fallback.getTime())) {
+    return fallback.toISOString();
+  }
+
+  return "";
+}
+
 const ESTADOS_ORDER = [
   "PENDIENTE_ASIGNACION",
   "ASIGNADO",
@@ -242,7 +277,6 @@ async function fetchCsvRows(url: string, label: string): Promise<Row[]> {
 
 /** =========================
  * ✅ Ejecutivos: map email->division y supervisor->divisiones
- * Headers esperadas: nombre,email,zona,gerencia,supervisor,cargo,division
  * ========================= */
 function buildEjecutivosIndex(rows: Row[]) {
   const emailToDivision: Record<string, string> = {};
@@ -280,10 +314,7 @@ export async function GET(req: Request) {
 
     const from = searchParams.get("from") || "";
     const to = searchParams.get("to") || "";
-
-    // "division" acá es un filtro explícito del UI (si seleccionan una)
     const explicitDivision = (searchParams.get("division") || "").trim().toUpperCase();
-
     const ejecutivo = (searchParams.get("ejecutivo") || "").trim().toLowerCase();
     const origen = (searchParams.get("origen") || "").trim().toUpperCase();
 
@@ -297,17 +328,13 @@ export async function GET(req: Request) {
     const dFrom = from ? parseIsoDate(from) : null;
     const dTo = to ? parseIsoDate(to) : null;
 
-    /** 0) Ejecutivos (para scope real de jefatura + inferir división si CRM_DB viene vacío) */
+    /** 0) Ejecutivos */
     const ejecutivosRows = await fetchCsvRows(
       sheetCsvUrl(SHEET_ID_EJECUTIVOS, EJECUTIVOS_GID),
       "EJECUTIVOS"
     );
     const { emailToDivision, supervisorToDivs } = buildEjecutivosIndex(ejecutivosRows);
 
-    // scopeDivs:
-    // - si es Jorge => sin scope
-    // - si no, tomamos divisiones donde "supervisor" == viewerEmail
-    // - si no existen, fallback: la división del propio viewer (si está en la hoja)
     const scopeDivs: Set<string> = new Set();
     if (!isJorge) {
       const setFromSupervisor = supervisorToDivs[viewerEmail];
@@ -327,7 +354,6 @@ export async function GET(req: Request) {
     const text = await res.text();
     const rows = parseCsv(text);
 
-    // index por folio (para comparar con WEB)
     const crmByFolio: Record<string, { estadoKey: string; asignadoA: string }> = {};
     for (const r of rows) {
       const folio = (pick(r, "folio") || "").trim();
@@ -338,26 +364,21 @@ export async function GET(req: Request) {
       };
     }
 
-    /** 2) Filtrar CRM_DB (con scope real) */
+    /** 2) Filtrar CRM_DB */
     const filtered = rows.filter((r) => {
       const created = parseIsoDate(pick(r, "created_at"));
 
       if (dFrom && (!created || created < dFrom)) return false;
       if (dTo && (!created || created > dTo)) return false;
 
-      // ✅ división efectiva (CRM_DB o inferida por Ejecutivos)
       const divEff = inferDivisionFromCRMRow(r, emailToDivision);
 
-      // ✅ filtro explícito del select (si seleccionan una)
       if (explicitDivision && divEff !== explicitDivision) return false;
-
-      // ✅ si NO hay división seleccionada, aplicamos scope (excepto Jorge)
       if (!explicitDivision && !isJorge && scopeDivs.size > 0 && !scopeDivs.has(divEff)) return false;
 
       const ej = (pick(r, "asignado_a", "ejecutivo_email") || "").trim().toLowerCase();
       if (ejecutivo && ej !== ejecutivo) return false;
 
-      // ojo: "origen" (query) es opcional. Si no viene, NO filtramos.
       const org = (pick(r, "origen_prospecto") || "").trim().toUpperCase();
       if (origen && org !== origen) return false;
 
@@ -372,7 +393,7 @@ export async function GET(req: Request) {
       return true;
     });
 
-    /** 3) Agregaciones CRM_DB (incluye TODOS los orígenes) */
+    /** 3) Agregaciones */
     let total = 0;
     let asignados = 0;
     let contactados = 0;
@@ -384,7 +405,6 @@ export async function GET(req: Request) {
 
     const countByEstado: Record<string, number> = {};
     const countByOrigen: Record<string, number> = {};
-
     const countByFechaCierre: Record<string, number> = {};
     const countByProbCierre: Record<string, number> = {};
 
@@ -399,7 +419,6 @@ export async function GET(req: Request) {
       const estadoKey = normalizeEstadoToKey(pick(r, "estado"));
       countByEstado[estadoKey] = (countByEstado[estadoKey] || 0) + 1;
 
-      // ✅ origen: si falta origen_prospecto, usamos "fuente" como fallback
       const org =
         (pick(r, "origen_prospecto") || pick(r, "fuente") || "—").trim().toUpperCase();
       countByOrigen[org] = (countByOrigen[org] || 0) + 1;
@@ -440,7 +459,7 @@ export async function GET(req: Request) {
       }
     }
 
-    /** 4) ✅ Pendientes desde BD_WEB (SOLO para los 2 campos: KPI + tabla) */
+    /** 4) Pendientes desde BD_WEB */
     const webRows = await fetchCsvRows(sheetCsvUrl(SHEET_ID_WEB, WEB_GID), "BD_WEB");
 
     let pendientesWeb = 0;
@@ -450,10 +469,7 @@ export async function GET(req: Request) {
       const { folio, division: divWeb } = normalizeLeadRowWeb(wr);
       if (!folio) continue;
 
-      // si seleccionan explícitamente una división => filtra
       if (explicitDivision && divWeb !== explicitDivision) continue;
-
-      // si NO hay explícita, aplica scope (excepto Jorge)
       if (!explicitDivision && !isJorge && scopeDivs.size > 0 && !scopeDivs.has(divWeb)) continue;
 
       const crm = crmByFolio[folio];
@@ -489,12 +505,27 @@ export async function GET(req: Request) {
     const probCierreSeries = seriesFromCountMap(countByProbCierre);
     const pendientesWebPorDivision = seriesFromCountMap(pendientesWebByDivision);
 
+    /** 6) Rows detalladas para tabla resumen */
+    const detalleRows = filtered.map((r) => ({
+      folio: pick(r, "folio"),
+      nombre_razon_social: pick(r, "nombre_razon_social"),
+      ejecutivo_email: lowerEmail(pick(r, "asignado_a", "ejecutivo_email")),
+      estado: pick(r, "estado"),
+      etapa_nombre: pick(r, "etapa_nombre"),
+      monto_proyectado: toMontoNumber(pick(r, "monto_proyectado")),
+      created_at: parseMixedDate(pick(r, "created_at")),
+      updated_at: parseMixedDate(
+        pick(r, "updated_at") || pick(r, "asignado_at") || pick(r, "created_at")
+      ),
+      observacion: pick(r, "observacion"),
+    }));
+
     return NextResponse.json({
       ok: true,
       filters: {
         from,
         to,
-        division: explicitDivision, // lo que seleccionó el usuario (si seleccionó)
+        division: explicitDivision,
         ejecutivo,
         origen,
         onlyAssigned,
@@ -511,16 +542,17 @@ export async function GET(req: Request) {
         noGanado,
         pipelineMonto: Math.round(pipelineMonto),
         forecastMonto: Math.round(forecastMonto),
-        pendientesWeb, // ✅ viene de BD_WEB
+        pendientesWeb,
       },
       charts: {
-        estados: estadoSeries, // ✅ para la mini tabla
+        estados: estadoSeries,
         origenes: origenSeries,
         ejecutivos: ejecutivoSeries,
         fechaCierre: fechaCierreSeries,
         probCierre: probCierreSeries,
-        pendientesWebPorDivision, // ✅ viene de BD_WEB
+        pendientesWebPorDivision,
       },
+      rows: detalleRows, // ✅ NUEVO
       debug: {
         crmRows: rows.length,
         crmFiltered: filtered.length,
@@ -533,4 +565,3 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }
-
