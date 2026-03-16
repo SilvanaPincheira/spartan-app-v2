@@ -140,6 +140,7 @@ type RowDetalle = {
   estado: string;
   etapa_nombre: string;
   monto_proyectado: number;
+  created_at?: string;   // NUEVO
   updated_at?: string;
   observacion?: string;
 };
@@ -159,7 +160,7 @@ type UpdateResp = {
 /* =========================
    SORT
    ========================= */
-type SortKey = "ejecutivo" | "razon" | "estado" | "etapa" | "monto" | "updated_at" | "dias";
+type SortKey = "ejecutivo" | "razon" | "estado" | "etapa" | "monto" |"created_at"| "updated_at" | "dias";
 type SortDir = "asc" | "desc";
 
 type TopEjecutivo = {
@@ -821,6 +822,14 @@ export default function CRMReporteriaGerenciaDetallePage() {
                 </th>
 
                 <th
+  style={{ padding: 12, borderBottom: "1px solid #e5e7eb" }}
+>
+  <span style={{ color: BRAND_BLUE, fontWeight: 900 }}>
+    Creado
+  </span>
+</th>
+
+                <th
                   style={{ padding: 12, borderBottom: "1px solid #e5e7eb", cursor: "pointer" }}
                   onClick={() => toggleSort("updated_at")}
                   title="Ordenar por última gestión"
@@ -916,6 +925,9 @@ export default function CRMReporteriaGerenciaDetallePage() {
                       <td style={{ padding: 12, textAlign: "right", fontWeight: 900 }}>
                         {r.monto_proyectado ? moneyCLP(Number(r.monto_proyectado)) : "—"}
                       </td>
+                      <td style={{ padding: 12 }}>
+  {r.created_at ? new Date(r.created_at).toLocaleDateString("es-CL") : "—"}
+</td>
 
                       <td style={{ padding: 12 }}>
                         {r.updated_at ? new Date(r.updated_at).toLocaleString("es-CL") : "—"}
