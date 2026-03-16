@@ -169,6 +169,7 @@ export async function GET(req: Request) {
         etapa_nombre: r.etapa_nombre || "",
         observacion: r.observacion || "",
         monto_proyectado: Number(r.monto_proyectado || 0),
+        created_at: r.created_at || "",   // 👈 agregar esto
         updated_at:
           r.updated_at ||
           r.asignado_at ||
