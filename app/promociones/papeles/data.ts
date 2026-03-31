@@ -44,5 +44,17 @@ export type PapelPromo = {
       precio: 49590,
       imagen: "/promociones/papeles/paño maxwipe 88.png",
     },
+    {
+      codigo: "ACN1540974",
+      nombre: "Paño Maxwipe 60 Bobina 890 un.",
+      precio: 39590,
+      imagen: "/promociones/papeles/paño limpieza max60.png",
+    },
+    {
+      codigo: "ACN1520720",
+      nombre: "Papel interfoliado extra blanco una hoja 15x320 un.",
+      precio: 30990,
+      imagen: "/promociones/papeles/toalla interfoliada 20720.png",
+    },
   ];
   

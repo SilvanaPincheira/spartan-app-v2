@@ -319,13 +319,19 @@ type ClientMaster = {
 };
 
 /* ===================== COMPONENTE ===================== */
+/* ===================== COMPONENTE ===================== */
 export default function Page() {
-  const [admin, setAdmin] = useState(false);
+  const [adminLevel, setAdminLevel] = useState(0);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const u = new URL(window.location.href);
-    setAdmin(u.searchParams.get("admin") === "1");
+    const level = Number(u.searchParams.get("admin") || "0");
+    setAdminLevel(Number.isFinite(level) ? level : 0);
   }, []);
+
+  const admin = adminLevel >= 1;
+  const showViabilidadPct = adminLevel >= 2;
 
   // URLs (persisten)
   const [ventasUrl, setVentasUrl] = useLocalStorage("ventas.url", DEFAULT_VENTAS_URL);
@@ -1234,39 +1240,67 @@ async function descargarYEnviar() {
           </div>
 
           {/* KPIs compactos */}
-          <div className="mt-3 grid gap-3 md:grid-cols-5">
-            <div className="rounded-2xl border p-3 shadow-sm">
-              <div className="text-[11px] leading-none text-zinc-500">Prom. venta mensual (6m)</div>
-              <div className="mt-1 text-lg font-semibold leading-tight">{money(promVentaMensual6m)}</div>
-            </div>
-            <div className="rounded-2xl border p-3 shadow-sm">
-              <div className="text-[11px] leading-none text-zinc-500">Comodato mensual (H+P)</div>
-              <div className="mt-1 text-lg font-semibold leading-tight">{money(comodatoMensual6m)}</div>
-            </div>
-            <div className="rounded-2xl border p-3 shadow-sm">
-              <div className="text-[11px] leading-none text-zinc-500">% Relación comodato/venta</div>
-              <div className="mt-1 text-lg font-semibold leading-tight">{pct(relComVta6m)}</div>
-            </div>
-            <div className="rounded-2xl border p-3 shadow-sm">
-              <div className="text-[11px] leading-none text-zinc-500">% Comisión final</div>
-              <div className="mt-1 text-lg font-semibold leading-tight">{pct(commissionFinal6m)}</div>
-            </div>
-            <div className="rounded-2xl border p-3 shadow-sm">
-              <div className="text-[11px] leading-none text-zinc-500">Estado</div>
-              <div className={`mt-1 inline-flex items-center rounded-xl px-4 py-2 text-xl font-extrabold ${isViable ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                {isViable ? "Viable" : "No viable"}
-              </div>
-            </div>
-          </div>
+<div className="mt-3 grid gap-3 md:grid-cols-5">
+  <div className="rounded-2xl border p-3 shadow-sm">
+    <div className="text-[11px] leading-none text-zinc-500">Prom. venta mensual (6m)</div>
+    <div className="mt-1 text-lg font-semibold leading-tight">{money(promVentaMensual6m)}</div>
+  </div>
 
-          {/* Acciones PDF */}
-          <div className="mt-4 flex gap-2">
-            <button onClick={descargarPdf} className="rounded bg-zinc-200 px-3 py-2 text-xs hover:bg-zinc-300">Descargar PDF</button>
-            <button onClick={descargarYEnviar} className={`rounded px-3 py-2 text-xs text-white ${isViable ? "bg-emerald-600 hover:bg-emerald-700" : "bg-zinc-400 cursor-not-allowed"}`}>
-              Descargar y enviar (si Viable)
-            </button>
-          </div>
-        </section>
+  <div className="rounded-2xl border p-3 shadow-sm">
+    <div className="text-[11px] leading-none text-zinc-500">Comodato mensual (H+P)</div>
+    <div className="mt-1 text-lg font-semibold leading-tight">{money(comodatoMensual6m)}</div>
+  </div>
+
+  <div className="rounded-2xl border p-3 shadow-sm">
+    <div className="text-[11px] leading-none text-zinc-500">% Relación comodato/venta</div>
+    <div className="mt-1 text-lg font-semibold leading-tight">{pct(relComVta6m)}</div>
+  </div>
+
+  <div className="rounded-2xl border p-3 shadow-sm">
+    <div className="text-[11px] leading-none text-zinc-500">% Comisión final</div>
+    <div className="mt-1 text-lg font-semibold leading-tight">{pct(commissionFinal6m)}</div>
+  </div>
+
+  <div className="rounded-2xl border p-3 shadow-sm">
+    <div className="text-[11px] leading-none text-zinc-500">Estado</div>
+
+    <div className="mt-1 flex flex-col gap-1">
+      <div
+        className={`inline-flex w-fit items-center rounded-xl px-4 py-2 text-xl font-extrabold ${
+          isViable ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+        }`}
+      >
+        {isViable ? "Viable" : "No viable"}
+      </div>
+
+      {showViabilidadPct && (
+        <div className="text-sm font-semibold text-zinc-700">
+          Viabilidad: {pct(viabilidadPct)}
+        </div>
+      )}
+    </div>
+  </div>
+</div>
+
+{/* Acciones PDF */}
+<div className="mt-4 flex gap-2">
+  <button
+    onClick={descargarPdf}
+    className="rounded bg-zinc-200 px-3 py-2 text-xs hover:bg-zinc-300"
+  >
+    Descargar PDF
+  </button>
+
+  <button
+    onClick={descargarYEnviar}
+    className={`rounded px-3 py-2 text-xs text-white ${
+      isViable ? "bg-emerald-600 hover:bg-emerald-700" : "bg-zinc-400 cursor-not-allowed"
+    }`}
+  >
+    Descargar y enviar (si Viable)
+  </button>
+</div>
+</section>
 
         {/* Comodatos históricos */}
         <section className="mt-6 rounded-2xl border bg-white p-6 shadow-sm">
