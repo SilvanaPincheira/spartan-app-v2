@@ -241,6 +241,7 @@ useEffect(() => {
       qty: Number(p["Cantidad Mensual"] || 1),
       priceKg: Number(p["Precio Venta $/Kg"] || 0),
       priceListaKg: Number(p["Precio Base $/Kg"] || 0),
+      costKg: Number(p["Costo $/Kg"] || 0),
     }));
     setSales(salesData);
 
@@ -756,6 +757,8 @@ async function guardarEnHistorial() {
         qty: p.qty,
         priceListaKg: p.priceListaKg,
         priceKg: p.priceKg,
+        costoKg: p.costKg ?? 0,
+        costoTotal: (p.costKg || 0) * (p.qty || 0) * (p.kilos || 1),
         descuento:
           p.priceListaKg && p.priceListaKg > 0
             ? ((1 - p.priceKg / p.priceListaKg) * 100).toFixed(1)
