@@ -1,4 +1,4 @@
-// app/api/guardar-notaventa/route.ts
+// app/api/guardar-nota-venta/route.ts
 import { NextResponse } from "next/server";
 import { guardarYEnviarNotaVenta } from "@/lib/notaventa";
 
