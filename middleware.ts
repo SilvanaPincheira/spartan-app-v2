@@ -24,3 +24,10 @@ export async function middleware(req: NextRequest) {
 
   return res;
 }
+
+// ✅ Esto es lnpm run devo que faltaba: evita que el middleware se ejecute en assets estáticos
+export const config = {
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.png|.*\\.svg|.*\\.jpg).*)",
+  ],
+};
