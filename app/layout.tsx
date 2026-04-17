@@ -75,7 +75,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       { name: "Gestión de Comodatos", href: "/comodatos", icon: "🧪" },
       { name: "Gestión de Ventas", href: "/ventas", icon: "📈" },
       { name: "Logística", href: "/logistica/seguimiento", icon: "🚚" },
-      { name: "Inventarios", href: "/inventarios", icon: "📦" },
+      { name: "Inventario", href: "/inventario", icon: "📦" },
       { name: "Promociones", href: "/promociones", icon: "🎯" },
       { name: "KPI", href: "/kpi", icon: "📊" },
       { name: "Metas", href: "/metas", icon: "🎯" },
