@@ -16,7 +16,7 @@ export default function MetasPage() {
     "entrega",
     "total_quimicos",
     "no_son_equipo_venta",
-    "meta_marzo_2026",
+    "meta_abril_2026",
     "cumplimiento_dinero",
     "cumplimiento_porcentaje",
   ];
@@ -31,7 +31,7 @@ export default function MetasPage() {
     entrega: "Entrega",
     total_quimicos: "Total Químicos",
     no_son_equipo_venta: "No son Equipo Venta",
-    meta_Febrero_2026: "Meta Marzo 2026",
+    meta_Abril_2026: "Meta Abril 2026",
     cumplimiento_dinero: "Cumplimiento $",
     cumplimiento_porcenatje: "Cumplimiento %",
   };
