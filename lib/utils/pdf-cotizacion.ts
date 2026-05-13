@@ -283,7 +283,7 @@ try {
   doc.setFontSize(9.5);
   const condiciones: string[] = [
     "Estos precios son unitarios netos y no incluyen I.V.A.",
-    "Despacho Mínimo: $50.000 + IVA, puesto en sus bodegas Región Metropolitana, cualquier pedido menor a este monto debe pagar despacho de $19.900 + IVA",
+    "Despacho Mínimo: $50.000 + IVA, puesto en sus bodegas según dirección de Despacho indicada, cualquier pedido menor a este monto debe pagar despacho de $19.900 + IVA",
     `Plazo de entrega: ${data.entrega || "A convenir"}`,
     `Validez cotización: ${data.validez || "10 días"}`,
     `Forma de pago: ${data.formaPago || "Contado - Transferencia"}`,
