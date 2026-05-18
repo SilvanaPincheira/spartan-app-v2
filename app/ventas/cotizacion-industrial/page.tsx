@@ -1213,7 +1213,7 @@ const resMail = await fetch("/api/send-cotizacion", {
                       <td className="px-2 py-1 text-right">
                         <input
                           type="number"
-                          step={1}
+                          step={0.01}
                           className="w-20 rounded border px-2 py-1 text-right"
                           value={String(r.descuento ?? 0)}
                           onChange={(e) => {
