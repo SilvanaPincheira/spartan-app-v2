@@ -1225,7 +1225,7 @@ const resMail = await fetch("/api/send-cotizacion", {
                           }}
                           onBlur={(e) => updateLine(i, "descuento", e.target.value)}
                         />
-                        <div className="text-[10px] text-zinc-500 mt-1">[-20%, +28%]</div>
+                        <div className="text-[10px] text-zinc-500 mt-1">[-20%, +20%]</div>
                       </td>
 
                       {/* Precio Venta */}
@@ -1233,7 +1233,7 @@ const resMail = await fetch("/api/send-cotizacion", {
                         <input
                           type="number"
                           min={0}
-                          step="any"
+                          step={0.01}
                           className="w-28 rounded border px-2 py-1 text-right"
                           value={r.precioVenta === 0 ? "" : r.precioVenta}
                           onChange={(e) => {
