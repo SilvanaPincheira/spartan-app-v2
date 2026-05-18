@@ -1233,7 +1233,7 @@ const resMail = await fetch("/api/send-cotizacion", {
                         <input
                           type="number"
                           min={0}
-                          step={1}
+                          step={0.01}
                           className="w-28 rounded border px-2 py-1 text-right"
                           value={r.precioVenta === 0 ? "" : r.precioVenta}
                           onChange={(e) => {
