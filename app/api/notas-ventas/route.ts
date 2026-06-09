@@ -32,7 +32,7 @@ export async function GET() {
     });
 
     const filtered = data.filter(
-      (row) => row["email_col"]?.toString().trim().toLowerCase() === email
+     (row) => row["email_col"]?.toString().trim().toLowerCase() === email
     );
 
     return NextResponse.json({ data: filtered });
