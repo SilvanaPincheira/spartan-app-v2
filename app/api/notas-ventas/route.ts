@@ -40,3 +40,4 @@ export async function GET() {
     return NextResponse.json({ error: "No se pudo leer Notas de Venta" }, { status: 500 });
   }
 }
+/home/SilvanaPincheira/spartan-app-v2/app/comodatos

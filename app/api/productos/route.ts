@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import Papa from "papaparse";
 
 const URL_PRODUCTOS =
-  "PEGA_AQUI_LA_URL_CSV_DE_PRODUCTOS";
+  "https://docs.google.com/spreadsheets/d/1UXVAxwzg-Kh7AWCPnPbxbEpzXnRPR2pDBKrRUFNZKZo/export?format=csv&gid=0";
 
 function normalize(val: string) {
   return val
