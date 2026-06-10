@@ -4,13 +4,15 @@ import Papa from "papaparse";
 const URL_NOTAS_VENTA =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vS_TD9sDzySN_-lkYQ159iIIQzU4ruzRuDJhLFfIgGDTc7NZm1w-Km8-BNwc_mS9-ZAq7oYyeTGuhhS/pub?gid=0&single=true&output=csv";
 
-function normalize(val: string) {
-  return val
-    ?.toLowerCase()
-    .trim()
-    .replace(/\s+/g, "_")
-    .replace(/[^\w_]/g, "");
-}
+  function normalize(val: string) {
+    return val
+      ?.normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, "_")
+      .replace(/[^\w_]/g, "");
+  }
 
 function toNumber(value: any) {
   const limpio = String(value ?? "")
