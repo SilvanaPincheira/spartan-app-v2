@@ -6,7 +6,9 @@ const URL_PRODUCTOS =
 
 function normalize(val: string) {
   return val
-    ?.toLowerCase()
+    ?.normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
     .trim()
     .replace(/\s+/g, "_")
     .replace(/[^\w_]/g, "");
@@ -23,8 +25,10 @@ function toNumber(value: any) {
 }
 
 function validarApiKey(req: Request) {
-  const apiKey = req.headers.get("x-api-key");
-  return apiKey === process.env.SPARTANONE_API_KEY;
+  const apiKey = req.headers.get("x-api-key")?.trim();
+  const expected = process.env.SPARTANONE_API_KEY?.trim();
+
+  return apiKey === expected;
 }
 
 export async function GET(req: Request) {
@@ -99,13 +103,101 @@ export async function GET(req: Request) {
       data,
     });
   } catch (err: any) {
-    console.error("❌ Error /api/sap/productos:", err);
+    console.error("❌ Error GET /api/sap/productos:", err);
 
     return NextResponse.json(
       {
         ok: false,
         error: "No se pudo leer Productos",
         details: err.message,
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    if (!validarApiKey(req)) {
+      return NextResponse.json(
+        { ok: false, error: "No autorizado" },
+        { status: 401 }
+      );
+    }
+
+    if (!process.env.SAP_SYNC_PRODUCTOS_APPS_SCRIPT_URL) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Falta variable SAP_SYNC_PRODUCTOS_APPS_SCRIPT_URL",
+        },
+        { status: 500 }
+      );
+    }
+
+    const body = await req.json();
+    const data = Array.isArray(body) ? body : [body];
+
+    if (data.length === 0) {
+      return NextResponse.json(
+        { ok: false, error: "No se recibieron productos" },
+        { status: 400 }
+      );
+    }
+
+    const res = await fetch(process.env.SAP_SYNC_PRODUCTOS_APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        tipo: "productos",
+        accion: "nuevo",
+        data,
+      }),
+    });
+
+    const resultText = await res.text();
+
+    let result: any;
+
+    try {
+      result = JSON.parse(resultText);
+    } catch {
+      result = {
+        ok: false,
+        raw: resultText,
+      };
+    }
+
+    if (!res.ok || result?.ok === false) {
+      return NextResponse.json(
+        {
+          ok: false,
+          endpoint: "productos",
+          error: "No se pudo registrar diferencial de productos",
+          result,
+        },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      endpoint: "productos",
+      source: "sap_sync_productos",
+      accion: "nuevo",
+      registros: result.registros ?? data.length,
+      result,
+    });
+  } catch (err: any) {
+    console.error("❌ Error POST /api/sap/productos:", err);
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Error al recibir productos desde SAP",
+        details: err?.message || "Error inesperado",
       },
       { status: 500 }
     );
