@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import Papa from "papaparse";
 
 const URL_NOTAS_VENTA =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vS_TD9sDzySN_-lkYQ159iIIQzU4ruzRuDJhLFfIgGDTc7NZm1w-Km8-BNwc_mS9-ZAq7oYyeTGuhhS/pub?gid=0&single=true&output=csv";
+  
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vR2dwvhSGvvFFPBiRxUgF8Q99HkWJlyoFKLDo6Mmu4HvCH_hJtdyV_7WTrOjkUp6u0pMyAOf543M1UE/pub?output=csv";
 
   function normalize(val: string) {
     return val
