@@ -14,7 +14,7 @@ const URL_PRECIOS =
       .replace(/\s+/g, "_")
       .replace(/[^\w_]/g, "");
   }
-  
+
 function toNumber(value: any) {
   const limpio = String(value ?? "")
     .replace(/\./g, "")
