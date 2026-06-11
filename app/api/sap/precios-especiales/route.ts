@@ -5,14 +5,16 @@ const URL_PRECIOS =
  
   "https://docs.google.com/spreadsheets/d/1UXVAxwzg-Kh7AWCPnPbxbEpzXnRPR2pDBKrRUFNZKZo/export?format=csv&gid=2117069636";
 
-function normalize(val: string) {
-  return val
-    ?.toLowerCase()
-    .trim()
-    .replace(/\s+/g, "_")
-    .replace(/[^\w_]/g, "");
-}
-
+  function normalize(val: string) {
+    return val
+      ?.normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, "_")
+      .replace(/[^\w_]/g, "");
+  }
+  
 function toNumber(value: any) {
   const limpio = String(value ?? "")
     .replace(/\./g, "")
