@@ -26,7 +26,6 @@ function toNumber(value: any) {
 
 function parseFechaChile(value: any) {
   const s = String(value ?? "").trim();
-
   if (!s) return null;
 
   const parts = s.split(/[\/\-]/);
@@ -87,7 +86,7 @@ export async function GET(req: Request) {
       return obj;
     });
 
-    // FILTRO: últimos 3 días
+    // FILTRO: últimos 3 días corridos
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
 
@@ -96,7 +95,6 @@ export async function GET(req: Request) {
 
     const rowsFiltradas = rows.filter((r) => {
       const fecha = parseFechaChile(r.fecha);
-
       if (!fecha) return false;
 
       return fecha >= hace3Dias && fecha <= hoy;
@@ -106,17 +104,28 @@ export async function GET(req: Request) {
 
     for (const r of rowsFiltradas) {
       const numeroNV = r.numero_nv ?? "";
+      const codigoCliente = r.codigo_cliente ?? "";
+      const rut = r.rut ?? "";
+      const cliente = r.cliente ?? "";
+      const ejecutivo = r.ejecutivo ?? "";
 
       if (!numeroNV) continue;
 
-      if (!agrupadas[numeroNV]) {
-        agrupadas[numeroNV] = {
+      const claveNV = [
+        numeroNV,
+        codigoCliente || rut || cliente,
+        ejecutivo,
+      ].join("__");
+
+      if (!agrupadas[claveNV]) {
+        agrupadas[claveNV] = {
+          claveNV,
           numeroNV,
           fecha: r.fecha ?? "",
-          cliente: r.cliente ?? "",
-          rut: r.rut ?? "",
-          codigoCliente: r.codigo_cliente ?? "",
-          ejecutivo: r.ejecutivo ?? "",
+          cliente,
+          rut,
+          codigoCliente,
+          ejecutivo,
           direccion: r.direccion ?? "",
           correoEjecutivo: r.correo_ejecutivo ?? "",
           comentarios: r.comentarios ?? "",
@@ -128,7 +137,7 @@ export async function GET(req: Request) {
         };
       }
 
-      agrupadas[numeroNV].lineas.push({
+      agrupadas[claveNV].lineas.push({
         codigo: r.codigo ?? "",
         descripcion: r.descripcion ?? "",
         kg: toNumber(r.kg),
