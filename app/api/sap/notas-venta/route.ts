@@ -2,18 +2,17 @@ import { NextResponse } from "next/server";
 import Papa from "papaparse";
 
 const URL_NOTAS_VENTA =
-  
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vR2dwvhSGvvFFPBiRxUgF8Q99HkWJlyoFKLDo6Mmu4HvCH_hJtdyV_7WTrOjkUp6u0pMyAOf543M1UE/pub?output=csv";
 
-  function normalize(val: string) {
-    return val
-      ?.normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .trim()
-      .replace(/\s+/g, "_")
-      .replace(/[^\w_]/g, "");
-  }
+function normalize(val: string) {
+  return val
+    ?.normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/[^\w_]/g, "");
+}
 
 function toNumber(value: any) {
   const limpio = String(value ?? "")
@@ -23,6 +22,23 @@ function toNumber(value: any) {
 
   const n = Number(limpio);
   return Number.isFinite(n) ? n : 0;
+}
+
+function parseFechaChile(value: any) {
+  const s = String(value ?? "").trim();
+
+  if (!s) return null;
+
+  const parts = s.split(/[\/\-]/);
+  if (parts.length !== 3) return null;
+
+  const [dd, mm, yyyy] = parts.map(Number);
+  if (!dd || !mm || !yyyy) return null;
+
+  const fecha = new Date(yyyy, mm - 1, dd);
+  fecha.setHours(0, 0, 0, 0);
+
+  return fecha;
 }
 
 function validarApiKey(req: Request) {
@@ -71,9 +87,24 @@ export async function GET(req: Request) {
       return obj;
     });
 
+    // FILTRO: últimos 3 días
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+
+    const hace3Dias = new Date(hoy);
+    hace3Dias.setDate(hoy.getDate() - 3);
+
+    const rowsFiltradas = rows.filter((r) => {
+      const fecha = parseFechaChile(r.fecha);
+
+      if (!fecha) return false;
+
+      return fecha >= hace3Dias && fecha <= hoy;
+    });
+
     const agrupadas: Record<string, any> = {};
 
-    for (const r of rows) {
+    for (const r of rowsFiltradas) {
       const numeroNV = r.numero_nv ?? "";
 
       if (!numeroNV) continue;
@@ -115,6 +146,9 @@ export async function GET(req: Request) {
       ok: true,
       endpoint: "notas-venta",
       source: "google_sheets",
+      filtro: "ultimos_3_dias",
+      desde: hace3Dias.toISOString().slice(0, 10),
+      hasta: hoy.toISOString().slice(0, 10),
       count: data.length,
       data,
     });
