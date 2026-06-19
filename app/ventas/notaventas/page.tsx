@@ -79,6 +79,19 @@ function hoySinHora(): Date {
   const t = new Date();
   return new Date(t.getFullYear(), t.getMonth(), t.getDate());
 }
+
+function calcularFechaEntrega(): string {
+  const ahora = new Date();
+  const entrega = new Date(ahora);
+
+  if (ahora.getHours() < 13) {
+    entrega.setDate(entrega.getDate() + 1);
+  } else {
+    entrega.setDate(entrega.getDate() + 2);
+  }
+
+  return entrega.toISOString().split("T")[0];
+}
 async function fileToBase64(file: File): Promise<{ base64: string; mime: string }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
