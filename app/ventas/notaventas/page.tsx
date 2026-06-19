@@ -899,6 +899,8 @@ if (descuentosInvalidos.length > 0) {
     const payload = lines.map((item) => ({
       numeroNV,
       fecha,
+      fechaEntrega: calcularFechaEntrega(),
+      ordenCompraCliente,
       cliente: clientName,
       rut: clientRut,
       codigoCliente: clientCode,
@@ -1449,6 +1451,8 @@ const resMail = await fetch("/api/send-notaventa", {
           const payload = lines.map((item) => ({
             numeroNV,
             fechaHora,
+            fechaEntrega: calcularFechaEntrega(),
+            ordenCompraCliente,
             cliente: clientName,
             rut: clientRut,
             codigoCliente: clientCode,
