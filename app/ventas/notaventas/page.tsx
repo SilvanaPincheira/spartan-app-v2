@@ -952,6 +952,8 @@ if (descuentosInvalidos.length > 0) {
         direccion,
         comuna,
         direccionNueva,  // 👈 aquí lo agregas
+        fechaEntrega: calcularFechaEntrega(),
+        ordenCompraCliente,
       },
       productos: lines.map((item) => ({
         codigo: item.code,
