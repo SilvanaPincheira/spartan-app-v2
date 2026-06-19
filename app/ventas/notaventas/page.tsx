@@ -925,6 +925,8 @@ if (descuentosInvalidos.length > 0) {
       especialBloqueado: !!item.isBloqueado,
     }));
 
+    console.log("PAYLOAD NV:", payload);
+
     setSaving(true);
     const resSave = await fetch("/api/save-to-sheets", {
       method: "POST",
@@ -1467,6 +1469,8 @@ const resMail = await fetch("/api/send-notaventa", {
             precioVenta: item.precioVenta,
             totalItem: item.total,
           }));
+
+          console.log("PAYLOAD NV:", payload);
 
           const res = await fetch("/api/save-to-sheets", {
             method: "POST",
