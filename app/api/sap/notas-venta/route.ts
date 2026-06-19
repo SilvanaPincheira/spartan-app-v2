@@ -122,6 +122,8 @@ export async function GET(req: Request) {
           claveNV,
           numeroNV,
           fecha: r.fecha ?? "",
+          fechaEntrega: r.fecha_entrega ?? "",
+          ordenCompraCliente: r.orden_compra_cliente ?? "",
           cliente,
           rut,
           codigoCliente,
