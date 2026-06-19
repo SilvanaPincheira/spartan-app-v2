@@ -90,7 +90,11 @@ function calcularFechaEntrega(): string {
     entrega.setDate(entrega.getDate() + 2);
   }
 
-  return entrega.toISOString().split("T")[0];
+  const dia = String(entrega.getDate()).padStart(2, "0");
+  const mes = String(entrega.getMonth() + 1).padStart(2, "0");
+  const anio = entrega.getFullYear();
+
+  return `${dia}-${mes}-${anio}`;
 }
 async function fileToBase64(file: File): Promise<{ base64: string; mime: string }> {
   return new Promise((resolve, reject) => {
