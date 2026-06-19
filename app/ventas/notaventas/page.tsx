@@ -1447,10 +1447,10 @@ const resMail = await fetch("/api/send-notaventa", {
         if (saving) return; // 🔒 evita doble clic
         setSaving(true);
         try {
-          const fechaHora = new Date().toLocaleString("es-CL");
+          const fecha = new Date().toLocaleString("es-CL");
           const payload = lines.map((item) => ({
             numeroNV,
-            fechaHora,
+            fecha,
             fechaEntrega: calcularFechaEntrega(),
             ordenCompraCliente,
             cliente: clientName,
