@@ -1131,6 +1131,24 @@ const resMail = await fetch("/api/send-notaventa", {
                 onChange={(e) => setComuna(e.target.value)}
               />
             </label>
+
+            <label className="flex flex-col gap-1">
+  <span className="font-medium">Fecha de entrega</span>
+  <input
+    className="w-full border rounded px-2 py-1 bg-gray-100"
+    value={calcularFechaEntrega()}
+    readOnly
+  />
+</label>
+
+<label className="flex flex-col gap-1">
+  <span className="font-medium">N° Orden de Compra Cliente</span>
+  <input
+    className="w-full border rounded px-2 py-1"
+    value={ordenCompraCliente}
+    onChange={(e) => setOrdenCompraCliente(e.target.value)}
+  />
+</label>
           </div>
         </section>
 
