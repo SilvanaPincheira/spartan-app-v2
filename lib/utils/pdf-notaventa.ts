@@ -91,8 +91,8 @@ if (data.cliente.direccionNueva) {
   doc.text(`Dirección nueva: ${data.cliente.direccionNueva}`, 18, 90);
   doc.setTextColor(0, 0, 0);   // volver a negro
   doc.text(`Comuna: ${data.cliente.comuna}`, 18, 96);
-  doc.text(`Fecha entrega: ${data.cliente.fechaEntrega || ""}`, x, y + 48);
-  doc.text(`OC Cliente: ${data.cliente.ordenCompraCliente || ""}`, x, y + 56);
+  doc.text(`Fecha entrega: ${data.cliente.fechaEntrega || ""}`, 18, 104);
+  doc.text(`OC Cliente: ${data.cliente.ordenCompraCliente || ""}`, 18, 112);
 } else {
   // si no hay dirección nueva, comuna en su posición normal
   doc.text(`Comuna: ${data.cliente.comuna}`, 18, 90);
