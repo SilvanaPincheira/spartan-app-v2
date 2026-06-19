@@ -278,6 +278,7 @@ export default function NotaVentaPage() {
   const [direccion, setDireccion] = useState("");
   const [direccionNueva, setDireccionNueva] = useState("");
   const [comuna, setComuna] = useState("");
+  const [ordenCompraCliente, setOrdenCompraCliente] = useState("");
   // Archivo OC (opcional)
 const [ocName, setOcName] = useState<string>("");
 const [ocMime, setOcMime] = useState<string>("");
