@@ -554,19 +554,29 @@ useEffect(() => {
     }
   
   
-   if (out.isEspecial && out.especialPrice > 0) {
+    if (out.isEspecial && out.especialPrice > 0) {
       out.descuento = 0;
-      out.precioVenta = Math.round(out.especialPrice);
+      out.precioVenta = Number(out.especialPrice.toFixed(2));
     } else {
       const base = precioBaseSegunLista(out);
+    
       if (out.precioVenta && out.precioVenta > 0) {
-        out.precioVenta = Math.round(out.precioVenta);
-        const descCalc = base > 0 ? ((base - out.precioVenta) / base) * 100 : 0;
-        out.descuento = Math.round(clamp(descCalc, -20, 20) * 100) / 100;
+        out.precioVenta = Number(out.precioVenta.toFixed(2));
+    
+        const descCalc =
+          base > 0 ? ((base - out.precioVenta) / base) * 100 : 0;
+    
+        out.descuento =
+          Math.round(clamp(descCalc, -20, 20) * 100) / 100;
       } else {
         const desc = clamp(num(out.descuento), -20, 20);
-        out.precioVenta = Math.round(base * (1 - desc / 100));
-        out.descuento = Math.round(desc * 100) / 100;
+    
+        out.precioVenta = Number(
+          (base * (1 - desc / 100)).toFixed(2)
+        );
+    
+        out.descuento =
+          Math.round(desc * 100) / 100;
       }
     }
 
