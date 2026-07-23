@@ -43,10 +43,18 @@ function normalize(s: string) {
 }
 function num(x: unknown) {
   if (typeof x === "string") {
-    const cleaned = x.replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
+    let cleaned = x.trim().replace(/\s/g, "");
+
+    // Si contiene coma, asumimos formato chileno:
+    // 2.093,55 -> 2093.55
+    if (cleaned.includes(",")) {
+      cleaned = cleaned.replace(/\./g, "").replace(",", ".");
+    }
+
     const v = Number(cleaned);
     return Number.isFinite(v) ? v : 0;
   }
+
   const v = Number(x);
   return Number.isFinite(v) ? v : 0;
 }
