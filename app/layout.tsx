@@ -71,9 +71,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   // 🔹 Recalcular menú cuando el perfil esté listo
   useEffect(() => {
     const baseMenu = [
-      { name: "CRM", href: "/crm", icon: "📈" }, // ✅ CRM como módulo normal
+      { name: "CRM", href: "/crm", icon: "📈" },
       { name: "Gestión de Comodatos", href: "/comodatos", icon: "🧪" },
       { name: "Gestión de Ventas", href: "/ventas", icon: "📈" },
+    
+      {
+        name: "Precios por vencer",
+        href: "/comercial/precios-especiales/vencimientos",
+        icon: "⏰",
+      },
+    
       { name: "Logística", href: "/logistica/seguimiento", icon: "🚚" },
       { name: "Inventario", href: "/inventario", icon: "📦" },
       { name: "Promociones", href: "/promociones", icon: "🎯" },
