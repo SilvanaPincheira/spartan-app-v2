@@ -309,6 +309,8 @@ const nvToDuplicate = searchParams.get("duplicar");
 
   /* ----- Estado: Metadatos/UX ----- */
   const [listaSeleccionada, setListaSeleccionada] = useState<1 | 2 | 3>(1);
+  // 🌎 Región seleccionada para determinar la lista base
+const [region, setRegion] = useState<string>("RM");
   const [emailEjecutivo, setEmailEjecutivo] = useState("");
   const [comentarios, setComentarios] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
@@ -342,6 +344,23 @@ const nvToDuplicate = searchParams.get("duplicar");
      [E] EFECTOS: Inicialización y carga de datos
      ========================================================================== */
   useEffect(() => setNumeroNV(generarNumeroNV()), []);
+  // Cargar la región utilizada anteriormente
+useEffect(() => {
+  if (typeof window === "undefined") return;
+
+  const regionGuardada = window.localStorage.getItem("nv.region");
+
+  if (regionGuardada) {
+    setRegion(regionGuardada);
+  }
+}, []);
+
+// Guardar la región cuando cambie
+useEffect(() => {
+  if (typeof window === "undefined") return;
+
+  window.localStorage.setItem("nv.region", region);
+}, [region]);
 
   // Clientes (desde backend, filtrados por ejecutivo logueado)
 useEffect(() => {
@@ -475,67 +494,169 @@ useEffect(() => {
 }, []);
 
 
-  // Productos
-  useEffect(() => {
-    (async () => {
+  // Productos: carga de lista de precios según región
+useEffect(() => {
+  (async () => {
+    try {
       const { id, gid } = normalizeGoogleSheetUrl(
         "https://docs.google.com/spreadsheets/d/1UXVAxwzg-Kh7AWCPnPbxbEpzXnRPR2pDBKrRUFNZKZo/edit?gid=0#gid=0"
       );
+
       if (!id) return;
+
       const rows = await loadSheetSmart(id, gid, "Productos");
-      const list: Product[] = rows.map((r) => ({
-        code: String((r as any).code ?? (r as any).Codigo ?? "").trim(),
-        name: String((r as any).name ?? (r as any).Producto ?? "").trim(),
-        price_list: num((r as any).price_list ?? (r as any)["Precio Lista"] ?? (r as any).Precio ?? 0),
-        kilos: num((r as any).kilos ?? 1),
-      }));
-      setProductos(list.filter((p) => p.code));
-    })().catch((e) => setErrorMsg(String(e)));
-  }, []);
 
-  
-      // Precios especiales
-useEffect(() => {
-  (async () => {
-    const { id, gid } = normalizeGoogleSheetUrl(
-      "https://docs.google.com/spreadsheets/d/1UXVAxwzg-Kh7AWCPnPbxbEpzXnRPR2pDBKrRUFNZKZo/edit?gid=2117069636#gid=2117069636"
-    );
-    if (!id) return;
+      if (!rows.length) {
+        throw new Error(
+          "No se encontraron productos en la hoja Catalog."
+        );
+      }
 
-    const rows = await loadSheetSmart(id, gid, "Precios especiales");
+      // Normaliza tildes, mayúsculas, espacios y caracteres especiales
+      const normalizeText = (txt: string) =>
+        String(txt || "")
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9]/g, "")
+          .trim();
 
-    const hoy = startOfDayMs(new Date());
-
-    const list: PrecioEspecial[] = rows.map((r) => {
-      const vencRaw =
-        String(
-          (r as any).Vencimiento ??
-          (r as any)["Fecha Vencimiento"] ??
-          (r as any)["Fecha vencimiento"] ??
-          ""
-        ).trim();
-
-      const d = parseFechaFlexible(vencRaw);
-      const vencMs = d ? startOfDayMs(d) : undefined;
-
-      // Regla: si no hay fecha o es inválida => lo consideramos VIGENTE.
-      // Cambia a `false` si quieres tratarlos como NO vigentes.
-      const vigente = vencMs === undefined ? false : hoy <= vencMs;
-
-      return {
-        codigoSN: String((r as any)["Código SN"] ?? (r as any)["Codigo SN"] ?? "").trim(),
-        articulo: String((r as any)["Número de artículo"] ?? (r as any)["Numero de articulo"] ?? "").trim(),
-        precio: num((r as any)["Precio especial"] ?? 0),
-        vencimiento: vencRaw,
-        vencimientoMs: vencMs,
-        vigente,
+      const regionMap: Record<string, string> = {
+        RM: "Región Metropolitana",
+        I: "Iquique",
+        II: "Antofagasta",
+        III: "Atacama",
+        IV: "Coquimbo",
+        V: "Valparaíso",
+        VI: "O'Higgins",
+        VII: "Maule",
+        VIII: "Biobío",
+        IX: "Araucanía",
+        X: "Los Lagos",
+        XI: "Chiloe",
+        XIV: "Los Ríos",
+        XV: "Arica y Parinacota",
       };
-    });
 
-    setPreciosEspeciales(list);
-  })().catch((e) => setErrorMsg(String(e)));
-}, []);
+      const selectedName =
+        regionMap[region] || "Región Metropolitana";
 
+      const normalizedRegion = normalizeText(selectedName);
+
+      const headers = Object.keys(rows[0] || {});
+      let matchHeader = "";
+
+      // Buscar la columna que corresponde a la región
+      for (const header of headers) {
+        if (normalizeText(header).includes(normalizedRegion)) {
+          matchHeader = header;
+          break;
+        }
+      }
+
+      console.log(
+        "🗺️ Región seleccionada:",
+        region,
+        "→ columna detectada:",
+        matchHeader || "(no encontrada)"
+      );
+
+      const list: Product[] = rows
+        .map((r) => {
+          const basePrice = num(
+            (r as any).price_list ??
+              (r as any)["Precio Lista"] ??
+              (r as any).Precio ??
+              0
+          );
+
+          const regionalPrice = matchHeader
+            ? num((r as any)[matchHeader] ?? 0)
+            : 0;
+
+          return {
+            code: String(
+              (r as any).code ??
+                (r as any).Codigo ??
+                ""
+            ).trim(),
+
+            name: String(
+              (r as any).name ??
+                (r as any).Producto ??
+                ""
+            ).trim(),
+
+            // Utiliza el regional; si está vacío o en cero, usa price_list
+            price_list:
+              regionalPrice > 0
+                ? Number(regionalPrice.toFixed(2))
+                : Number(basePrice.toFixed(2)),
+
+            kilos: num((r as any).kilos ?? 1),
+          };
+        })
+        .filter((p) => p.code);
+
+      setProductos(list);
+
+      /*
+       * Si el usuario cambia la región cuando ya agregó productos,
+       * actualiza también las líneas existentes.
+       */
+      setLines((oldLines) =>
+        oldLines.map((line) => {
+          if (!line.code) return line;
+
+          const productoRegional = list.find(
+            (producto) => producto.code === line.code
+          );
+
+          if (!productoRegional) return line;
+
+          const lineaActualizada: Line = {
+            ...line,
+            priceBase: productoRegional.price_list,
+            kilos: productoRegional.kilos || line.kilos || 1,
+
+            /*
+             * Obliga a recalcular el precio normal según la nueva región.
+             * Los precios especiales se volverán a aplicar después.
+             */
+            precioVenta: line.isEspecial
+              ? line.precioVenta
+              : 0,
+
+            descuento: line.isEspecial
+              ? 0
+              : line.descuento,
+          };
+
+          return applyEspecial(lineaActualizada);
+        })
+      );
+
+      if (matchHeader) {
+        console.log(
+          `💰 Lista regional cargada: ${selectedName}`
+        );
+      } else {
+        console.warn(
+          `⚠️ No se encontró la columna "${selectedName}". Se utilizará price_list.`
+        );
+      }
+    } catch (e: any) {
+      console.error(
+        "❌ Error cargando productos regionales:",
+        e
+      );
+
+      setErrorMsg(
+        `Productos: ${e?.message || "No se pudieron cargar"}`
+      );
+    }
+  })();
+}, [region]);
 
   /* ==========================================================================
      [F] LÓGICA DE PRECIOS
@@ -622,7 +743,9 @@ function applyEspecial(row: Line): Line {
 
     if (vigente) {
       out.isEspecial = true;
-      out.especialPrice = Math.round(pe.precio || 0);
+      out.especialPrice = Number(
+        (pe.precio || 0).toFixed(2)
+      );
       out.descuento = 0;
     } else {
       out.isBloqueado = true;      // ❌ especial vencido -> bloquear
@@ -840,6 +963,7 @@ useEffect(() => {
     setErrorMsg("");
     setNumeroNV(generarNumeroNV());
     setListaSeleccionada(1);
+    setRegion("RM");
     setSaveMsg("");
     setProcesado(false);
   }
@@ -1212,6 +1336,46 @@ const resMail = await fetch("/api/send-notaventa", {
         </section>
 
         {/* ===== PRODUCTOS ===== */}
+        {/* ===== REGIÓN DE PRECIOS ===== */}
+<section className="bg-white shadow p-4 rounded mb-4 print:hidden">
+  <h2 className="font-semibold text-[#2B6CFF] mb-2">
+    Región de la Nota de Venta
+  </h2>
+
+  <div className="flex flex-wrap items-center gap-3">
+    <span className="font-medium text-sm">
+      Lista regional:
+    </span>
+
+    <select
+      value={region}
+      onChange={(e) => setRegion(e.target.value)}
+      className="border rounded px-2 py-1 text-sm"
+    >
+      <option value="RM">Región Metropolitana</option>
+      <option value="I">Iquique</option>
+      <option value="II">Antofagasta</option>
+      <option value="III">Atacama</option>
+      <option value="IV">Coquimbo</option>
+      <option value="V">Valparaíso</option>
+      <option value="VI">O’Higgins</option>
+      <option value="VII">Maule</option>
+      <option value="VIII">Biobío</option>
+      <option value="IX">Araucanía</option>
+      <option value="X">Los Lagos</option>
+      <option value="XI">Chiloe</option>
+      <option value="XIV">Los Ríos</option>
+      <option value="XV">
+        Arica y Parinacota
+      </option>
+    </select>
+
+    <span className="text-xs text-zinc-500">
+      La 1.ª, 2.ª y 3.ª lista se calcularán sobre
+      el precio de esta región.
+    </span>
+  </div>
+</section>
         <section className="bg-white shadow p-4 rounded mb-4">
           <div className="flex justify-between mb-2 items-center">
             <h2 className="font-semibold text-[#2B6CFF]">Productos</h2>
@@ -1502,6 +1666,7 @@ const resMail = await fetch("/api/send-notaventa", {
             fecha,
             fechaEntrega: calcularFechaEntrega(),
             ordenCompraCliente,
+            region,
             cliente: clientName,
             rut: clientRut,
             codigoCliente: clientCode,
