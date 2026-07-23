@@ -720,7 +720,7 @@ function applyEspecial(row: Line): Line {
           row.precioVenta = 0;
           row.descuento = 0;
         } else {
-          const pv = Math.round(num(value));
+          const pv = Number(num(value).toFixed(2));
           const base = precioBaseSegunLista(row);
           const descCalc = base > 0 ? ((base - pv) / base) * 100 : 0;
   
@@ -735,7 +735,7 @@ function applyEspecial(row: Line): Line {
                 )}%, lo que supera el máximo permitido (20%).\n\n` +
                 `El precio será restablecido al valor base.`
             );
-            row.precioVenta = Math.round(base);
+            row.precioVenta = Number(base.toFixed(2));
             row.descuento = 0;
           } else {
             row.precioVenta = pv;
@@ -762,10 +762,12 @@ function applyEspecial(row: Line): Line {
         // Si cambia el % descuento, recalcula precio de venta
         if (field === "descuento") {
           const base = precioBaseSegunLista(row);
-          row.precioVenta = Math.round(base * (1 - row.descuento / 100));
+          row.precioVenta = Number(
+            (base * (1 - row.descuento / 100)).toFixed(2)
+          );
         }
+      
       }
-  
       // Recalcular totales
       n[i] = computeLine(row);
       return n;
@@ -948,13 +950,15 @@ if (descuentosInvalidos.length > 0) {
       descripcion: item.name,
       kilos: item.kilos,
       cantidad: item.qty,
-      precioBase: Math.round(item.priceBase || 0),
-      descuento: item.isEspecial ? 0 : item.descuento,
-      precioVenta: Math.round(item.precioVenta || 0),
-      precioPresentacion: Math.round((item.precioVenta || 0) * (item.kilos || 1)),
-      totalItem: Math.round(item.total || 0),
-      especialVigente: !!item.isEspecial,
-      especialBloqueado: !!item.isBloqueado,
+      precioBase: Number((item.priceBase || 0).toFixed(2)),
+descuento: item.isEspecial ? 0 : item.descuento,
+precioVenta: Number((item.precioVenta || 0).toFixed(2)),
+precioPresentacion: Number(
+  ((item.precioVenta || 0) * (item.kilos || 1)).toFixed(2)
+),
+totalItem: Number((item.total || 0).toFixed(2)),
+especialVigente: !!item.isEspecial,
+especialBloqueado: !!item.isBloqueado,
     }));
 
     console.log("PAYLOAD NV:", payload);
@@ -992,10 +996,13 @@ if (descuentosInvalidos.length > 0) {
         descripcion: item.name,
         kilos: item.kilos,
         cantidad: item.qty,
-        precioBase: Math.round(item.priceBase || 0),
-        precioVenta: Math.round(item.precioVenta || 0),
-        precioPresentacion: Math.round((item.precioVenta || 0) * (item.kilos || 1)),
-        total: Math.round(item.total || 0),
+      
+        precioBase: Number((item.priceBase || 0).toFixed(2)),
+        precioVenta: Number((item.precioVenta || 0).toFixed(2)),
+        precioPresentacion: Number(
+          ((item.precioVenta || 0) * (item.kilos || 1)).toFixed(2)
+        ),
+        total: Number((item.total || 0).toFixed(2)),
       })),
       comentarios,
     });
@@ -1345,7 +1352,7 @@ const resMail = await fetch("/api/send-notaventa", {
                         <input
                           type="number"
                           min={0}
-                          step={1}
+                          step={0.01}
                           className="w-28 rounded border px-2 py-1 text-right"
                           value={r.precioVenta === 0 ? "" : r.precioVenta}
                           onChange={(e) => {
