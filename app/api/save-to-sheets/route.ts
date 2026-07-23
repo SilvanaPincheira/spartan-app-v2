@@ -9,6 +9,26 @@ export async function POST(req: Request) {
   try {
     // 1. Leer payload que viene desde page.tsx
     const payload = await req.json();
+    if (!Array.isArray(payload) || payload.length === 0) {
+      return NextResponse.json(
+        { error: "No se recibieron registros para guardar" },
+        { status: 400 }
+      );
+    }
+    
+    const filaSinNumero = payload.find(
+      (fila: any) => !String(fila?.numeroNV || "").trim()
+    );
+    
+    if (filaSinNumero) {
+      return NextResponse.json(
+        {
+          error: "La Nota de Venta no contiene numeroNV",
+          cliente: filaSinNumero?.cliente || "",
+        },
+        { status: 400 }
+      );
+    }
 
     // 2. Mandar al Apps Script
     const res = await fetch(APPS_SCRIPT_URL, {

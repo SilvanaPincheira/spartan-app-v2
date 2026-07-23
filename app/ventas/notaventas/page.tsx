@@ -875,6 +875,16 @@ async function guardarPdfYEnviar() {
 if (!clientName || !clientRut || !clientCode) {
   throw new Error("Faltan datos del cliente (Nombre, RUT y Código Cliente).");
 }
+if (!String(numeroNV || "").trim()) {
+  throw new Error(
+    "No se generó el número de Nota de Venta. Recarga la página e inténtalo nuevamente."
+  );
+}
+if (!numeroNV?.trim()) {
+  throw new Error(
+    "No se ha generado el número de Nota de Venta. Intenta nuevamente."
+  );
+}
 if (lines.length === 0) {
   throw new Error("Agrega al menos un ítem antes de guardar.");
 }
@@ -1455,6 +1465,12 @@ const resMail = await fetch("/api/send-notaventa", {
         if (saving) return; // 🔒 evita doble clic
         setSaving(true);
         try {
+          if (!numeroNV?.trim()) {
+            throw new Error(
+              "No se ha generado el número de Nota de Venta."
+            );
+          }
+
           const fecha = new Date().toLocaleString("es-CL");
           const payload = lines.map((item) => ({
             numeroNV,
@@ -1476,7 +1492,7 @@ const resMail = await fetch("/api/send-notaventa", {
             totalItem: item.total,
           }));
 
-          console.log("PAYLOAD NV:", payload);
+          console.table(payload);
 
           const res = await fetch("/api/save-to-sheets", {
             method: "POST",
