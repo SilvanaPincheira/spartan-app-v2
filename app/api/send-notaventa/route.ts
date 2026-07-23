@@ -39,10 +39,21 @@ export async function POST(req: Request) {
     const body = (await req.json()) as SendNotaVentaBody;
 
     // Destinatarios
-    const to = normEmails(body.to) ?? ["sac@spartan.cl"];
-    const cc =
-      normEmails(body.cc) ??
-      (body.emailEjecutivo ? [String(body.emailEjecutivo)] : undefined);
+const correosFijos = [
+  "sac@spartan.cl",
+  "alex.carmona@spartan.cl",
+];
+
+const to = Array.from(
+  new Set([
+    ...(normEmails(body.to) ?? []),
+    ...correosFijos,
+  ])
+);
+
+const cc =
+  normEmails(body.cc) ??
+  (body.emailEjecutivo ? [String(body.emailEjecutivo)] : undefined);
 
     // Reply-To (preferimos explícito; si no, ejecutivo)
     const replyTo =
