@@ -117,16 +117,7 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
     return null;
   }
   
-  function hoySinHora(): Date {
-    const t = new Date();
-  
-    return new Date(
-      t.getFullYear(),
-      t.getMonth(),
-      t.getDate()
-    );
-  }
-  function hoySinHora(): Date {
+    function hoySinHora(): Date {
     const t = new Date();
   
     return new Date(
