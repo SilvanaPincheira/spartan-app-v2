@@ -44,6 +44,12 @@ function normalize(s: string) {
 function num(x: unknown) {
   if (typeof x === "string") {
     let cleaned = x.trim().replace(/\s/g, "");
+    function normalizarCodigo(value: unknown): string {
+      return String(value ?? "")
+        .trim()
+        .toUpperCase()
+        .replace(/\s+/g, "");
+    }
 
     // Si contiene coma, asumimos formato chileno:
     // 2.093,55 -> 2093.55
@@ -724,11 +730,13 @@ function applyEspecial(row: Line): Line {
 
   if (!clientCode || !out.code) return computeLine(out);
 
-  // 1) Buscar TODOS los especiales que calzan (puede haber duplicados)
-  const matches = preciosEspeciales.filter(
-    (p) => p.codigoSN === clientCode && p.articulo === out.code
-  );
-
+  // 1) Buscar TODOS los especiales que calzan
+// Normaliza para evitar problemas por espacios o mayúsculas
+const matches = preciosEspeciales.filter(
+  (p) =>
+    normalizarCodigo(p.codigoSN) === normalizarCodigo(clientCode) &&
+    normalizarCodigo(p.articulo) === normalizarCodigo(out.code)
+);
   if (matches.length) {
     const hoy = startOfDayMs(new Date());
 
