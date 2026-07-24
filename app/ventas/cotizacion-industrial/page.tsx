@@ -707,7 +707,7 @@ useEffect(() => {
       }));
 
       // 1) Guardar en Sheets (pestaña "Cotizaciones")
-      const resSave = await fetch("/api/save-to-sheets", {
+      const resSave = await fetch("/api/save-cotizacion", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ datos }), // ✅ solo enviamos "datos"
