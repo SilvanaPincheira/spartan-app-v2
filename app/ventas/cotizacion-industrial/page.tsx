@@ -843,19 +843,21 @@ const resMail = await fetch("/api/send-cotizacion", {
   }),
 });
 
-      const mailJson = await resMail.json();
-      if (!mailJson.ok) throw new Error(mailJson.error || "No se pudo enviar el correo");
+const mailJson = await resMail.json();
 
-      alert("✅ Guardado en Sheets, PDF generado y correo enviado a Cliente + Ejecutivo (CC Patricia).");
-    } catch (e: any) {
-      console.error("❌ Error:", e);
-      setErrorMsg(e?.message || "Ocurrió un error inesperado.");
-      alert(`❌ No se pudo completar el proceso.\n\nDetalles: ${e?.message || "Error inesperado"}`);
-    } finally {
-      setProcesando(false);
-    }
-  }
+if (!resMail.ok || !mailJson.ok) {
+  console.error("❌ Error en send-cotizacion:", {
+    status: resMail.status,
+    respuesta: mailJson,
+  });
 
+  throw new Error(
+    mailJson.error ||
+      `No se pudo enviar el correo. Código HTTP ${resMail.status}`
+  );
+}
+
+console.log("✅ Correo enviado:", mailJson);
   /* ========================= UI ========================= */
   const readOnlyActivos = tipoCliente === "activo";
 
