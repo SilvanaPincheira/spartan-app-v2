@@ -701,6 +701,92 @@ useEffect(() => {
   })();
 }, [region]);
 
+// Precios especiales
+useEffect(() => {
+  (async () => {
+    const { id, gid } = normalizeGoogleSheetUrl(
+      "https://docs.google.com/spreadsheets/d/1UXVAxwzg-Kh7AWCPnPbxbEpzXnRPR2pDBKrRUFNZKZo/edit?gid=2117069636#gid=2117069636"
+    );
+
+    if (!id) return;
+
+    const rows = await loadSheetSmart(
+      id,
+      gid,
+      "Precios especiales"
+    );
+
+    const hoy = startOfDayMs(new Date());
+
+    const list: PrecioEspecial[] = rows
+      .map((r) => {
+        const vencRaw = String(
+          (r as any).Vencimiento ??
+            (r as any)["Fecha Vencimiento"] ??
+            (r as any)["Fecha vencimiento"] ??
+            ""
+        ).trim();
+
+        const d = parseFechaFlexible(vencRaw);
+        const vencMs = d
+          ? startOfDayMs(d)
+          : undefined;
+
+        const vigente =
+          vencMs !== undefined &&
+          hoy <= vencMs;
+
+        return {
+          codigoSN: normalizarCodigo(
+            (r as any)["Código SN"] ??
+              (r as any)["Codigo SN"] ??
+              ""
+          ),
+
+          articulo: normalizarCodigo(
+            (r as any)["Número de artículo"] ??
+              (r as any)["Numero de articulo"] ??
+              ""
+          ),
+
+          precio: num(
+            (r as any)["Precio especial"] ?? 0
+          ),
+
+          vencimiento: vencRaw,
+          vencimientoMs: vencMs,
+          vigente,
+        };
+      })
+      .filter(
+        (precio) =>
+          precio.codigoSN &&
+          precio.articulo &&
+          precio.precio > 0
+      );
+
+    console.log(
+      "✅ Precios especiales cargados:",
+      list.length
+    );
+
+    setPreciosEspeciales(list);
+  })().catch((e) => {
+    console.error(
+      "❌ Error cargando precios especiales:",
+      e
+    );
+
+    setErrorMsg(
+      `Precios especiales: ${
+        e instanceof Error
+          ? e.message
+          : String(e)
+      }`
+    );
+  });
+}, []);
+
   /* ==========================================================================
      [F] LÓGICA DE PRECIOS
      ========================================================================== */
