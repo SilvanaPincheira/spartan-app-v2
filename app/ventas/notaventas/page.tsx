@@ -588,6 +588,7 @@ useEffect(() => {
 
       const headers = Object.keys(rows[0] || {});
       let matchHeader = "";
+      console.log("COLUMNAS DEL SHEET:", headers);
 
       // Buscar la columna que corresponde a la región
       for (const header of headers) {
@@ -612,6 +613,7 @@ useEffect(() => {
               (r as any).Precio ??
               0
           );
+          console.log("Primer registro:", rows[0]);
 
           const regionalPrice = matchHeader
             ? num((r as any)[matchHeader] ?? 0)
