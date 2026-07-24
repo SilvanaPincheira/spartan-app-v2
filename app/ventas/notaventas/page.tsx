@@ -34,97 +34,51 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 /* ============================================================================
    [A] HELPERS GENERALES
    ============================================================================ */
-function normalize(s: string) {
-  return (s || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim();
-}
-function num(x: unknown) {
-  if (typeof x === "string") {
-    let cleaned = x.trim().replace(/\s/g, "");
-    function normalizarCodigo(value: unknown): string {
-      return String(value ?? "")
-        .trim()
-        .toUpperCase()
-        .replace(/\s+/g, "");
-    }
 
-    // Si contiene coma, asumimos formato chileno:
-    // 2.093,55 -> 2093.55
-    if (cleaned.includes(",")) {
-      cleaned = cleaned.replace(/\./g, "").replace(",", ".");
+   function normalize(s: string) {
+    return (s || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+  }
+  
+  function num(x: unknown) {
+    if (typeof x === "string") {
+      let cleaned = x.trim().replace(/\s/g, "");
+  
+      // Si contiene coma, asumimos formato chileno:
+      // 2.093,55 -> 2093.55
+      if (cleaned.includes(",")) {
+        cleaned = cleaned.replace(/\./g, "").replace(",", ".");
+      }
+  
+      const v = Number(cleaned);
+      return Number.isFinite(v) ? v : 0;
     }
-
-    const v = Number(cleaned);
+  
+    const v = Number(x);
     return Number.isFinite(v) ? v : 0;
   }
-
-  const v = Number(x);
-  return Number.isFinite(v) ? v : 0;
-}
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
-}
-function money(n: number) {
-  return (n || 0).toLocaleString("es-CL", {
-    style: "currency",
-    currency: "CLP",
-    maximumFractionDigits: 0,
-  });
-}
-function parseFecha(v?: string): Date | null {
-  const s = (v || "").trim();
-  if (!s) return null;
-  const iso = new Date(s);
-  if (!isNaN(iso.getTime())) return iso;
-  const m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
-  if (m) {
-    const d = Number(m[1]);
-    const mo = Number(m[2]) - 1;
-    const y = Number(m[3]);
-    const dt = new Date(y, mo, d, 0, 0, 0, 0);
-    return isNaN(dt.getTime()) ? null : dt;
+  
+  function normalizarCodigo(value: unknown): string {
+    return String(value ?? "")
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, "");
   }
-  return null;
-}
-function hoySinHora(): Date {
-  const t = new Date();
-  return new Date(t.getFullYear(), t.getMonth(), t.getDate());
-}
-
-function calcularFechaEntrega(): string {
-  const ahora = new Date();
-  const entrega = new Date(ahora);
-
-  if (ahora.getHours() < 13) {
-    entrega.setDate(entrega.getDate() + 1);
-  } else {
-    entrega.setDate(entrega.getDate() + 2);
+  
+  function clamp(n: number, min: number, max: number) {
+    return Math.max(min, Math.min(max, n));
   }
-
-  const dia = String(entrega.getDate()).padStart(2, "0");
-  const mes = String(entrega.getMonth() + 1).padStart(2, "0");
-  const anio = entrega.getFullYear();
-
-  return `${dia}-${mes}-${anio}`;
-}
-async function fileToBase64(file: File): Promise<{ base64: string; mime: string }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result || "");
-      resolve({
-        base64: dataUrl.split(",")[1] || "",
-        mime: file.type || "application/octet-stream",
-      });
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
+  
+  function money(n: number) {
+    return (n || 0).toLocaleString("es-CL", {
+      style: "currency",
+      currency: "CLP",
+      maximumFractionDigits: 0,
+    });
+  }
 
 /* ============================================================================
    [B] LECTURA DE CSVs (Google Sheets) — sin dependencias
