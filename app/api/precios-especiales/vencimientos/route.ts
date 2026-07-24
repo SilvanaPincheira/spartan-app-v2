@@ -4,7 +4,7 @@ import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 
 type SheetRow = Record<string, string>;
 
-function num(value: unknown) {
+function num(value: unknown): number {
   if (typeof value === "string") {
     let cleaned = value.trim().replace(/\s/g, "");
 
@@ -20,7 +20,7 @@ function num(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function normalizarTexto(value: unknown) {
+function normalizarTexto(value: unknown): string {
   return String(value ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -31,18 +31,22 @@ function normalizarTexto(value: unknown) {
 
 function parseCsv(text: string): SheetRow[] {
   const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
+
+  let currentRow: string[] = [];
+  let currentCell = "";
   let inQuotes = false;
 
   const pushCell = () => {
-    row.push(cell);
-    cell = "";
+    currentRow.push(currentCell);
+    currentCell = "";
   };
 
   const pushRow = () => {
-    if (row.length) rows.push(row);
-    row = [];
+    if (currentRow.length > 0) {
+      rows.push(currentRow);
+    }
+
+    currentRow = [];
   };
 
   const content = String(text || "").replace(/\r/g, "");
@@ -53,49 +57,53 @@ function parseCsv(text: string): SheetRow[] {
     if (inQuotes) {
       if (char === '"') {
         if (content[i + 1] === '"') {
-          cell += '"';
+          currentCell += '"';
           i++;
         } else {
           inQuotes = false;
         }
       } else {
-        cell += char;
+        currentCell += char;
       }
+
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = true;
+    } else if (char === ",") {
+      pushCell();
+    } else if (char === "\n") {
+      pushCell();
+      pushRow();
     } else {
-      if (char === '"') {
-        inQuotes = true;
-      } else if (char === ",") {
-        pushCell();
-      } else if (char === "\n") {
-        pushCell();
-        pushRow();
-      } else {
-        cell += char;
-      }
+      currentCell += char;
     }
   }
 
-  if (cell.length || row.length) {
+  if (currentCell.length > 0 || currentRow.length > 0) {
     pushCell();
     pushRow();
   }
 
-  if (!rows.length) return [];
+  if (rows.length === 0) {
+    return [];
+  }
 
   const headers = rows[0].map((header) => header.trim());
 
   return rows
     .slice(1)
     .filter(
-      (currentRow) =>
-        currentRow &&
-        !currentRow.every((value) => value === "")
+      (row) =>
+        Array.isArray(row) &&
+        !row.every((value) => String(value ?? "").trim() === "")
     )
-    .map((currentRow) => {
+    .map((row) => {
       const result: SheetRow = {};
 
       headers.forEach((header, index) => {
-        result[header] = String(currentRow[index] ?? "").trim();
+        result[header] = String(row[index] ?? "").trim();
       });
 
       return result;
@@ -105,8 +113,11 @@ function parseCsv(text: string): SheetRow[] {
 function parseFechaFlexible(value: unknown): Date | null {
   const raw = String(value ?? "").trim();
 
-  if (!raw) return null;
+  if (!raw) {
+    return null;
+  }
 
+  // Fecha serial de Google Sheets o Excel
   const serial = Number(raw);
 
   if (
@@ -116,6 +127,7 @@ function parseFechaFlexible(value: unknown): Date | null {
     !raw.includes("/")
   ) {
     const base = new Date(1899, 11, 30).getTime();
+
     return new Date(base + serial * 86_400_000);
   }
 
@@ -124,42 +136,47 @@ function parseFechaFlexible(value: unknown): Date | null {
     ""
   );
 
+  // Formato AAAA-MM-DD
   let match = clean.match(
     /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/
   );
 
   if (match) {
-    return new Date(
-      Number(match[1]),
-      Number(match[2]) - 1,
-      Number(match[3])
-    );
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+
+    return new Date(year, month - 1, day);
   }
 
+  // Formato DD-MM-AAAA
   match = clean.match(
     /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})$/
   );
 
   if (match) {
+    const day = Number(match[1]);
+    const month = Number(match[2]);
+
     let year = Number(match[3]);
 
-    if (year < 100) year += 2000;
+    if (year < 100) {
+      year += 2000;
+    }
 
-    return new Date(
-      year,
-      Number(match[2]) - 1,
-      Number(match[1])
-    );
+    return new Date(year, month - 1, day);
   }
 
   const timestamp = Date.parse(raw);
 
-  return Number.isNaN(timestamp)
-    ? null
-    : new Date(timestamp);
+  if (Number.isNaN(timestamp)) {
+    return null;
+  }
+
+  return new Date(timestamp);
 }
 
-function startOfDay(date: Date) {
+function startOfDay(date: Date): number {
   return new Date(
     date.getFullYear(),
     date.getMonth(),
@@ -167,7 +184,7 @@ function startOfDay(date: Date) {
   ).getTime();
 }
 
-function diasHasta(fecha: Date) {
+function diasHasta(fecha: Date): number {
   const hoy = startOfDay(new Date());
   const vencimiento = startOfDay(fecha);
 
@@ -176,11 +193,11 @@ function diasHasta(fecha: Date) {
   );
 }
 
-function formatFecha(date: Date) {
+function formatFecha(date: Date): string {
   return date.toLocaleDateString("es-CL");
 }
 
-async function leerPreciosEspeciales() {
+async function leerPreciosEspeciales(): Promise<SheetRow[]> {
   const spreadsheetId =
     "1UXVAxwzg-Kh7AWCPnPbxbEpzXnRPR2pDBKrRUFNZKZo";
 
@@ -196,7 +213,7 @@ async function leerPreciosEspeciales() {
 
   if (!response.ok) {
     throw new Error(
-      `No se pudo leer la hoja: ${response.status}`
+      `No se pudo leer la hoja de precios especiales: ${response.status}`
     );
   }
 
@@ -216,8 +233,8 @@ export async function GET() {
     const correoUsuario = String(
       session?.user?.email || ""
     )
-      .toLowerCase()
-      .trim();
+      .trim()
+      .toLowerCase();
 
     if (!correoUsuario) {
       return NextResponse.json(
@@ -229,6 +246,10 @@ export async function GET() {
       );
     }
 
+    /*
+     * Busca el nombre del ejecutivo usando el correo
+     * del usuario conectado.
+     */
     const {
       data: ejecutivoData,
       error: ejecutivoError,
@@ -261,7 +282,7 @@ export async function GET() {
 
     const rows = await leerPreciosEspeciales();
 
-    const data = rows
+    const registros = rows
       .map((row) => {
         const fecha = parseFechaFlexible(
           row["Fecha Vencimiento"] ??
@@ -269,9 +290,17 @@ export async function GET() {
             row["Vencimiento"]
         );
 
-        if (!fecha) return null;
+        if (!fecha) {
+          return null;
+        }
 
         const diasRestantes = diasHasta(fecha);
+
+        const ejecutivo = String(
+          row["ejecutivo"] ??
+            row["Ejecutivo"] ??
+            ""
+        ).trim();
 
         return {
           codigoSN: String(
@@ -311,13 +340,16 @@ export async function GET() {
           ),
 
           fechaVencimiento: formatFecha(fecha),
+          fechaOrden: startOfDay(fecha),
           diasRestantes,
+          ejecutivo,
 
-          ejecutivo: String(
-            row["ejecutivo"] ??
-              row["Ejecutivo"] ??
-              ""
-          ).trim(),
+          estado:
+            diasRestantes < 0
+              ? "VENCIDO"
+              : diasRestantes <= 30
+                ? "URGENTE"
+                : "PROXIMO",
         };
       })
       .filter(
@@ -331,17 +363,67 @@ export async function GET() {
           normalizarTexto(row.ejecutivo) ===
           nombreEjecutivo
       )
-      .sort(
-        (a, b) =>
-          a.diasRestantes - b.diasRestantes
-      );
+      /*
+       * Conservamos:
+       * - todos los vencidos;
+       * - vigentes que vencen en máximo 60 días.
+       *
+       * Se ocultan los vigentes con más de 60 días.
+       */
+      .filter(
+        (row) =>
+          row.diasRestantes < 0 ||
+          row.diasRestantes <= 60
+      )
+      .sort((a, b) => {
+        /*
+         * Primero los próximos a vencer.
+         * Después los vencidos, comenzando por los más recientes.
+         */
+        const aVencido = a.diasRestantes < 0;
+        const bVencido = b.diasRestantes < 0;
+
+        if (aVencido !== bVencido) {
+          return aVencido ? 1 : -1;
+        }
+
+        if (!aVencido) {
+          return a.diasRestantes - b.diasRestantes;
+        }
+
+        return b.diasRestantes - a.diasRestantes;
+      });
+
+    const proximos30 = registros.filter(
+      (row) =>
+        row.diasRestantes >= 0 &&
+        row.diasRestantes <= 30
+    ).length;
+
+    const proximos60 = registros.filter(
+      (row) =>
+        row.diasRestantes >= 31 &&
+        row.diasRestantes <= 60
+    ).length;
+
+    const vencidos = registros.filter(
+      (row) => row.diasRestantes < 0
+    ).length;
 
     return NextResponse.json({
       ok: true,
-      total: data.length,
+
       ejecutivo: ejecutivoData.nombre,
       correoUsuario,
-      data,
+
+      resumen: {
+        total: registros.length,
+        proximos30,
+        proximos60,
+        vencidos,
+      },
+
+      data: registros,
     });
   } catch (error: unknown) {
     console.error(
