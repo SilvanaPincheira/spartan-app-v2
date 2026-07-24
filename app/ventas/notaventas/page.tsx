@@ -79,8 +79,100 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
       maximumFractionDigits: 0,
     });
   }
-
-/* ============================================================================
+  function parseFecha(v?: string): Date | null {
+    const s = (v || "").trim();
+  
+    if (!s) return null;
+  
+    const iso = new Date(s);
+  
+    if (!isNaN(iso.getTime())) {
+      return iso;
+    }
+  
+    const m = s.match(
+      /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/
+    );
+  
+    if (m) {
+      const dia = Number(m[1]);
+      const mes = Number(m[2]) - 1;
+      const anio = Number(m[3]);
+  
+      const fecha = new Date(
+        anio,
+        mes,
+        dia,
+        0,
+        0,
+        0,
+        0
+      );
+  
+      return isNaN(fecha.getTime())
+        ? null
+        : fecha;
+    }
+  
+    return null;
+  }
+  
+  function hoySinHora(): Date {
+    const t = new Date();
+  
+    return new Date(
+      t.getFullYear(),
+      t.getMonth(),
+      t.getDate()
+    );
+  }
+  function hoySinHora(): Date {
+    const t = new Date();
+  
+    return new Date(
+      t.getFullYear(),
+      t.getMonth(),
+      t.getDate()
+    );
+  }
+  
+  function calcularFechaEntrega(): string {
+    const ahora = new Date();
+    const entrega = new Date(ahora);
+  
+    if (ahora.getHours() < 13) {
+      entrega.setDate(entrega.getDate() + 1);
+    } else {
+      entrega.setDate(entrega.getDate() + 2);
+    }
+  
+    const dia = String(entrega.getDate()).padStart(2, "0");
+    const mes = String(entrega.getMonth() + 1).padStart(2, "0");
+    const anio = entrega.getFullYear();
+  
+    return `${dia}-${mes}-${anio}`;
+  }
+  
+  async function fileToBase64(
+    file: File
+  ): Promise<{ base64: string; mime: string }> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+  
+      reader.onload = () => {
+        const dataUrl = String(reader.result || "");
+  
+        resolve({
+          base64: dataUrl.split(",")[1] || "",
+          mime: file.type || "application/octet-stream",
+        });
+      };
+  
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+  /* ============================================================================
    [B] LECTURA DE CSVs (Google Sheets) — sin dependencias
    ============================================================================ */
 function parseCsv(text: string): Record<string, string>[] {
