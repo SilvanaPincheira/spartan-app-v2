@@ -22,6 +22,15 @@ function num(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function normalizarTexto(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
 function parseCsv(text: string): SheetRow[] {
   const rows: string[][] = [];
   let row: string[] = [];
@@ -75,9 +84,7 @@ function parseCsv(text: string): SheetRow[] {
 
   if (!rows.length) return [];
 
-  const headers = rows[0].map((header) =>
-    header.trim()
-  );
+  const headers = rows[0].map((header) => header.trim());
 
   return rows
     .slice(1)
@@ -226,6 +233,36 @@ export async function GET() {
       );
     }
 
+    // Buscar el nombre del ejecutivo usando el correo del login
+    const {
+      data: ejecutivoData,
+      error: ejecutivoError,
+    } = await supabase
+      .from("ejecutivos")
+      .select("nombre, email")
+      .ilike("email", correoUsuario)
+      .maybeSingle();
+
+    if (ejecutivoError) {
+      throw new Error(
+        `No se pudo consultar la tabla ejecutivos: ${ejecutivoError.message}`
+      );
+    }
+
+    if (!ejecutivoData?.nombre) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "El usuario conectado no está registrado en la tabla ejecutivos",
+        },
+        { status: 404 }
+      );
+    }
+
+    const nombreEjecutivo =
+      normalizarTexto(ejecutivoData.nombre);
+
     const rows = await leerPreciosEspeciales();
 
     const data = rows
@@ -239,15 +276,6 @@ export async function GET() {
         if (!fecha) return null;
 
         const diasRestantes = diasHasta(fecha);
-
-        const correoEjecutivo = String(
-          row["correo_ejecutivo"] ??
-            row["Correo Ejecutivo"] ??
-            row["Email Ejecutivo"] ??
-            ""
-        )
-          .toLowerCase()
-          .trim();
 
         return {
           codigoSN: String(
@@ -294,8 +322,6 @@ export async function GET() {
               row["Ejecutivo"] ??
               ""
           ).trim(),
-
-          correoEjecutivo,
         };
       })
       .filter(
@@ -306,7 +332,8 @@ export async function GET() {
       )
       .filter(
         (row) =>
-          row.correoEjecutivo === correoUsuario &&
+          normalizarTexto(row.ejecutivo) ===
+            nombreEjecutivo &&
           row.diasRestantes >= 0 &&
           row.diasRestantes <= 60
       )
@@ -318,9 +345,10 @@ export async function GET() {
     return NextResponse.json({
       ok: true,
       total: data.length,
+      ejecutivo: ejecutivoData.nombre,
       data,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error(
       "Error API vencimientos:",
       error
@@ -330,8 +358,9 @@ export async function GET() {
       {
         ok: false,
         error:
-          error?.message ||
-          "No se pudieron consultar los vencimientos",
+          error instanceof Error
+            ? error.message
+            : "No se pudieron consultar los vencimientos",
       },
       { status: 500 }
     );
