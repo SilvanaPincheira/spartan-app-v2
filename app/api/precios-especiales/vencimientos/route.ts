@@ -9,9 +9,7 @@ function num(value: unknown) {
     let cleaned = value.trim().replace(/\s/g, "");
 
     if (cleaned.includes(",")) {
-      cleaned = cleaned
-        .replace(/\./g, "")
-        .replace(",", ".");
+      cleaned = cleaned.replace(/\./g, "").replace(",", ".");
     }
 
     const parsed = Number(cleaned);
@@ -97,9 +95,7 @@ function parseCsv(text: string): SheetRow[] {
       const result: SheetRow = {};
 
       headers.forEach((header, index) => {
-        result[header] = String(
-          currentRow[index] ?? ""
-        ).trim();
+        result[header] = String(currentRow[index] ?? "").trim();
       });
 
       return result;
@@ -191,8 +187,8 @@ async function leerPreciosEspeciales() {
   const gid = "2117069636";
 
   const url =
-    `https://docs.google.com/spreadsheets/d/` +
-    `${spreadsheetId}/export?format=csv&gid=${gid}`;
+    `https://docs.google.com/spreadsheets/d/${spreadsheetId}` +
+    `/export?format=csv&gid=${gid}`;
 
   const response = await fetch(url, {
     cache: "no-store",
@@ -233,7 +229,6 @@ export async function GET() {
       );
     }
 
-    // Buscar el nombre del ejecutivo usando el correo del login
     const {
       data: ejecutivoData,
       error: ejecutivoError,
@@ -260,8 +255,9 @@ export async function GET() {
       );
     }
 
-    const nombreEjecutivo =
-      normalizarTexto(ejecutivoData.nombre);
+    const nombreEjecutivo = normalizarTexto(
+      ejecutivoData.nombre
+    );
 
     const rows = await leerPreciosEspeciales();
 
@@ -333,9 +329,7 @@ export async function GET() {
       .filter(
         (row) =>
           normalizarTexto(row.ejecutivo) ===
-            nombreEjecutivo &&
-          row.diasRestantes >= 0 &&
-          row.diasRestantes <= 60
+          nombreEjecutivo
       )
       .sort(
         (a, b) =>
@@ -346,6 +340,7 @@ export async function GET() {
       ok: true,
       total: data.length,
       ejecutivo: ejecutivoData.nombre,
+      correoUsuario,
       data,
     });
   } catch (error: unknown) {
