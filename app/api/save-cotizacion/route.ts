@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 const APPS_SCRIPT_URL =
-  "AQUI_DEBES_PONER_LA_URL_PUBLICADA_DEL_APPS_SCRIPT_DE_COTIZACIONES";
+  "https://script.google.com/macros/s/AKfycbwmIuiwWMpjsWkU3vR-uulqQViIsAkayEss2WnoLDZDDAk50AsoZ9MHOG8LIstOTb54/exec";
 
 export async function POST(req: Request) {
   try {
