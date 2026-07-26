@@ -12,7 +12,7 @@ export default function BadgePreciosVencidos() {
     async function cargarAlertas() {
       try {
         const res = await fetch(
-          "/api/precios-por-vencer?resumen=true",
+            "/api/precio-especiales/vencimientos?resumen=true",,
           {
             method: "GET",
             cache: "no-store",
