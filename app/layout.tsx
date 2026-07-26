@@ -6,6 +6,8 @@ import { usePathname } from "next/navigation";
 import { useState, useEffect, useMemo } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import AvisoFlotante from "@/app/components/AvisoFlotante";
+import BadgePreciosVencidos from "@/app/components/BadgePreciosVencidos";
+
 
 // 🧩 Importa los módulos de modo offline
 import { useOfflineSync } from "@/lib/hooks/useOfflineSync";
@@ -143,20 +145,28 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
           {/* ✅ MENÚ normal */}
           <nav className="flex-1 px-2 py-3 space-y-1">
-            {menuItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition ${
-                  isActive(item.href)
-                    ? "bg-[#1f4ed8] text-white"
-                    : "text-gray-700 hover:bg-blue-50 hover:text-[#1f4ed8]"
-                }`}
-              >
-                <span>{item.icon}</span>
-                {item.name}
-              </Link>
-            ))}
+          {menuItems.map((item) => (
+  <Link
+    key={item.href}
+    href={item.href}
+    className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition ${
+      isActive(item.href)
+        ? "bg-[#1f4ed8] text-white"
+        : "text-gray-700 hover:bg-blue-50 hover:text-[#1f4ed8]"
+    }`}
+  >
+    <span>{item.icon}</span>
+
+    <span className="flex-1">
+      {item.name}
+    </span>
+
+    {item.href ===
+      "/comercial/precios-especiales/vencimientos" && (
+      <BadgePreciosVencidos />
+    )}
+  </Link>
+))}
           </nav>
 
           {/* ==== Botón login/logout (PC) ==== */}
@@ -213,21 +223,29 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
 
               <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto">
-                {menuItems.map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={() => setMobileOpen(false)}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition ${
-                      isActive(item.href)
-                        ? "bg-[#1f4ed8] text-white"
-                        : "text-gray-700 hover:bg-blue-50 hover:text-[#1f4ed8]"
-                    }`}
-                  >
-                    <span>{item.icon}</span>
-                    {item.name}
-                  </Link>
-                ))}
+              {menuItems.map((item) => (
+  <Link
+    key={item.href}
+    href={item.href}
+    onClick={() => setMobileOpen(false)}
+    className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition ${
+      isActive(item.href)
+        ? "bg-[#1f4ed8] text-white"
+        : "text-gray-700 hover:bg-blue-50 hover:text-[#1f4ed8]"
+    }`}
+  >
+    <span>{item.icon}</span>
+
+    <span className="flex-1">
+      {item.name}
+    </span>
+
+    {item.href ===
+      "/comercial/precios-especiales/vencimientos" && (
+      <BadgePreciosVencidos />
+    )}
+  </Link>
+))}
               </nav>
 
               <div className="p-4 border-t">

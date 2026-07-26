@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import {NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 
@@ -220,8 +220,11 @@ async function leerPreciosEspeciales(): Promise<SheetRow[]> {
   return parseCsv(await response.text());
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const soloResumen =
+  req.nextUrl.searchParams.get("resumen") === "true";
+
     const supabase = createRouteHandlerClient({
       cookies,
     });
@@ -410,21 +413,28 @@ export async function GET() {
       (row) => row.diasRestantes < 0
     ).length;
 
-    return NextResponse.json({
-      ok: true,
-
-      ejecutivo: ejecutivoData.nombre,
-      correoUsuario,
-
-      resumen: {
-        total: registros.length,
-        proximos30,
-        proximos60,
-        vencidos,
-      },
-
-      data: registros,
-    });
+    const respuestaBase = {
+        ok: true,
+      
+        ejecutivo: ejecutivoData.nombre,
+        correoUsuario,
+      
+        resumen: {
+          total: registros.length,
+          proximos30,
+          proximos60,
+          vencidos,
+        },
+      };
+      
+      if (soloResumen) {
+        return NextResponse.json(respuestaBase);
+      }
+      
+      return NextResponse.json({
+        ...respuestaBase,
+        data: registros,
+      });
   } catch (error: unknown) {
     console.error(
       "Error API vencimientos:",
