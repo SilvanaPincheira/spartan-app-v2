@@ -858,10 +858,35 @@ if (!resMail.ok || !mailJson.ok) {
 }
 
 console.log("✅ Correo enviado:", mailJson);
-  /* ========================= UI ========================= */
-  const readOnlyActivos = tipoCliente === "activo";
 
-  return (
+setProcesado(true);
+
+setInfoMsg(
+  "✅ Cotización guardada, PDF generado y correo enviado correctamente."
+);
+
+} catch (e: any) {
+  console.error("❌ Error al procesar la cotización:", e);
+
+  setErrorMsg(
+    e?.message || "Ocurrió un error inesperado."
+  );
+
+  alert(
+    `❌ No se pudo completar el proceso.\n\nDetalles: ${
+      e?.message || "Error inesperado"
+    }`
+  );
+} finally {
+  setProcesando(false);
+}
+}
+
+/* ========================= UI ========================= */
+const readOnlyActivos = tipoCliente === "activo";
+
+return (
+  
     <>
       <div id="printArea" className="min-h-screen bg-white p-6 text-[12px]">
         {/* Encabezado */}
