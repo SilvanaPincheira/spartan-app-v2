@@ -4,15 +4,16 @@ import Papa from "papaparse";
 const URL_NOTAS_VENTA =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vR2dwvhSGvvFFPBiRxUgF8Q99HkWJlyoFKLDo6Mmu4HvCH_hJtdyV_7WTrOjkUp6u0pMyAOf543M1UE/pub?output=csv";
 
-function normalize(val: string) {
-  return val
-    ?.normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, "_")
-    .replace(/[^\w_]/g, "");
-}
+  function normalize(val: string) {
+    return String(val ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, "_")
+      .replace(/[^\w_]/g, "")
+      .replace(/^_+|_+$/g, "");
+  }
 
 function toNumber(value: any) {
   const limpio = String(value ?? "")
@@ -145,7 +146,12 @@ export async function GET(req: Request) {
         kg: toNumber(r.kg),
         cantidad: toNumber(r.cantidad),
         precioBase: toNumber(r.precio_base),
-        descuento: toNumber(r.desc),
+        descuento: toNumber( r.desc ??
+          r._desc ??
+          r.descuento ??
+          r.porcentaje_descuento
+        ),
+
         precioVenta: toNumber(r.precio_venta),
         totalItem: toNumber(r.total_item),
       });
