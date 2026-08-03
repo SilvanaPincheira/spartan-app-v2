@@ -1221,18 +1221,58 @@ especialBloqueado: !!item.isBloqueado,
     console.log("PAYLOAD NV:", payload);
 
     setSaving(true);
-    const resSave = await fetch("/api/save-to-sheets", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    setSaving(false);
 
-    if (!resSave.ok) throw new Error("Error al guardar en Google Sheets.");
-    const json = await resSave.json();
-    const rows = Number(json?.rows ?? payload.length) || payload.length;
-    setSaveMsg(`✅ Nota de venta guardada con ${rows} ítem(s) en Google Sheets.`);
+try {
+  const resSave = await fetch("/api/save-to-sheets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 
+  const saveText = await resSave.text();
+
+  let json: any = {};
+
+  try {
+    json = saveText ? JSON.parse(saveText) : {};
+  } catch {
+    json = {
+      ok: false,
+      error: "La API no devolvió una respuesta JSON válida.",
+      raw: saveText,
+    };
+  }
+
+  console.log("RESPUESTA SAVE-TO-SHEETS:", {
+    numeroNV,
+    status: resSave.status,
+    okHttp: resSave.ok,
+    respuesta: json,
+  });
+
+  if (
+    !resSave.ok ||
+    json?.ok === false ||
+    json?.success === false ||
+    json?.status === "error" ||
+    json?.error
+  ) {
+    throw new Error(
+      json?.error ||
+        json?.message ||
+        `Error al guardar en Google Sheets. HTTP ${resSave.status}`
+    );
+  }
+
+  const rows =
+    Number(json?.rows ?? payload.length) || payload.length;
+
+  setSaveMsg(
+    `✅ Nota de venta guardada con ${rows} ítem(s) en Google Sheets.`
+  );
+} finally {
+  setSaving(false);
+}
     // 3) Generar PDF bonito
     const { filename, base64 } = generarPdfNotaVenta({
       numeroNV,
@@ -1850,9 +1890,14 @@ const resMail = await fetch("/api/send-notaventa", {
       await guardarPdfYEnviar(); // función actual
       setProcesado(true); // ✅ marcar como procesado
       alert("✅ Nota de Venta guardada y enviada correctamente.");
-    } catch (err) {
+    } catch (err: any) {
       console.error("❌ Error al enviar la Nota de Venta:", err);
-      alert("Ocurrió un error al guardar o enviar la Nota de Venta.");
+    
+      alert(
+        `Error al guardar o enviar la Nota de Venta.\n\n${
+          err?.message || "Error desconocido"
+        }`
+      );
     } finally {
       setProcesando(false);
     }
