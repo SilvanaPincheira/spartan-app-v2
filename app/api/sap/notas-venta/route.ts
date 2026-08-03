@@ -15,15 +15,28 @@ const URL_NOTAS_VENTA =
       .replace(/^_+|_+$/g, "");
   }
 
-function toNumber(value: any) {
-  const limpio = String(value ?? "")
-    .replace(/\./g, "")
-    .replace(",", ".")
-    .trim();
-
-  const n = Number(limpio);
-  return Number.isFinite(n) ? n : 0;
-}
+  function toNumber(value: unknown) {
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : 0;
+    }
+  
+    let limpio = String(value ?? "")
+      .trim()
+      .replace(/\s/g, "");
+  
+    if (!limpio) return 0;
+  
+    // Si viene en formato chileno: 2.689,75
+    if (limpio.includes(",")) {
+      limpio = limpio
+        .replace(/\./g, "")
+        .replace(",", ".");
+    }
+  
+    const n = Number(limpio);
+  
+    return Number.isFinite(n) ? n : 0;
+  }
 
 function parseFechaChile(value: any) {
   const s = String(value ?? "").trim();
