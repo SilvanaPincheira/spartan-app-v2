@@ -39,9 +39,11 @@ export async function POST(req: Request) {
 
     // 3. Capturar respuesta cruda
     const text = await res.text();
+    console.log("===== RESPUESTA APPS SCRIPT =====");
+console.log(text);
+console.log("================================");
     
 
-    console.log("Respuesta Apps Script:", text);
     // 4. Intentar parsear como JSON
     let json: any;
     try {
