@@ -331,7 +331,6 @@ export default function NotaVentaPage() {
   const [ejecutivo, setEjecutivo] = useState("");
   const [clientCode, setClientCode] = useState("");
   const [direccion, setDireccion] = useState("");
-  const [direccionNueva, setDireccionNueva] = useState("");
   const [comuna, setComuna] = useState("");
   const [ordenCompraCliente, setOrdenCompraCliente] = useState("");
   // Archivo OC (opcional)
@@ -1058,14 +1057,12 @@ useEffect(() => {
       setClientCode("");
       setEjecutivo(row.ejecutivo || "");
       setDireccion("");
-      setDireccionNueva("");
       setComuna("");
     } else {
       setClientRut("");
       setClientCode("");
       setEjecutivo("");
       setDireccion("");
-      setDireccionNueva("");
       setComuna("");
     }
   }
@@ -1088,7 +1085,6 @@ useEffect(() => {
     setClientCode("");
     setEjecutivo("");
     setDireccion("");
-    setDireccionNueva("");
     setComuna("");
     setEmailEjecutivo("");
     setComentarios("");
@@ -1197,7 +1193,6 @@ if (descuentosInvalidos.length > 0) {
       codigoCliente: clientCode,
       ejecutivo,
       direccionDespacho: direccion,
-      direccionNueva,
       comuna,
       correoEjecutivo: emailEjecutivo,
       comentarios,
@@ -1284,7 +1279,6 @@ try {
         ejecutivo,
         direccion,
         comuna,
-        direccionNueva,  // 👈 aquí lo agregas
         fechaEntrega: calcularFechaEntrega(),
         ordenCompraCliente,
       },
@@ -1467,16 +1461,6 @@ const resMail = await fetch("/api/send-notaventa", {
             <label className="flex flex-col gap-1 print:col-span-2">
               <span className="font-medium">Dirección de Despacho</span>
               <input className="w-full border rounded px-2 py-1" value={direccion} readOnly />
-            </label>
-
-            <label className="flex flex-col gap-1">
-              <span className="font-medium">Dirección nueva</span>
-              <input
-                className="w-full border rounded px-2 py-1"
-                value={direccionNueva}
-                onChange={(e) => setDireccionNueva(e.target.value)}
-                placeholder="(Opcional)"
-              />
             </label>
 
             <label className="flex flex-col gap-1">
