@@ -17,10 +17,21 @@ function normalize(s: string) {
 }
 function num(x: unknown) {
   if (typeof x === "string") {
-    const cleaned = x.replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
+    let cleaned = x.trim().replace(/\s/g, "");
+
+    // Si contiene coma, asumimos formato chileno:
+    // 1.234,56 → 1234.56
+    if (cleaned.includes(",")) {
+      cleaned = cleaned.replace(/\./g, "").replace(",", ".");
+    }
+
+    // Si solo contiene punto:
+    // 4.8 → 4.8
+    // 1700 → 1700
     const v = Number(cleaned);
     return Number.isFinite(v) ? v : 0;
   }
+
   const v = Number(x);
   return Number.isFinite(v) ? v : 0;
 }
