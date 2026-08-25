@@ -76,6 +76,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       { name: "CRM", href: "/crm", icon: "📈" },
       { name: "Gestión de Comodatos", href: "/comodatos", icon: "🧪" },
       { name: "Gestión de Ventas", href: "/ventas", icon: "📈" },
+      { 
+        name: "Nuevo Cliente", 
+        href: "/ventas/nuevo-cliente", 
+        icon: "👤" 
+      },
     
       {
         name: "Precios por vencer",
