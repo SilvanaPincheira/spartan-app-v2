@@ -78,8 +78,19 @@ type Evaluacion = {
   requiereVB: boolean;
   estadoVB: string;
 
+  usuarioVB?: string;
+  fechaVB?: string;
+  comentarioVB?: string;
+  montoAprobado?: number;
+
   productos: Producto[];
   equipos: Equipo[];
+};
+
+
+type ResultadoVB = {
+  success: boolean;
+  error: string;
 };
 
 
@@ -106,16 +117,15 @@ function formatoNumero(
 function formatoPorcentaje(valor: number) {
   const numero = Number(valor) || 0;
 
-  /*
-   * El historial puede almacenar:
-   * 0,53 o 53.
-   */
   const porcentaje =
     Math.abs(numero) <= 1
       ? numero * 100
       : numero;
 
-  return `${formatoNumero(porcentaje, 2)}%`;
+  return `${formatoNumero(
+    porcentaje,
+    2
+  )}%`;
 }
 
 
@@ -124,10 +134,6 @@ function obtenerFechaComparable(
 ) {
   if (!fecha) return null;
 
-  /*
-   * Formato esperado:
-   * dd-MM-yyyy HH:mm:ss
-   */
   const parteFecha =
     fecha.split(" ")[0];
 
@@ -145,13 +151,17 @@ function obtenerFechaComparable(
   const resultado =
     new Date(anio, mes - 1, dia);
 
-  return Number.isNaN(resultado.getTime())
+  return Number.isNaN(
+    resultado.getTime()
+  )
     ? null
     : resultado;
 }
 
 
-function normalizarTexto(valor: unknown) {
+function normalizarTexto(
+  valor: unknown
+) {
   return String(valor || "")
     .trim()
     .toLowerCase()
@@ -175,20 +185,29 @@ export default function ReporteriaEvaluacionesPage() {
   const [evaluaciones, setEvaluaciones] =
     useState<Evaluacion[]>([]);
 
-  const [evaluacionAbierta, setEvaluacionAbierta] =
+  const [
+    evaluacionAbierta,
+    setEvaluacionAbierta,
+  ] = useState<string | null>(null);
+
+  const [guardandoVB, setGuardandoVB] =
     useState<string | null>(null);
 
   const [busqueda, setBusqueda] =
     useState("");
 
-  const [filtroEjecutivo, setFiltroEjecutivo] =
-    useState("");
+  const [
+    filtroEjecutivo,
+    setFiltroEjecutivo,
+  ] = useState("");
 
   const [filtroZona, setFiltroZona] =
     useState("");
 
-  const [filtroViabilidad, setFiltroViabilidad] =
-    useState("");
+  const [
+    filtroViabilidad,
+    setFiltroViabilidad,
+  ] = useState("");
 
   const [filtroVB, setFiltroVB] =
     useState("");
@@ -250,7 +269,9 @@ export default function ReporteriaEvaluacionesPage() {
       }
 
       setEvaluaciones(
-        Array.isArray(resultado.evaluaciones)
+        Array.isArray(
+          resultado.evaluaciones
+        )
           ? resultado.evaluaciones
           : []
       );
@@ -270,12 +291,108 @@ export default function ReporteriaEvaluacionesPage() {
   }
 
 
+  async function guardarVBGerencia(
+    idEvaluacion: string,
+    estadoVB:
+      | "Aprobado"
+      | "Rechazado",
+    comentario: string
+  ): Promise<ResultadoVB> {
+    setGuardandoVB(idEvaluacion);
+
+    try {
+      const response = await fetch(
+        "/api/historial-evaluaciones",
+        {
+          method: "PATCH",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+
+          body: JSON.stringify({
+            idEvaluacion,
+            estadoVB,
+            comentario,
+          }),
+        }
+      );
+
+      const resultado =
+        await response.json();
+
+      if (
+        !response.ok ||
+        resultado.success === false
+      ) {
+        throw new Error(
+          resultado.error ||
+            "No se pudo guardar el VB."
+        );
+      }
+
+      /*
+       * Actualizar la evaluación en pantalla
+       * sin recargar todo el historial.
+       */
+      setEvaluaciones((actuales) =>
+        actuales.map((evaluacion) =>
+          evaluacion.idEvaluacion ===
+          idEvaluacion
+            ? {
+                ...evaluacion,
+
+                estadoVB:
+                  resultado.estadoVB,
+
+                usuarioVB:
+                  resultado.usuarioVB,
+
+                fechaVB:
+                  resultado.fechaVB,
+
+                comentarioVB:
+                  resultado.comentarioVB,
+
+                montoAprobado:
+                  resultado.montoAprobado,
+              }
+            : evaluacion
+        )
+      );
+
+      return {
+        success: true,
+        error: "",
+      };
+
+    } catch (error) {
+      console.error(error);
+
+      return {
+        success: false,
+
+        error:
+          error instanceof Error
+            ? error.message
+            : "No se pudo guardar la decisión.",
+      };
+
+    } finally {
+      setGuardandoVB(null);
+    }
+  }
+
+
   const ejecutivos = useMemo(() => {
     return Array.from(
       new Set(
         evaluaciones
           .map((item) =>
-            String(item.ejecutivo || "").trim()
+            String(
+              item.ejecutivo || ""
+            ).trim()
           )
           .filter(Boolean)
       )
@@ -290,7 +407,9 @@ export default function ReporteriaEvaluacionesPage() {
       new Set(
         evaluaciones
           .map((item) =>
-            String(item.zona || "").trim()
+            String(
+              item.zona || ""
+            ).trim()
           )
           .filter(Boolean)
       )
@@ -306,11 +425,15 @@ export default function ReporteriaEvaluacionesPage() {
         normalizarTexto(busqueda);
 
       const desde = fechaDesde
-        ? new Date(`${fechaDesde}T00:00:00`)
+        ? new Date(
+            `${fechaDesde}T00:00:00`
+          )
         : null;
 
       const hasta = fechaHasta
-        ? new Date(`${fechaHasta}T23:59:59`)
+        ? new Date(
+            `${fechaHasta}T23:59:59`
+          )
         : null;
 
       return evaluaciones.filter(
@@ -351,14 +474,49 @@ export default function ReporteriaEvaluacionesPage() {
 
           let coincideVB = true;
 
-          if (filtroVB === "requiere") {
+          if (
+            filtroVB === "requiere"
+          ) {
             coincideVB =
-              evaluacion.requiereVB === true;
+              evaluacion.requiereVB ===
+              true;
           }
 
-          if (filtroVB === "no-requiere") {
+          if (
+            filtroVB === "pendiente"
+          ) {
             coincideVB =
-              evaluacion.requiereVB !== true;
+              evaluacion.requiereVB ===
+                true &&
+              normalizarTexto(
+                evaluacion.estadoVB
+              ) === "pendiente";
+          }
+
+          if (
+            filtroVB === "aprobado"
+          ) {
+            coincideVB =
+              normalizarTexto(
+                evaluacion.estadoVB
+              ) === "aprobado";
+          }
+
+          if (
+            filtroVB === "rechazado"
+          ) {
+            coincideVB =
+              normalizarTexto(
+                evaluacion.estadoVB
+              ) === "rechazado";
+          }
+
+          if (
+            filtroVB === "no-requiere"
+          ) {
+            coincideVB =
+              evaluacion.requiereVB !==
+              true;
           }
 
           const fecha =
@@ -404,7 +562,9 @@ export default function ReporteriaEvaluacionesPage() {
       evaluacionesFiltradas.reduce(
         (total, item) =>
           total +
-          (Number(item.ventaMensual) || 0),
+          (Number(
+            item.ventaMensual
+          ) || 0),
         0
       );
 
@@ -412,7 +572,9 @@ export default function ReporteriaEvaluacionesPage() {
       evaluacionesFiltradas.reduce(
         (total, item) =>
           total +
-          (Number(item.costoTotal) || 0),
+          (Number(
+            item.costoTotal
+          ) || 0),
         0
       );
 
@@ -420,7 +582,9 @@ export default function ReporteriaEvaluacionesPage() {
       evaluacionesFiltradas.reduce(
         (total, item) =>
           total +
-          (Number(item.margenFinal) || 0),
+          (Number(
+            item.margenFinal
+          ) || 0),
         0
       );
 
@@ -428,23 +592,27 @@ export default function ReporteriaEvaluacionesPage() {
       evaluacionesFiltradas.reduce(
         (total, item) =>
           total +
-          (Number(item.comodatoTotal) || 0),
+          (Number(
+            item.comodatoTotal
+          ) || 0),
         0
       );
 
     const viables =
       evaluacionesFiltradas.filter(
         (item) =>
-          normalizarTexto(item.estado) ===
-          "viable"
+          normalizarTexto(
+            item.estado
+          ) === "viable"
       ).length;
 
     const pendientesVB =
       evaluacionesFiltradas.filter(
         (item) =>
           item.requiereVB === true &&
-          normalizarTexto(item.estadoVB) ===
-            "pendiente"
+          normalizarTexto(
+            item.estadoVB
+          ) === "pendiente"
       ).length;
 
     return {
@@ -472,10 +640,11 @@ export default function ReporteriaEvaluacionesPage() {
   function cambiarEvaluacion(
     idEvaluacion: string
   ) {
-    setEvaluacionAbierta((actual) =>
-      actual === idEvaluacion
-        ? null
-        : idEvaluacion
+    setEvaluacionAbierta(
+      (actual) =>
+        actual === idEvaluacion
+          ? null
+          : idEvaluacion
     );
   }
 
@@ -514,12 +683,14 @@ export default function ReporteriaEvaluacionesPage() {
         </h1>
 
         <p className="mt-2 text-sm text-red-600">
-          Este módulo está disponible únicamente
-          para Gerencia.
+          Este módulo está disponible
+          únicamente para Gerencia.
         </p>
 
         <button
-          onClick={() => router.push("/")}
+          onClick={() =>
+            router.push("/")
+          }
           className="mt-6 rounded-lg bg-[#1f4ed8] px-5 py-2 text-sm font-medium text-white hover:bg-[#163bb8]"
         >
           Volver al inicio
@@ -544,8 +715,8 @@ export default function ReporteriaEvaluacionesPage() {
           </h1>
 
           <p className="mt-1 text-sm text-gray-500">
-            Evaluaciones comerciales, costos,
-            márgenes y comodatos.
+            Evaluaciones comerciales,
+            costos, márgenes y comodatos.
           </p>
         </div>
 
@@ -558,12 +729,11 @@ export default function ReporteriaEvaluacionesPage() {
       </div>
 
 
-      {/* ERROR */}
-
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4">
           <p className="font-medium text-red-700">
-            No fue posible cargar la reportería
+            No fue posible cargar la
+            reportería
           </p>
 
           <p className="mt-1 text-sm text-red-600">
@@ -633,8 +803,8 @@ export default function ReporteriaEvaluacionesPage() {
                 </h2>
 
                 <p className="text-xs text-gray-500">
-                  Selecciona los criterios de la
-                  reportería.
+                  Selecciona los criterios
+                  de la reportería.
                 </p>
               </div>
 
@@ -667,7 +837,9 @@ export default function ReporteriaEvaluacionesPage() {
               <CampoSeleccion
                 etiqueta="Ejecutivo"
                 value={filtroEjecutivo}
-                onChange={setFiltroEjecutivo}
+                onChange={
+                  setFiltroEjecutivo
+                }
                 opciones={ejecutivos}
                 opcionInicial="Todos"
               />
@@ -682,8 +854,12 @@ export default function ReporteriaEvaluacionesPage() {
 
               <CampoSeleccion
                 etiqueta="Viabilidad"
-                value={filtroViabilidad}
-                onChange={setFiltroViabilidad}
+                value={
+                  filtroViabilidad
+                }
+                onChange={
+                  setFiltroViabilidad
+                }
                 opciones={[
                   "Viable",
                   "No Viable",
@@ -713,8 +889,20 @@ export default function ReporteriaEvaluacionesPage() {
                     Requiere VB
                   </option>
 
+                  <option value="pendiente">
+                    Pendiente
+                  </option>
+
+                  <option value="aprobado">
+                    Aprobado
+                  </option>
+
+                  <option value="rechazado">
+                    Rechazado
+                  </option>
+
                   <option value="no-requiere">
-                    No requiere VB
+                    No requiere
                   </option>
                 </select>
               </div>
@@ -756,34 +944,32 @@ export default function ReporteriaEvaluacionesPage() {
           </section>
 
 
-          {/* LISTADO */}
+          {/* EVALUACIONES */}
 
           <section className="overflow-hidden rounded-2xl border bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b p-5">
-              <div>
-                <h2 className="font-semibold text-gray-900">
-                  Evaluaciones
-                </h2>
+            <div className="border-b p-5">
+              <h2 className="font-semibold text-gray-900">
+                Evaluaciones
+              </h2>
 
-                <p className="text-xs text-gray-500">
-                  {evaluacionesFiltradas.length}{" "}
-                  resultados encontrados
-                </p>
-              </div>
+              <p className="text-xs text-gray-500">
+                {
+                  evaluacionesFiltradas.length
+                }{" "}
+                resultados encontrados
+              </p>
             </div>
 
-            {evaluacionesFiltradas.length === 0 ? (
+            {evaluacionesFiltradas.length ===
+            0 ? (
               <div className="p-12 text-center">
                 <div className="mb-3 text-5xl">
                   🔎
                 </div>
 
                 <p className="font-medium text-gray-700">
-                  No se encontraron evaluaciones
-                </p>
-
-                <p className="mt-1 text-sm text-gray-500">
-                  Prueba cambiando los filtros.
+                  No se encontraron
+                  evaluaciones
                 </p>
               </div>
             ) : (
@@ -824,9 +1010,11 @@ export default function ReporteriaEvaluacionesPage() {
                                 />
 
                                 {evaluacion.requiereVB && (
-                                  <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
-                                    ⚠ VB Gerencia
-                                  </span>
+                                  <EstadoVB
+                                    estado={
+                                      evaluacion.estadoVB
+                                    }
+                                  />
                                 )}
                               </div>
 
@@ -881,6 +1069,13 @@ export default function ReporteriaEvaluacionesPage() {
                             evaluacion={
                               evaluacion
                             }
+                            guardando={
+                              guardandoVB ===
+                              evaluacion.idEvaluacion
+                            }
+                            onGuardarVB={
+                              guardarVBGerencia
+                            }
                           />
                         )}
                       </article>
@@ -898,7 +1093,7 @@ export default function ReporteriaEvaluacionesPage() {
 
 
 /****************************************************
- * COMPONENTES VISUALES
+ * COMPONENTES
  ****************************************************/
 
 function TarjetaIndicador({
@@ -919,10 +1114,14 @@ function TarjetaIndicador({
     | "naranjo";
 }) {
   const colores = {
-    azul: "bg-blue-50 text-blue-700",
-    verde: "bg-green-50 text-green-700",
-    morado: "bg-purple-50 text-purple-700",
-    naranjo: "bg-amber-50 text-amber-700",
+    azul:
+      "bg-blue-50 text-blue-700",
+    verde:
+      "bg-green-50 text-green-700",
+    morado:
+      "bg-purple-50 text-purple-700",
+    naranjo:
+      "bg-amber-50 text-amber-700",
   };
 
   return (
@@ -962,7 +1161,8 @@ function CampoSeleccion({
 }: {
   etiqueta: string;
   value: string;
-  onChange: (value: string) => void;
+  onChange:
+    (value: string) => void;
   opciones: string[];
   opcionInicial: string;
 }) {
@@ -975,7 +1175,9 @@ function CampoSeleccion({
       <select
         value={value}
         onChange={(event) =>
-          onChange(event.target.value)
+          onChange(
+            event.target.value
+          )
         }
         className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
       >
@@ -983,14 +1185,16 @@ function CampoSeleccion({
           {opcionInicial}
         </option>
 
-        {opciones.map((opcion) => (
-          <option
-            key={opcion}
-            value={opcion}
-          >
-            {opcion}
-          </option>
-        ))}
+        {opciones.map(
+          (opcion) => (
+            <option
+              key={opcion}
+              value={opcion}
+            >
+              {opcion}
+            </option>
+          )
+        )}
       </select>
     </div>
   );
@@ -1003,7 +1207,8 @@ function EstadoViabilidad({
   estado: string;
 }) {
   const viable =
-    normalizarTexto(estado) === "viable";
+    normalizarTexto(estado) ===
+    "viable";
 
   return (
     <span
@@ -1014,6 +1219,42 @@ function EstadoViabilidad({
       }`}
     >
       {estado || "Sin estado"}
+    </span>
+  );
+}
+
+
+function EstadoVB({
+  estado,
+}: {
+  estado: string;
+}) {
+  const estadoNormalizado =
+    normalizarTexto(estado);
+
+  if (
+    estadoNormalizado === "aprobado"
+  ) {
+    return (
+      <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700">
+        ✅ VB Aprobado
+      </span>
+    );
+  }
+
+  if (
+    estadoNormalizado === "rechazado"
+  ) {
+    return (
+      <span className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700">
+        ❌ VB Rechazado
+      </span>
+    );
+  }
+
+  return (
+    <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
+      ⚠ VB Pendiente
     </span>
   );
 }
@@ -1040,11 +1281,128 @@ function DatoResumen({
 }
 
 
+function CajaDato({
+  titulo,
+  valor,
+  secundario,
+}: {
+  titulo: string;
+  valor: string;
+  secundario?: string;
+}) {
+  return (
+    <div className="rounded-xl border bg-white p-4">
+      <p className="text-xs text-gray-500">
+        {titulo}
+      </p>
+
+      <p className="mt-1 font-bold text-gray-900">
+        {valor}
+      </p>
+
+      {secundario && (
+        <p className="mt-1 text-xs font-medium text-blue-600">
+          {secundario}
+        </p>
+      )}
+    </div>
+  );
+}
+
+
 function DetalleEvaluacion({
   evaluacion,
+  guardando,
+  onGuardarVB,
 }: {
   evaluacion: Evaluacion;
+  guardando: boolean;
+
+  onGuardarVB: (
+    idEvaluacion: string,
+    estadoVB:
+      | "Aprobado"
+      | "Rechazado",
+    comentario: string
+  ) => Promise<ResultadoVB>;
 }) {
+  const [comentario, setComentario] =
+    useState(
+      evaluacion.comentarioVB || ""
+    );
+
+  const [mensaje, setMensaje] =
+    useState("");
+
+  const [
+    tipoMensaje,
+    setTipoMensaje,
+  ] = useState<
+    "success" | "error" | ""
+  >("");
+
+
+  const decisionRegistrada =
+    evaluacion.estadoVB ===
+      "Aprobado" ||
+    evaluacion.estadoVB ===
+      "Rechazado";
+
+
+  async function procesarDecision(
+    estado:
+      | "Aprobado"
+      | "Rechazado"
+  ) {
+    setMensaje("");
+    setTipoMensaje("");
+
+    if (
+      estado === "Rechazado" &&
+      !comentario.trim()
+    ) {
+      setMensaje(
+        "Debe ingresar el motivo del rechazo."
+      );
+
+      setTipoMensaje("error");
+      return;
+    }
+
+    const confirmacion =
+      window.confirm(
+        estado === "Aprobado"
+          ? "¿Confirma la aprobación de esta evaluación?"
+          : "¿Confirma el rechazo de esta evaluación?"
+      );
+
+    if (!confirmacion) {
+      return;
+    }
+
+    const resultado =
+      await onGuardarVB(
+        evaluacion.idEvaluacion,
+        estado,
+        comentario.trim()
+      );
+
+    if (resultado.success) {
+      setMensaje(
+        estado === "Aprobado"
+          ? "Evaluación aprobada correctamente."
+          : "Evaluación rechazada correctamente."
+      );
+
+      setTipoMensaje("success");
+
+    } else {
+      setMensaje(resultado.error);
+      setTipoMensaje("error");
+    }
+  }
+
+
   return (
     <div className="border-t bg-slate-50 p-5">
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
@@ -1128,32 +1486,183 @@ function DetalleEvaluacion({
         />
       </div>
 
+
       {evaluacion.requiereVB && (
-        <div className="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div
+          className={`mt-5 rounded-xl border p-5 ${
+            evaluacion.estadoVB ===
+            "Aprobado"
+              ? "border-green-300 bg-green-50"
+              : evaluacion.estadoVB ===
+                "Rechazado"
+              ? "border-red-300 bg-red-50"
+              : "border-amber-300 bg-amber-50"
+          }`}
+        >
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <p className="font-semibold text-amber-800">
-                ⚠ Requiere VB de Gerencia
+              <p
+                className={`font-semibold ${
+                  evaluacion.estadoVB ===
+                  "Aprobado"
+                    ? "text-green-800"
+                    : evaluacion.estadoVB ===
+                      "Rechazado"
+                    ? "text-red-800"
+                    : "text-amber-800"
+                }`}
+              >
+                {evaluacion.estadoVB ===
+                "Aprobado"
+                  ? "✅ Aprobado por Gerencia"
+                  : evaluacion.estadoVB ===
+                    "Rechazado"
+                  ? "❌ Rechazado por Gerencia"
+                  : "⚠ Requiere VB de Gerencia"}
               </p>
 
-              <p className="mt-1 text-sm text-amber-700">
-                El comodato supera los
-                $5.000.000.
+              <p className="mt-1 text-sm text-gray-700">
+                Comodato:{" "}
+                <strong>
+                  {formatoMoneda(
+                    evaluacion.comodatoTotal
+                  )}
+                </strong>
               </p>
+
+              {decisionRegistrada && (
+                <div className="mt-3 space-y-1 text-sm text-gray-700">
+                  <p>
+                    <strong>
+                      Usuario:
+                    </strong>{" "}
+                    {evaluacion.usuarioVB ||
+                      "Sin informar"}
+                  </p>
+
+                  <p>
+                    <strong>
+                      Fecha:
+                    </strong>{" "}
+                    {evaluacion.fechaVB ||
+                      "Sin informar"}
+                  </p>
+
+                  {evaluacion.comentarioVB && (
+                    <p>
+                      <strong>
+                        Comentario:
+                      </strong>{" "}
+                      {
+                        evaluacion.comentarioVB
+                      }
+                    </p>
+                  )}
+
+                  <p>
+                    <strong>
+                      Monto registrado:
+                    </strong>{" "}
+                    {formatoMoneda(
+                      evaluacion.montoAprobado ||
+                        evaluacion.comodatoTotal
+                    )}
+                  </p>
+                </div>
+              )}
             </div>
 
-            <span className="w-fit rounded-full bg-amber-200 px-3 py-1 text-sm font-semibold text-amber-800">
+            <span
+              className={`w-fit rounded-full px-3 py-1 text-sm font-semibold ${
+                evaluacion.estadoVB ===
+                "Aprobado"
+                  ? "bg-green-200 text-green-800"
+                  : evaluacion.estadoVB ===
+                    "Rechazado"
+                  ? "bg-red-200 text-red-800"
+                  : "bg-amber-200 text-amber-800"
+              }`}
+            >
               {evaluacion.estadoVB ||
                 "Pendiente"}
             </span>
           </div>
+
+
+          {!decisionRegistrada && (
+            <div className="mt-5 border-t border-amber-200 pt-4">
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Comentario de Gerencia
+              </label>
+
+              <textarea
+                value={comentario}
+                onChange={(event) =>
+                  setComentario(
+                    event.target.value
+                  )
+                }
+                placeholder="Comentario opcional al aprobar y obligatorio al rechazar..."
+                rows={3}
+                disabled={guardando}
+                className="w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:opacity-60"
+              />
+
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  disabled={guardando}
+                  onClick={() =>
+                    procesarDecision(
+                      "Rechazado"
+                    )
+                  }
+                  className="rounded-lg border border-red-300 bg-white px-5 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {guardando
+                    ? "Guardando..."
+                    : "❌ Rechazar"}
+                </button>
+
+                <button
+                  type="button"
+                  disabled={guardando}
+                  onClick={() =>
+                    procesarDecision(
+                      "Aprobado"
+                    )
+                  }
+                  className="rounded-lg bg-green-600 px-5 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {guardando
+                    ? "Guardando..."
+                    : "✅ Aprobar"}
+                </button>
+              </div>
+            </div>
+          )}
+
+
+          {mensaje && (
+            <div
+              className={`mt-4 rounded-lg border p-3 text-sm ${
+                tipoMensaje ===
+                "success"
+                  ? "border-green-200 bg-green-100 text-green-800"
+                  : "border-red-200 bg-red-100 text-red-800"
+              }`}
+            >
+              {mensaje}
+            </div>
+          )}
         </div>
       )}
+
 
       {evaluacion.comentarios && (
         <div className="mt-5 rounded-xl border bg-white p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-            Comentarios
+            Comentarios de la evaluación
           </p>
 
           <p className="mt-2 text-sm text-gray-700">
@@ -1162,48 +1671,22 @@ function DetalleEvaluacion({
         </div>
       )}
 
+
       <div className="mt-5 space-y-5">
         <TablaProductos
           productos={
-            evaluacion.productos || []
+            evaluacion.productos ||
+            []
           }
         />
 
         <TablaEquipos
           equipos={
-            evaluacion.equipos || []
+            evaluacion.equipos ||
+            []
           }
         />
       </div>
-    </div>
-  );
-}
-
-
-function CajaDato({
-  titulo,
-  valor,
-  secundario,
-}: {
-  titulo: string;
-  valor: string;
-  secundario?: string;
-}) {
-  return (
-    <div className="rounded-xl border bg-white p-4">
-      <p className="text-xs text-gray-500">
-        {titulo}
-      </p>
-
-      <p className="mt-1 font-bold text-gray-900">
-        {valor}
-      </p>
-
-      {secundario && (
-        <p className="mt-1 text-xs font-medium text-blue-600">
-          {secundario}
-        </p>
-      )}
     </div>
   );
 }
@@ -1226,7 +1709,8 @@ function TablaProductos({
         </h4>
 
         <p className="text-xs text-gray-500">
-          {productos.length} productos registrados
+          {productos.length} productos
+          registrados
         </p>
       </div>
 
@@ -1276,7 +1760,9 @@ function TablaProductos({
                   </td>
 
                   <td className="min-w-[260px] px-4 py-3 text-gray-700">
-                    {producto.descripcion}
+                    {
+                      producto.descripcion
+                    }
                   </td>
 
                   <td className="px-4 py-3 text-right">
@@ -1336,7 +1822,8 @@ function TablaEquipos({
         </h4>
 
         <p className="text-xs text-gray-500">
-          {equipos.length} equipos registrados
+          {equipos.length} equipos
+          registrados
         </p>
       </div>
 
@@ -1378,7 +1865,9 @@ function TablaEquipos({
                   </td>
 
                   <td className="min-w-[260px] px-4 py-3 text-gray-700">
-                    {equipo.descripcion}
+                    {
+                      equipo.descripcion
+                    }
                   </td>
 
                   <td className="px-4 py-3 text-right">
