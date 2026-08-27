@@ -173,3 +173,143 @@ export async function POST(req: Request) {
     );
   }
 }
+/****************************************************
+ * PATCH: GUARDAR VB DE GERENCIA
+ ****************************************************/
+
+export async function PATCH(req: Request) {
+  try {
+    const body = await req.json();
+
+    const idEvaluacion =
+      String(body.idEvaluacion || "").trim();
+
+    const estadoVB =
+      String(body.estadoVB || "").trim();
+
+    const comentario =
+      String(body.comentario || "").trim();
+
+    if (!idEvaluacion) {
+      return Response.json(
+        {
+          success: false,
+          error:
+            "Falta el ID de la evaluación.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (
+      estadoVB !== "Aprobado" &&
+      estadoVB !== "Rechazado"
+    ) {
+      return Response.json(
+        {
+          success: false,
+          error:
+            "La decisión debe ser Aprobado o Rechazado.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (
+      estadoVB === "Rechazado" &&
+      !comentario
+    ) {
+      return Response.json(
+        {
+          success: false,
+          error:
+            "Debe ingresar el motivo del rechazo.",
+        },
+        { status: 400 }
+      );
+    }
+
+    /*
+     * El usuario no se recibe desde la pantalla:
+     * se establece directamente en el servidor.
+     */
+    const payload = {
+      action: "GUARDAR_VB",
+      idEvaluacion,
+      estadoVB,
+      comentario,
+      usuario:
+        "jorge.beltran@spartan.cl",
+    };
+
+    const response = await fetch(
+      SCRIPT_URL,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify(payload),
+        cache: "no-store",
+      }
+    );
+
+    const text =
+      await response.text();
+
+    let resultado: any;
+
+    try {
+      resultado =
+        JSON.parse(text);
+    } catch {
+      return Response.json(
+        {
+          success: false,
+          error:
+            "Apps Script devolvió una respuesta no válida.",
+          raw: text,
+        },
+        { status: 502 }
+      );
+    }
+
+    if (
+      !response.ok ||
+      resultado.success === false
+    ) {
+      return Response.json(
+        {
+          success: false,
+          error:
+            resultado.error ||
+            "No se pudo guardar el VB.",
+        },
+        { status: 502 }
+      );
+    }
+
+    return Response.json(
+      resultado,
+      { status: 200 }
+    );
+
+  } catch (error) {
+    console.error(
+      "Error en PATCH /api/historial-evaluaciones:",
+      error
+    );
+
+    return Response.json(
+      {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Error interno al guardar el VB.",
+      },
+      { status: 500 }
+    );
+  }
+}
