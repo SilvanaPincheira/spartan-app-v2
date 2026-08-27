@@ -15,7 +15,7 @@ export default function NuevoClientePage() {
 
       <div className="min-h-0 flex-1 p-3">
         <iframe
-          src="https://app.spartan.cl/SpartanVentas/clientescrm/nuevo_cliente.html"
+          //src="https://app.spartan.cl/SpartanVentas/clientescrm/nuevo_cliente.html"//
           title="Nuevo cliente"
           className="h-full w-full rounded-lg border-0 bg-white shadow-sm"
           allow="clipboard-read; clipboard-write"
