@@ -1,30 +1,52 @@
 import { createClient } from "@supabase/supabase-js";
 
-// ⚠️ Usa las variables de entorno de tu proyecto
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl) {
+  throw new Error("Falta NEXT_PUBLIC_SUPABASE_URL");
+}
+
+if (!serviceRoleKey) {
+  throw new Error("Falta SUPABASE_SERVICE_ROLE_KEY");
+}
+
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://beepxealdpjbxtivugwv.supabase.co",
-  process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJlZXB4ZWFsZHBqYnh0aXZ1Z3d2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY4NzIzMDksImV4cCI6MjA3MjQ0ODMwOX0.QARAnpPD2fyuJrDXaLZWFflAyZsIRS8KBX_D4LpMclQ"
+  supabaseUrl,
+  serviceRoleKey,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  }
 );
 
 async function resetPassword() {
   try {
-    // 👇 Reemplaza con el UID del usuario (lo ves en la consola de Auth > Users)
     const userId = "9e8209cf-79c9-4f93-962a-f77a71d337ed";
 
-    // 👇 Nueva clave (puedes cambiarla)
     const newPassword = "Spartan123";
 
-    const { data, error } = await supabase.auth.admin.updateUserById(userId, {
-      password: newPassword,
-    });
+    console.log("Intentando cambiar password del UID:", userId);
+
+    const { data, error } =
+      await supabase.auth.admin.updateUserById(userId, {
+        password: newPassword,
+      });
 
     if (error) {
-      console.error("❌ Error reseteando contraseña:", error.message);
-    } else {
-      console.log("✅ Contraseña actualizada con éxito para:", data.user.email);
+      console.error("❌ ERROR SUPABASE:");
+      console.error(error);
+      return;
     }
-  } catch (err: any) {
-    console.error("Error general:", err.message);
+
+    console.log("✅ PASSWORD CAMBIADA");
+    console.log("Usuario:", data.user.email);
+    console.log("UID:", data.user.id);
+
+  } catch (err) {
+    console.error("❌ ERROR GENERAL:", err);
   }
 }
 
