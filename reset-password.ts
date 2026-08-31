@@ -9,7 +9,7 @@ const supabase = createClient(
 async function resetPassword() {
   try {
     // 👇 Reemplaza con el UID del usuario (lo ves en la consola de Auth > Users)
-    const userId = "3b2b2ab8-a5a5-44b5-8ed9-5796260ce15c";
+    const userId = "9e8209cf-79c9-4f93-962a-f77a71d337ed";
 
     // 👇 Nueva clave (puedes cambiarla)
     const newPassword = "Spartan123";

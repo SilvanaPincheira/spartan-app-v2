@@ -69,7 +69,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     () => normalizeEmail(perfil?.email || session?.user?.email || ""),
     [perfil, session]
   );
-  const EMAIL_GERENCIA_EVALUACIONES = "jorge.beltran@spartan.cl";
 
   // 🔹 Recalcular menú cuando el perfil esté listo
   useEffect(() => {
@@ -101,13 +100,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
     if (perfil?.role === "gerencia" || perfil?.department?.startsWith("gerencia_")) {
       baseMenu.push({ name: "Gerencia", href: "/gerencia", icon: "🏢" });
-    }
-    if (loggedEmail === EMAIL_GERENCIA_EVALUACIONES) {
-      baseMenu.push({
-        name: "Reportería de Evaluaciones",
-        href: "/reporteria-evaluaciones",
-        icon: "📋",
-      });
     }
 
     setMenuItems(baseMenu);
