@@ -1,0 +1,2 @@
+> git push origin main:main
+fatal: Authentication failed for 'https://github.com/silvanapincheira/spartan-app-v2.git'
