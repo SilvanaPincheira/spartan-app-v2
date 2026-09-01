@@ -16,6 +16,8 @@ import { dbGetAll } from "@/lib/offline/db";
 function normalizeEmail(s: string) {
   return (s || "").trim().toLowerCase();
 }
+// Acceso a Reportería de Evaluaciones
+const EMAIL_GERENCIA_EVALUACIONES = "jorge.beltran@spartan.cl";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
