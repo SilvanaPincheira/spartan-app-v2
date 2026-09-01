@@ -101,14 +101,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     if (perfil?.role === "gerencia" || perfil?.department?.startsWith("gerencia_")) {
       baseMenu.push({ name: "Gerencia", href: "/gerencia", icon: "🏢" });
     }
-    if (loggedEmail === EMAIL_GERENCIA_EVALUACIONES) {
-      baseMenu.push({
-        name: "Reportería de Evaluaciones",
-        href: "/reporteria-evaluaciones",
-        icon: "📋",
-      });
-    }
-
+    
     setMenuItems(baseMenu);
   }, [perfil, loggedEmail]);
 
