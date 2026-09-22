@@ -124,22 +124,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         name: "Tablero de Control",
         href: "/tablero-control",
         icon: "📊",
-        children: [
-          {
-            name: "Avance Diario",
-            href: "/avance-diario",
-          },
-          {
-            name: "Resumen de Cierre",
-            href: "/avance-diario/resumen",
-          },
-          {
-            name: "Comparativo",
-            href: "/tablero-control/comparativo",
-          },
-        ],
       });
     }
+    
     if (loggedEmail === EMAIL_GERENCIA_EVALUACIONES) {
       baseMenu.push({
         name: "Reportería de Evaluaciones",
@@ -147,9 +134,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         icon: "📋",
       });
     }
-
+    
     setMenuItems(baseMenu);
-  }, [perfil, loggedEmail]);
+    
+    }, [perfil, loggedEmail]);
 
   async function handleLogout() {
     const supabase = createClientComponentClient();
