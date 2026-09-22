@@ -20,11 +20,20 @@ function normalizeEmail(s: string) {
 // Acceso a Reportería de Evaluaciones
 const EMAIL_GERENCIA_EVALUACIONES = "jorge.beltran@spartan.cl";
 
+type MenuItem = {
+  name: string;
+  href?: string;
+  icon: string;
+  children?: {
+    name: string;
+    href: string;
+  }[];
+};
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [session, setSession] = useState<any>(null);
   const [perfil, setPerfil] = useState<any>(null);
-  const [menuItems, setMenuItems] = useState<any[]>([]);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   // 🟢 Activa el modo offline apenas carga la app
@@ -112,11 +121,24 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       });
     
       baseMenu.push({
-        name: "Avance Diario",
-        href: "/avance-diario",
+        name: "Tablero de Control",
+        href: "/tablero-control",
         icon: "📊",
+        children: [
+          {
+            name: "Avance Diario",
+            href: "/avance-diario",
+          },
+          {
+            name: "Resumen de Cierre",
+            href: "/avance-diario/resumen",
+          },
+          {
+            name: "Comparativo",
+            href: "/tablero-control/comparativo",
+          },
+        ],
       });
-    
     }
     if (loggedEmail === EMAIL_GERENCIA_EVALUACIONES) {
       baseMenu.push({
@@ -172,32 +194,56 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </Link>
           </div>
 
-          {/* ✅ MENÚ normal */}
           <nav className="flex-1 px-2 py-3 space-y-1">
-          {menuItems.map((item) => (
-  <Link
-    key={item.href}
-    href={item.href}
-    className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition ${
-      isActive(item.href)
-        ? "bg-[#1f4ed8] text-white"
-        : "text-gray-700 hover:bg-blue-50 hover:text-[#1f4ed8]"
-    }`}
-  >
-    <span>{item.icon}</span>
+  {menuItems.map((item) => {
+    const childActive =
+      item.children?.some((child) => isActive(child.href)) ?? false;
 
-    <span className="flex-1">
-      {item.name}
-    </span>
+    return (
+      <div key={item.name}>
+        {item.href && (
+          <Link
+            href={item.href}
+            className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition ${
+              isActive(item.href) || childActive
+                ? "bg-blue-50 text-[#1f4ed8]"
+                : "text-gray-700 hover:bg-blue-50 hover:text-[#1f4ed8]"
+            }`}
+          >
+            <span>{item.icon}</span>
 
-    {item.href ===
-      "/comercial/precios-especiales/vencimientos" && (
-      <BadgePreciosVencidos />
-    )}
-  </Link>
-))}
-          </nav>
+            <span className="flex-1">
+              {item.name}
+            </span>
 
+            {item.href ===
+              "/comercial/precios-especiales/vencimientos" && (
+              <BadgePreciosVencidos />
+            )}
+          </Link>
+        )}
+
+        {item.children && (
+          <div className="ml-7 mt-1 space-y-1 border-l border-gray-200 pl-2">
+            {item.children.map((child) => (
+              <Link
+                key={child.href}
+                href={child.href}
+                className={`block rounded-md px-3 py-2 text-sm transition ${
+                  isActive(child.href)
+                    ? "bg-[#1f4ed8] text-white font-medium"
+                    : "text-gray-600 hover:bg-blue-50 hover:text-[#1f4ed8]"
+                }`}
+              >
+                {child.name}
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  })}
+</nav>
           {/* ==== Botón login/logout (PC) ==== */}
           <div className="p-4 border-t">
             {session ? (
@@ -252,30 +298,57 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
 
               <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto">
-              {menuItems.map((item) => (
-  <Link
-    key={item.href}
-    href={item.href}
-    onClick={() => setMobileOpen(false)}
-    className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition ${
-      isActive(item.href)
-        ? "bg-[#1f4ed8] text-white"
-        : "text-gray-700 hover:bg-blue-50 hover:text-[#1f4ed8]"
-    }`}
-  >
-    <span>{item.icon}</span>
+  {menuItems.map((item) => {
+    const childActive =
+      item.children?.some((child) => isActive(child.href)) ?? false;
 
-    <span className="flex-1">
-      {item.name}
-    </span>
+    return (
+      <div key={item.name}>
+        {item.href && (
+          <Link
+            href={item.href}
+            onClick={() => setMobileOpen(false)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition ${
+              isActive(item.href) || childActive
+                ? "bg-blue-50 text-[#1f4ed8]"
+                : "text-gray-700 hover:bg-blue-50 hover:text-[#1f4ed8]"
+            }`}
+          >
+            <span>{item.icon}</span>
 
-    {item.href ===
-      "/comercial/precios-especiales/vencimientos" && (
-      <BadgePreciosVencidos />
-    )}
-  </Link>
-))}
-              </nav>
+            <span className="flex-1">
+              {item.name}
+            </span>
+
+            {item.href ===
+              "/comercial/precios-especiales/vencimientos" && (
+              <BadgePreciosVencidos />
+            )}
+          </Link>
+        )}
+
+        {item.children && (
+          <div className="ml-7 mt-1 space-y-1 border-l border-gray-200 pl-2">
+            {item.children.map((child) => (
+              <Link
+                key={child.href}
+                href={child.href}
+                onClick={() => setMobileOpen(false)}
+                className={`block rounded-md px-3 py-2 text-sm transition ${
+                  isActive(child.href)
+                    ? "bg-[#1f4ed8] text-white font-medium"
+                    : "text-gray-600 hover:bg-blue-50 hover:text-[#1f4ed8]"
+                }`}
+              >
+                {child.name}
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  })}
+</nav>
 
               <div className="p-4 border-t">
                 {session ? (
