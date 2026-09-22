@@ -12,11 +12,8 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 type ReporteRow = {
   id: number;
   fecha_corte: string;
-  anio: number;
-  mes: number;
   slpcode: number;
   vendedor: string;
-
   zona: string | null;
   division: string | null;
   equipo: string | null;
@@ -27,82 +24,83 @@ type ReporteRow = {
   facturado_otros: number | string | null;
   facturado_total: number | string | null;
 
-  pedidos_quimicos: number | string | null;
-  pedidos_otros: number | string | null;
   pedidos_total: number | string | null;
-
-  entregas_quimicos: number | string | null;
-  entregas_otros: number | string | null;
   entregas_total: number | string | null;
 
   cierre_quimicos: number | string | null;
-  cierre_otros: number | string | null;
   cierre_total: number | string | null;
 
   synced_at: string | null;
 };
 
-function numero(valor: unknown) {
-  const n = Number(valor ?? 0);
+type GestionRow = {
+  fecha_corte: string;
+  slpcode: number;
+  proyeccion_total_mes: number | string | null;
+  driver: string | null;
+  acciones_mitigacion: string | null;
+  monto_mitigacion: number | string | null;
+  updated_at?: string | null;
+  updated_by?: string | null;
+};
 
-  return Number.isFinite(n)
-    ? n
-    : 0;
+type GestionEdit = {
+  proyeccion_total_mes: string;
+  driver: string;
+  acciones_mitigacion: string;
+  monto_mitigacion: string;
+};
+
+function n(value: unknown) {
+  const num = Number(value ?? 0);
+  return Number.isFinite(num) ? num : 0;
 }
 
-function dinero(valor: unknown) {
-  return numero(valor).toLocaleString(
-    "es-CL",
-    {
-      style: "currency",
-      currency: "CLP",
-      maximumFractionDigits: 0,
-    }
-  );
+function money(value: unknown) {
+  return n(value).toLocaleString("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    maximumFractionDigits: 0,
+  });
 }
 
-function porcentaje(valor: number) {
-  return `${valor.toLocaleString(
-    "es-CL",
-    {
-      minimumFractionDigits: 1,
-      maximumFractionDigits: 1,
-    }
-  )}%`;
+function pct(value: number) {
+  return `${value.toLocaleString("es-CL", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })}%`;
 }
 
-function fechaHora(
-  valor: string | null | undefined
-) {
-  if (!valor) return "—";
+function fechaHora(value?: string | null) {
+  if (!value) return "—";
 
-  const d = new Date(valor);
+  const d = new Date(value);
 
   if (Number.isNaN(d.getTime())) {
-    return valor;
+    return value;
   }
 
-  return d.toLocaleString(
-    "es-CL",
-    {
-      dateStyle: "short",
-      timeStyle: "medium",
-    }
-  );
+  return d.toLocaleString("es-CL");
 }
 
-function colorPorcentaje(
-  valor: number
-) {
-  if (valor >= 100) {
-    return "text-green-700";
+function colorPct(value: number) {
+  if (value >= 100) {
+    return "bg-green-100 text-green-800";
   }
 
-  if (valor >= 80) {
-    return "text-amber-600";
+  if (value >= 80) {
+    return "bg-yellow-100 text-yellow-800";
   }
 
-  return "text-red-600";
+  return "bg-red-100 text-red-700";
+}
+
+function colorDiferencia(value: number) {
+  if (value >= 0) {
+    return "bg-green-50 text-green-800";
+  }
+
+  return "bg-red-50 text-red-700";
 }
 
 export default function AvanceDiarioPage() {
@@ -111,187 +109,96 @@ export default function AvanceDiarioPage() {
     []
   );
 
-  const [rows, setRows] =
-    useState<ReporteRow[]>([]);
+  const [rows, setRows] = useState<ReporteRow[]>([]);
+  const [gestion, setGestion] = useState<Record<number, GestionEdit>>({});
 
-  const [fechaCorte, setFechaCorte] =
-    useState("");
+  const [fechaCorte, setFechaCorte] = useState("");
+  const [zonaFiltro, setZonaFiltro] = useState("TODAS");
+  const [divisionFiltro, setDivisionFiltro] = useState("TODAS");
+  const [equipoFiltro, setEquipoFiltro] = useState("TODOS");
 
-  const [zona, setZona] =
-    useState("TODAS");
+  const [loading, setLoading] = useState(true);
+  const [guardando, setGuardando] = useState(false);
+  const [mensaje, setMensaje] = useState("");
+  const [error, setError] = useState("");
 
-  const [division, setDivision] =
-    useState("TODAS");
-
-  const [equipo, setEquipo] =
-    useState("TODOS");
-
-  const [loading, setLoading] =
-    useState(true);
-
-  const [error, setError] =
-    useState("");
-
-  const [accesoValidado, setAccesoValidado] =
-    useState(false);
+  const [emailUsuario, setEmailUsuario] = useState("");
 
   // ============================================================
-  // VALIDAR USUARIO
+  // SESIÓN
   // ============================================================
 
-  const validarAcceso =
-    useCallback(async () => {
-      const {
-        data: sessionData,
-      } =
-        await supabase.auth.getSession();
+  const validarSesion = useCallback(async () => {
+    const { data } = await supabase.auth.getSession();
 
-      const session =
-        sessionData.session;
+    const session = data.session;
 
-      if (!session?.user) {
-        window.location.href =
-          "/login";
+    if (!session?.user) {
+      window.location.href = "/login";
+      return false;
+    }
 
-        return false;
-      }
+    setEmailUsuario(
+      session.user.email || ""
+    );
 
-      const {
-        data: perfil,
-        error: perfilError,
-      } = await supabase
-        .from("profiles")
-        .select(
-          "role, department"
-        )
-        .eq(
-          "id",
-          session.user.id
-        )
-        .single();
-
-      if (perfilError) {
-        console.error(
-          "Error perfil:",
-          perfilError
-        );
-
-        setError(
-          "No fue posible validar el perfil del usuario."
-        );
-
-        return false;
-      }
-
-      const role =
-        String(
-          perfil?.role || ""
-        ).toLowerCase();
-
-      const department =
-        String(
-          perfil?.department || ""
-        ).toLowerCase();
-
-      const permitido =
-        role === "gerencia" ||
-        department.startsWith(
-          "gerencia_"
-        );
-
-      if (!permitido) {
-        setError(
-          "No tienes acceso a este módulo."
-        );
-
-        return false;
-      }
-
-      setAccesoValidado(true);
-
-      return true;
-    }, [supabase]);
+    return true;
+  }, [supabase]);
 
   // ============================================================
-  // OBTENER ÚLTIMA FECHA DISPONIBLE
+  // ÚLTIMA FECHA
   // ============================================================
 
-  const obtenerUltimaFecha =
-    useCallback(async () => {
-      const {
-        data,
-        error,
-      } = await supabase
-        .from(
-          "reporte_ventas_diario"
-        )
-        .select("fecha_corte")
-        .order(
-          "fecha_corte",
-          {
-            ascending: false,
-          }
-        )
-        .limit(1);
+  const obtenerUltimaFecha = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("reporte_ventas_diario")
+      .select("fecha_corte")
+      .order("fecha_corte", {
+        ascending: false,
+      })
+      .limit(1);
 
-      if (error) {
-        throw error;
-      }
+    if (error) {
+      throw error;
+    }
 
-      return (
-        data?.[0]
-          ?.fecha_corte || ""
-      );
-    }, [supabase]);
+    return data?.[0]?.fecha_corte || "";
+  }, [supabase]);
 
   // ============================================================
-  // CARGAR DATOS
+  // CARGAR
   // ============================================================
 
-  const cargarReporte =
-    useCallback(
-      async (
-        fechaSolicitada?: string
-      ) => {
-        try {
-          setLoading(true);
-          setError("");
+  const cargar = useCallback(
+    async (fechaSolicitada?: string) => {
+      try {
+        setLoading(true);
+        setError("");
+        setMensaje("");
 
-          let fecha =
-            fechaSolicitada ||
-            fechaCorte;
+        let fecha = fechaSolicitada || fechaCorte;
+
+        if (!fecha) {
+          fecha = await obtenerUltimaFecha();
 
           if (!fecha) {
-            fecha =
-              await obtenerUltimaFecha();
-
-            if (!fecha) {
-              setRows([]);
-
-              setError(
-                "No existen datos de avance diario."
-              );
-
-              return;
-            }
-
-            setFechaCorte(
-              fecha
-            );
+            setError("No existen datos de Avance Diario.");
+            setRows([]);
+            return;
           }
 
-          const {
-            data,
-            error,
-          } = await supabase
-            .from(
-              "reporte_ventas_diario"
-            )
+          setFechaCorte(fecha);
+        }
+
+        const [
+          reporteResult,
+          gestionResult,
+        ] = await Promise.all([
+          supabase
+            .from("reporte_ventas_diario")
             .select(`
               id,
               fecha_corte,
-              anio,
-              mes,
               slpcode,
               vendedor,
               zona,
@@ -301,63 +208,91 @@ export default function AvanceDiarioPage() {
               facturado_quimicos,
               facturado_otros,
               facturado_total,
-              pedidos_quimicos,
-              pedidos_otros,
               pedidos_total,
-              entregas_quimicos,
-              entregas_otros,
               entregas_total,
               cierre_quimicos,
-              cierre_otros,
               cierre_total,
               synced_at
             `)
-            .eq(
-              "fecha_corte",
-              fecha
-            )
-            .order(
-              "zona",
-              {
-                ascending: true,
-              }
-            )
-            .order(
-              "vendedor",
-              {
-                ascending: true,
-              }
-            );
+            .eq("fecha_corte", fecha)
+            .order("zona")
+            .order("vendedor"),
 
-          if (error) {
-            throw error;
-          }
+          supabase
+            .from("avance_diario_gestion")
+            .select(`
+              fecha_corte,
+              slpcode,
+              proyeccion_total_mes,
+              driver,
+              acciones_mitigacion,
+              monto_mitigacion,
+              updated_at,
+              updated_by
+            `)
+            .eq("fecha_corte", fecha),
+        ]);
 
-          setRows(
-            (data || []) as ReporteRow[]
-          );
-        } catch (err: any) {
-          console.error(
-            "Error avance diario:",
-            err
-          );
-
-          setRows([]);
-
-          setError(
-            err?.message ||
-              "No fue posible cargar el Avance Diario."
-          );
-        } finally {
-          setLoading(false);
+        if (reporteResult.error) {
+          throw reporteResult.error;
         }
-      },
-      [
-        supabase,
-        fechaCorte,
-        obtenerUltimaFecha,
-      ]
-    );
+
+        if (gestionResult.error) {
+          throw gestionResult.error;
+        }
+
+        const reporte =
+          (reporteResult.data || []) as ReporteRow[];
+
+        const gestionDb =
+          (gestionResult.data || []) as GestionRow[];
+
+        setRows(reporte);
+
+        const gestionMap: Record<number, GestionEdit> = {};
+
+        reporte.forEach((r) => {
+          const existente = gestionDb.find(
+            (g) => Number(g.slpcode) === Number(r.slpcode)
+          );
+
+          gestionMap[r.slpcode] = {
+            proyeccion_total_mes:
+              existente?.proyeccion_total_mes != null
+                ? String(existente.proyeccion_total_mes)
+                : "",
+
+            driver:
+              existente?.driver || "",
+
+            acciones_mitigacion:
+              existente?.acciones_mitigacion || "",
+
+            monto_mitigacion:
+              existente?.monto_mitigacion != null
+                ? String(existente.monto_mitigacion)
+                : "",
+          };
+        });
+
+        setGestion(gestionMap);
+      } catch (err: any) {
+        console.error(err);
+
+        setError(
+          err?.message ||
+            "No fue posible cargar el Avance Diario."
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [
+      supabase,
+      fechaCorte,
+      obtenerUltimaFecha,
+    ]
+  );
 
   // ============================================================
   // INICIO
@@ -365,15 +300,14 @@ export default function AvanceDiarioPage() {
 
   useEffect(() => {
     async function iniciar() {
-      const permitido =
-        await validarAcceso();
+      const ok = await validarSesion();
 
-      if (!permitido) {
+      if (!ok) {
         setLoading(false);
         return;
       }
 
-      await cargarReporte();
+      await cargar();
     }
 
     iniciar();
@@ -384,1116 +318,1013 @@ export default function AvanceDiarioPage() {
   // ============================================================
 
   useEffect(() => {
-    if (
-      !accesoValidado ||
-      !fechaCorte
-    ) {
-      return;
-    }
+    if (!fechaCorte) return;
 
-    const timer =
-      window.setInterval(
-        () => {
-          cargarReporte(
-            fechaCorte
-          );
-        },
-        5 * 60 * 1000
-      );
+    const timer = window.setInterval(() => {
+      cargar(fechaCorte);
+    }, 5 * 60 * 1000);
 
-    return () =>
-      window.clearInterval(
-        timer
-      );
+    return () => {
+      window.clearInterval(timer);
+    };
   }, [
-    accesoValidado,
     fechaCorte,
-    cargarReporte,
+    cargar,
   ]);
 
   // ============================================================
-  // FILTROS DISPONIBLES
+  // FILTROS
   // ============================================================
 
-  const zonas =
-    useMemo(() => {
-      return [
-        ...new Set(
-          rows
-            .map(
-              (r) =>
-                r.zona?.trim() ||
-                ""
-            )
-            .filter(Boolean)
-        ),
-      ].sort();
-    }, [rows]);
-
-  const divisiones =
-    useMemo(() => {
-      return [
-        ...new Set(
-          rows
-            .filter(
-              (r) =>
-                zona ===
-                  "TODAS" ||
-                r.zona === zona
-            )
-            .map(
-              (r) =>
-                r.division?.trim() ||
-                ""
-            )
-            .filter(Boolean)
-        ),
-      ].sort();
-    }, [
-      rows,
-      zona,
-    ]);
-
-  const equipos =
-    useMemo(() => {
-      return [
-        ...new Set(
-          rows
-            .filter((r) => {
-              if (
-                zona !==
-                  "TODAS" &&
-                r.zona !== zona
-              ) {
-                return false;
-              }
-
-              if (
-                division !==
-                  "TODAS" &&
-                r.division !==
-                  division
-              ) {
-                return false;
-              }
-
-              return true;
-            })
-            .map(
-              (r) =>
-                r.equipo?.trim() ||
-                ""
-            )
-            .filter(Boolean)
-        ),
-      ].sort();
-    }, [
-      rows,
-      zona,
-      division,
-    ]);
-
-  useEffect(() => {
-    setDivision(
-      "TODAS"
-    );
-
-    setEquipo(
-      "TODOS"
-    );
-  }, [zona]);
-
-  useEffect(() => {
-    setEquipo(
-      "TODOS"
-    );
-  }, [division]);
-
-  // ============================================================
-  // FILAS FILTRADAS
-  // ============================================================
-
-  const filasFiltradas =
-    useMemo(() => {
-      return rows.filter(
-        (r) => {
-          if (
-            zona !==
-              "TODAS" &&
-            r.zona !== zona
-          ) {
-            return false;
-          }
-
-          if (
-            division !==
-              "TODAS" &&
-            r.division !==
-              division
-          ) {
-            return false;
-          }
-
-          if (
-            equipo !==
-              "TODOS" &&
-            r.equipo !== equipo
-          ) {
-            return false;
-          }
-
-          return true;
-        }
-      );
-    }, [
-      rows,
-      zona,
-      division,
-      equipo,
-    ]);
-
-  // ============================================================
-  // KPI
-  // ============================================================
-
-  const resumen =
-    useMemo(() => {
-      let meta = 0;
-
-      let ventaQ = 0;
-
-      let ventaOtros = 0;
-
-      let ventaTotal = 0;
-
-      let pedidos = 0;
-
-      let entregas = 0;
-
-      let cierreQ = 0;
-
-      let cierreTotal = 0;
-
-      filasFiltradas.forEach(
-        (r) => {
-          meta += numero(
-            r.meta_mes
-          );
-
-          ventaQ += numero(
-            r.facturado_quimicos
-          );
-
-          ventaOtros += numero(
-            r.facturado_otros
-          );
-
-          ventaTotal += numero(
-            r.facturado_total
-          );
-
-          pedidos += numero(
-            r.pedidos_total
-          );
-
-          entregas += numero(
-            r.entregas_total
-          );
-
-          cierreQ += numero(
-            r.cierre_quimicos
-          );
-
-          cierreTotal += numero(
-            r.cierre_total
-          );
-        }
-      );
-
-      const avance =
-        meta > 0
-          ? (ventaQ / meta) *
-            100
-          : 0;
-
-      const cierrePct =
-        meta > 0
-          ? (cierreQ / meta) *
-            100
-          : 0;
-
-      const faltante =
-        meta - ventaQ;
-
-      return {
-        meta,
-        ventaQ,
-        ventaOtros,
-        ventaTotal,
-        pedidos,
-        entregas,
-        cierreQ,
-        cierreTotal,
-        avance,
-        cierrePct,
-        faltante,
-      };
-    }, [
-      filasFiltradas,
-    ]);
-
-  // ============================================================
-  // ÚLTIMA SINCRONIZACIÓN
-  // ============================================================
-
-  const ultimaActualizacion =
-    useMemo(() => {
-      const fechas =
+  const zonas = useMemo(() => {
+    return [
+      ...new Set(
         rows
-          .map(
-            (r) =>
-              r.synced_at
-          )
-          .filter(
-            (
-              x
-            ): x is string =>
-              Boolean(x)
-          )
-          .sort();
+          .map((r) => r.zona || "")
+          .filter(Boolean)
+      ),
+    ].sort();
+  }, [rows]);
 
+  const divisiones = useMemo(() => {
+    return [
+      ...new Set(
+        rows
+          .filter(
+            (r) =>
+              zonaFiltro === "TODAS" ||
+              r.zona === zonaFiltro
+          )
+          .map((r) => r.division || "")
+          .filter(Boolean)
+      ),
+    ].sort();
+  }, [
+    rows,
+    zonaFiltro,
+  ]);
+
+  const equipos = useMemo(() => {
+    return [
+      ...new Set(
+        rows
+          .filter((r) => {
+            if (
+              zonaFiltro !== "TODAS" &&
+              r.zona !== zonaFiltro
+            ) {
+              return false;
+            }
+
+            if (
+              divisionFiltro !== "TODAS" &&
+              r.division !== divisionFiltro
+            ) {
+              return false;
+            }
+
+            return true;
+          })
+          .map((r) => r.equipo || "")
+          .filter(Boolean)
+      ),
+    ].sort();
+  }, [
+    rows,
+    zonaFiltro,
+    divisionFiltro,
+  ]);
+
+  const filtrados = useMemo(() => {
+    return rows.filter((r) => {
       if (
-        fechas.length === 0
+        zonaFiltro !== "TODAS" &&
+        r.zona !== zonaFiltro
       ) {
-        return null;
+        return false;
       }
 
-      return fechas[
-        fechas.length - 1
-      ];
-    }, [rows]);
+      if (
+        divisionFiltro !== "TODAS" &&
+        r.division !== divisionFiltro
+      ) {
+        return false;
+      }
+
+      if (
+        equipoFiltro !== "TODOS" &&
+        r.equipo !== equipoFiltro
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [
+    rows,
+    zonaFiltro,
+    divisionFiltro,
+    equipoFiltro,
+  ]);
+
+  useEffect(() => {
+    setDivisionFiltro("TODAS");
+    setEquipoFiltro("TODOS");
+  }, [zonaFiltro]);
+
+  useEffect(() => {
+    setEquipoFiltro("TODOS");
+  }, [divisionFiltro]);
 
   // ============================================================
-  // RESUMEN POR ZONA
+  // EDITAR
   // ============================================================
 
-  const resumenPorZona =
-    useMemo(() => {
-      const mapa =
-        new Map<
-          string,
-          {
-            zona: string;
-            meta: number;
-            ventaQ: number;
-            ventaTotal: number;
-            pedidos: number;
-            entregas: number;
-            cierreQ: number;
-            cierreTotal: number;
-          }
-        >();
-
-      filasFiltradas.forEach(
-        (r) => {
-          const key =
-            r.zona ||
-            "SIN ZONA";
-
-          if (
-            !mapa.has(key)
-          ) {
-            mapa.set(
-              key,
-              {
-                zona: key,
-                meta: 0,
-                ventaQ: 0,
-                ventaTotal: 0,
-                pedidos: 0,
-                entregas: 0,
-                cierreQ: 0,
-                cierreTotal: 0,
-              }
-            );
-          }
-
-          const item =
-            mapa.get(key)!;
-
-          item.meta +=
-            numero(
-              r.meta_mes
-            );
-
-          item.ventaQ +=
-            numero(
-              r.facturado_quimicos
-            );
-
-          item.ventaTotal +=
-            numero(
-              r.facturado_total
-            );
-
-          item.pedidos +=
-            numero(
-              r.pedidos_total
-            );
-
-          item.entregas +=
-            numero(
-              r.entregas_total
-            );
-
-          item.cierreQ +=
-            numero(
-              r.cierre_quimicos
-            );
-
-          item.cierreTotal +=
-            numero(
-              r.cierre_total
-            );
-        }
-      );
-
-      return [
-        ...mapa.values(),
-      ].sort((a, b) =>
-        a.zona.localeCompare(
-          b.zona
-        )
-      );
-    }, [
-      filasFiltradas,
-    ]);
-
-  // ============================================================
-  // SIN ACCESO
-  // ============================================================
-
-  if (
-    error &&
-    !accesoValidado
+  function editar(
+    slpcode: number,
+    campo: keyof GestionEdit,
+    valor: string
   ) {
-    return (
-      <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-red-700">
-        {error}
-      </div>
-    );
+    setGestion((prev) => ({
+      ...prev,
+      [slpcode]: {
+        ...(prev[slpcode] || {
+          proyeccion_total_mes: "",
+          driver: "",
+          acciones_mitigacion: "",
+          monto_mitigacion: "",
+        }),
+        [campo]: valor,
+      },
+    }));
   }
 
   // ============================================================
-  // PANTALLA
+  // GUARDAR
+  // ============================================================
+
+  async function guardarCambios() {
+    if (!fechaCorte) return;
+
+    try {
+      setGuardando(true);
+      setMensaje("");
+      setError("");
+
+      const payload = filtrados.map((r) => {
+        const g = gestion[r.slpcode] || {
+          proyeccion_total_mes: "",
+          driver: "",
+          acciones_mitigacion: "",
+          monto_mitigacion: "",
+        };
+
+        return {
+          fecha_corte: fechaCorte,
+          slpcode: r.slpcode,
+
+          proyeccion_total_mes:
+            n(g.proyeccion_total_mes),
+
+          driver:
+            g.driver?.trim() || null,
+
+          acciones_mitigacion:
+            g.acciones_mitigacion?.trim() || null,
+
+          monto_mitigacion:
+            n(g.monto_mitigacion),
+
+          updated_at:
+            new Date().toISOString(),
+
+          updated_by:
+            emailUsuario || null,
+        };
+      });
+
+      const { error } = await supabase
+        .from("avance_diario_gestion")
+        .upsert(
+          payload,
+          {
+            onConflict:
+              "fecha_corte,slpcode",
+          }
+        );
+
+      if (error) {
+        throw error;
+      }
+
+      setMensaje(
+        "Cambios guardados correctamente."
+      );
+    } catch (err: any) {
+      console.error(err);
+
+      setError(
+        err?.message ||
+          "No fue posible guardar los cambios."
+      );
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  // ============================================================
+  // CÁLCULO POR VENDEDOR
+  // ============================================================
+
+  function calc(r: ReporteRow) {
+    const g = gestion[r.slpcode];
+
+    const meta =
+      n(r.meta_mes);
+
+    const quimicos =
+      n(r.facturado_quimicos);
+
+    const otros =
+      n(r.facturado_otros);
+
+    const ventaTotal =
+      n(r.facturado_total);
+
+    const proyeccion =
+      n(g?.proyeccion_total_mes);
+
+    const mitigacion =
+      n(g?.monto_mitigacion);
+
+    const avance =
+      meta > 0
+        ? (quimicos / meta) * 100
+        : 0;
+
+    const cumplimiento =
+      meta > 0
+        ? (proyeccion / meta) * 100
+        : 0;
+
+    const diferencia =
+      proyeccion - meta;
+
+    const total =
+      proyeccion + mitigacion;
+
+    const cumplimientoFinal =
+      meta > 0
+        ? (total / meta) * 100
+        : 0;
+
+    return {
+      meta,
+      quimicos,
+      otros,
+      ventaTotal,
+      avance,
+      proyeccion,
+      cumplimiento,
+      diferencia,
+      mitigacion,
+      total,
+      cumplimientoFinal,
+    };
+  }
+
+  // ============================================================
+  // AGRUPACIÓN ZONA
+  // ============================================================
+
+  const grupos = useMemo(() => {
+    const mapa = new Map<string, ReporteRow[]>();
+
+    filtrados.forEach((r) => {
+      const zona =
+        r.zona || "SIN ZONA";
+
+      if (!mapa.has(zona)) {
+        mapa.set(zona, []);
+      }
+
+      mapa.get(zona)!.push(r);
+    });
+
+    return [...mapa.entries()];
+  }, [filtrados]);
+
+  // ============================================================
+  // TOTALES
+  // ============================================================
+
+  function totalGrupo(
+    lista: ReporteRow[]
+  ) {
+    let meta = 0;
+    let quimicos = 0;
+    let otros = 0;
+    let ventaTotal = 0;
+    let proyeccion = 0;
+    let mitigacion = 0;
+
+    lista.forEach((r) => {
+      const c = calc(r);
+
+      meta += c.meta;
+      quimicos += c.quimicos;
+      otros += c.otros;
+      ventaTotal += c.ventaTotal;
+      proyeccion += c.proyeccion;
+      mitigacion += c.mitigacion;
+    });
+
+    const avance =
+      meta > 0
+        ? (quimicos / meta) * 100
+        : 0;
+
+    const cumplimiento =
+      meta > 0
+        ? (proyeccion / meta) * 100
+        : 0;
+
+    const diferencia =
+      proyeccion - meta;
+
+    const total =
+      proyeccion + mitigacion;
+
+    const cumplimientoFinal =
+      meta > 0
+        ? (total / meta) * 100
+        : 0;
+
+    return {
+      meta,
+      quimicos,
+      otros,
+      ventaTotal,
+      avance,
+      proyeccion,
+      cumplimiento,
+      diferencia,
+      mitigacion,
+      total,
+      cumplimientoFinal,
+    };
+  }
+
+  const totalEmpresa =
+    useMemo(
+      () => totalGrupo(filtrados),
+      [
+        filtrados,
+        gestion,
+      ]
+    );
+
+  const ultimaSync =
+    useMemo(() => {
+      const fechas = rows
+        .map((r) => r.synced_at)
+        .filter(
+          (x): x is string =>
+            Boolean(x)
+        )
+        .sort();
+
+      return fechas.length
+        ? fechas[
+            fechas.length - 1
+          ]
+        : null;
+    }, [rows]);
+
+  // ============================================================
+  // RENDER
   // ============================================================
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* CABECERA */}
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">
             Avance Diario
           </h1>
 
           <p className="mt-1 text-sm text-gray-500">
-            Seguimiento de
-            ventas, metas,
-            pedidos,
-            entregas y cierre
-            potencial.
+            Ventas netas, proyección de cierre y acciones de mitigación.
           </p>
         </div>
 
         <div className="text-sm text-gray-500">
-          Última sincronización:{" "}
-          <span className="font-semibold text-gray-700">
-            {fechaHora(
-              ultimaActualizacion
-            )}
-          </span>
+          Última sincronización SAP:{" "}
+          <strong>
+            {fechaHora(ultimaSync)}
+          </strong>
         </div>
       </div>
 
       {/* FILTROS */}
 
       <div className="rounded-xl border bg-white p-4 shadow-sm">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">
-              Fecha de corte
-            </label>
-
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <Filtro label="Fecha de corte">
             <input
               type="date"
-              value={
-                fechaCorte
-              }
-              onChange={(
-                e
-              ) =>
+              value={fechaCorte}
+              onChange={(e) =>
                 setFechaCorte(
                   e.target.value
                 )
               }
-              className="w-full rounded-lg border px-3 py-2 text-sm"
+              className="w-full rounded-lg border px-3 py-2"
             />
-          </div>
+          </Filtro>
 
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">
-              Zona
-            </label>
-
+          <Filtro label="Zona">
             <select
-              value={zona}
-              onChange={(
-                e
-              ) =>
-                setZona(
+              value={zonaFiltro}
+              onChange={(e) =>
+                setZonaFiltro(
                   e.target.value
                 )
               }
-              className="w-full rounded-lg border px-3 py-2 text-sm"
+              className="w-full rounded-lg border px-3 py-2"
             >
               <option value="TODAS">
                 Todas
               </option>
 
-              {zonas.map(
-                (x) => (
-                  <option
-                    key={x}
-                    value={x}
-                  >
-                    {x}
-                  </option>
-                )
-              )}
+              {zonas.map((z) => (
+                <option
+                  key={z}
+                  value={z}
+                >
+                  {z}
+                </option>
+              ))}
             </select>
-          </div>
+          </Filtro>
 
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">
-              División
-            </label>
-
+          <Filtro label="División">
             <select
-              value={
-                division
-              }
-              onChange={(
-                e
-              ) =>
-                setDivision(
+              value={divisionFiltro}
+              onChange={(e) =>
+                setDivisionFiltro(
                   e.target.value
                 )
               }
-              className="w-full rounded-lg border px-3 py-2 text-sm"
+              className="w-full rounded-lg border px-3 py-2"
             >
               <option value="TODAS">
                 Todas
               </option>
 
               {divisiones.map(
-                (x) => (
+                (d) => (
                   <option
-                    key={x}
-                    value={x}
+                    key={d}
+                    value={d}
                   >
-                    {x}
+                    {d}
                   </option>
                 )
               )}
             </select>
-          </div>
+          </Filtro>
 
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">
-              Equipo
-            </label>
-
+          <Filtro label="Equipo">
             <select
-              value={
-                equipo
-              }
-              onChange={(
-                e
-              ) =>
-                setEquipo(
+              value={equipoFiltro}
+              onChange={(e) =>
+                setEquipoFiltro(
                   e.target.value
                 )
               }
-              className="w-full rounded-lg border px-3 py-2 text-sm"
+              className="w-full rounded-lg border px-3 py-2"
             >
               <option value="TODOS">
                 Todos
               </option>
 
               {equipos.map(
-                (x) => (
+                (e) => (
                   <option
-                    key={x}
-                    value={x}
+                    key={e}
+                    value={e}
                   >
-                    {x}
+                    {e}
                   </option>
                 )
               )}
             </select>
-          </div>
+          </Filtro>
 
-          <div className="flex items-end">
+          <div className="flex items-end gap-2">
             <button
-              type="button"
               onClick={() =>
-                cargarReporte(
-                  fechaCorte
-                )
+                cargar(fechaCorte)
               }
-              disabled={
-                loading ||
-                !fechaCorte
-              }
-              className="w-full rounded-lg bg-[#1f4ed8] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#163bb8] disabled:opacity-50"
+              className="flex-1 rounded-lg border px-4 py-2 font-semibold hover:bg-gray-50"
             >
-              {loading
-                ? "Cargando..."
-                : "Actualizar"}
+              Actualizar
+            </button>
+
+            <button
+              onClick={guardarCambios}
+              disabled={guardando}
+              className="flex-1 rounded-lg bg-[#1f4ed8] px-4 py-2 font-semibold text-white hover:bg-[#163bb8] disabled:opacity-50"
+            >
+              {guardando
+                ? "Guardando..."
+                : "Guardar"}
             </button>
           </div>
         </div>
       </div>
 
       {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {error}
         </div>
       )}
 
-      {/* KPI */}
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi
-          titulo="Meta Químicos"
-          valor={dinero(
-            resumen.meta
-          )}
-          detalle={`${filasFiltradas.length} vendedores`}
-        />
-
-        <Kpi
-          titulo="Venta Químicos"
-          valor={dinero(
-            resumen.ventaQ
-          )}
-          detalle={`Avance ${porcentaje(
-            resumen.avance
-          )}`}
-          color={colorPorcentaje(
-            resumen.avance
-          )}
-        />
-
-        <Kpi
-          titulo="Venta Total"
-          valor={dinero(
-            resumen.ventaTotal
-          )}
-          detalle={`Otros ${dinero(
-            resumen.ventaOtros
-          )}`}
-        />
-
-        <Kpi
-          titulo="Faltante Meta"
-          valor={dinero(
-            resumen.faltante
-          )}
-          detalle="Meta químicos"
-          color={
-            resumen.faltante <=
-            0
-              ? "text-green-700"
-              : "text-red-600"
-          }
-        />
-
-        <Kpi
-          titulo="Pedidos Abiertos"
-          valor={dinero(
-            resumen.pedidos
-          )}
-        />
-
-        <Kpi
-          titulo="Entregas"
-          valor={dinero(
-            resumen.entregas
-          )}
-        />
-
-        <Kpi
-          titulo="Cierre Potencial Q"
-          valor={dinero(
-            resumen.cierreQ
-          )}
-          detalle={`Cierre ${porcentaje(
-            resumen.cierrePct
-          )}`}
-          color={colorPorcentaje(
-            resumen.cierrePct
-          )}
-        />
-
-        <Kpi
-          titulo="Cierre Potencial Total"
-          valor={dinero(
-            resumen.cierreTotal
-          )}
-        />
-      </div>
-
-      {/* RESUMEN ZONA */}
-
-      <div className="overflow-hidden rounded-xl border bg-white shadow-sm">
-        <div className="border-b px-5 py-4">
-          <h2 className="font-semibold text-gray-900">
-            Resumen por Zona
-          </h2>
+      {mensaje && (
+        <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
+          {mensaje}
         </div>
+      )}
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-              <tr>
-                <th className="px-4 py-3 text-left">
-                  Zona
-                </th>
+      {/* TOTAL EMPRESA */}
 
-                <th className="px-4 py-3 text-right">
-                  Meta
-                </th>
+      <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
+        <table className="min-w-[1900px] w-full border-collapse text-xs">
+          <thead>
+            <tr>
+              <th
+                colSpan={7}
+                className="border bg-gray-100 px-3 py-2 text-left text-sm font-bold"
+              >
+                AVANCE REAL
+              </th>
 
-                <th className="px-4 py-3 text-right">
-                  Venta Q
-                </th>
+              <th
+                colSpan={8}
+                className="border bg-yellow-100 px-3 py-2 text-center text-sm font-bold"
+              >
+                PROYECCIÓN Y ACCIONES DE MITIGACIÓN
+              </th>
+            </tr>
 
-                <th className="px-4 py-3 text-right">
-                  % Avance
-                </th>
+            <tr className="bg-gray-50">
+              <Cab>Zona</Cab>
+              <Cab>Empleado Ventas</Cab>
+              <Cab>Meta del Mes</Cab>
+              <Cab>Vta Neta Químicos</Cab>
+              <Cab>% Tot</Cab>
+              <Cab>Venta Neta Otros</Cab>
+              <Cab>Venta Neta Total</Cab>
 
-                <th className="px-4 py-3 text-right">
-                  Venta Total
-                </th>
+              <Cab amarillo>
+                Proyección Total Mes
+              </Cab>
 
-                <th className="px-4 py-3 text-right">
-                  Pedidos
-                </th>
+              <Cab verde>
+                % Cum
+              </Cab>
 
-                <th className="px-4 py-3 text-right">
-                  Entregas
-                </th>
+              <Cab>
+                Diferencia
+              </Cab>
 
-                <th className="px-4 py-3 text-right">
-                  Cierre Q
-                </th>
+              <Cab>
+                Driver
+              </Cab>
 
-                <th className="px-4 py-3 text-right">
-                  % Cierre
-                </th>
+              <Cab>
+                Acciones de Mitigación para llegar a Meta con Riesgo
+              </Cab>
 
-                <th className="px-4 py-3 text-right">
-                  Cierre Total
-                </th>
-              </tr>
-            </thead>
+              <Cab amarillo>
+                $$ Mitigación
+              </Cab>
 
-            <tbody className="divide-y">
-              {resumenPorZona.map(
-                (r) => {
-                  const avance =
-                    r.meta > 0
-                      ? (r.ventaQ /
-                          r.meta) *
-                        100
-                      : 0;
+              <Cab verde>
+                Total
+              </Cab>
 
-                  const cierre =
-                    r.meta > 0
-                      ? (r.cierreQ /
-                          r.meta) *
-                        100
-                      : 0;
+              <Cab verde>
+                % Cum
+              </Cab>
+            </tr>
+          </thead>
 
-                  return (
-                    <tr
-                      key={
-                        r.zona
+          <tbody>
+            {/* TOTAL EMPRESA */}
+
+            <FilaTotal
+              nombre="TOTAL"
+              zona=""
+              t={totalEmpresa}
+            />
+
+            {/* ZONAS */}
+
+            {grupos.map(
+              ([zona, lista]) => {
+                const totalZona =
+                  totalGrupo(lista);
+
+                return (
+                  <React.Fragment
+                    key={zona}
+                  >
+                    <FilaTotal
+                      nombre={`Total ${zona}`}
+                      zona={zona}
+                      t={totalZona}
+                    />
+
+                    {lista.map(
+                      (r) => {
+                        const c =
+                          calc(r);
+
+                        const g =
+                          gestion[
+                            r.slpcode
+                          ] || {
+                            proyeccion_total_mes:
+                              "",
+                            driver: "",
+                            acciones_mitigacion:
+                              "",
+                            monto_mitigacion:
+                              "",
+                          };
+
+                        return (
+                          <tr
+                            key={`${r.fecha_corte}-${r.slpcode}`}
+                            className="hover:bg-blue-50"
+                          >
+                            <Celda>
+                              {r.zona}
+                            </Celda>
+
+                            <Celda
+                              izquierda
+                              fuerte
+                            >
+                              {r.vendedor}
+                            </Celda>
+
+                            <Celda>
+                              {money(
+                                c.meta
+                              )}
+                            </Celda>
+
+                            <Celda>
+                              {money(
+                                c.quimicos
+                              )}
+                            </Celda>
+
+                            <Celda
+                              clase={colorPct(
+                                c.avance
+                              )}
+                            >
+                              {pct(
+                                c.avance
+                              )}
+                            </Celda>
+
+                            <Celda>
+                              {money(
+                                c.otros
+                              )}
+                            </Celda>
+
+                            <Celda fuerte>
+                              {money(
+                                c.ventaTotal
+                              )}
+                            </Celda>
+
+                            {/* PROYECCIÓN */}
+
+                            <td className="border bg-yellow-50 p-1">
+                              <input
+                                type="number"
+                                value={
+                                  g.proyeccion_total_mes
+                                }
+                                onChange={(
+                                  e
+                                ) =>
+                                  editar(
+                                    r.slpcode,
+                                    "proyeccion_total_mes",
+                                    e.target.value
+                                  )
+                                }
+                                className="w-32 rounded border border-yellow-300 bg-yellow-50 px-2 py-1 text-right"
+                              />
+                            </td>
+
+                            <Celda
+                              clase={colorPct(
+                                c.cumplimiento
+                              )}
+                            >
+                              {pct(
+                                c.cumplimiento
+                              )}
+                            </Celda>
+
+                            <Celda
+                              clase={colorDiferencia(
+                                c.diferencia
+                              )}
+                            >
+                              {money(
+                                c.diferencia
+                              )}
+                            </Celda>
+
+                            <td className="min-w-[220px] border p-1">
+                              <textarea
+                                value={
+                                  g.driver
+                                }
+                                onChange={(
+                                  e
+                                ) =>
+                                  editar(
+                                    r.slpcode,
+                                    "driver",
+                                    e.target.value
+                                  )
+                                }
+                                rows={2}
+                                className="w-full resize-y rounded border px-2 py-1"
+                              />
+                            </td>
+
+                            <td className="min-w-[300px] border p-1">
+                              <textarea
+                                value={
+                                  g.acciones_mitigacion
+                                }
+                                onChange={(
+                                  e
+                                ) =>
+                                  editar(
+                                    r.slpcode,
+                                    "acciones_mitigacion",
+                                    e.target.value
+                                  )
+                                }
+                                rows={2}
+                                className="w-full resize-y rounded border px-2 py-1"
+                              />
+                            </td>
+
+                            <td className="border bg-yellow-50 p-1">
+                              <input
+                                type="number"
+                                value={
+                                  g.monto_mitigacion
+                                }
+                                onChange={(
+                                  e
+                                ) =>
+                                  editar(
+                                    r.slpcode,
+                                    "monto_mitigacion",
+                                    e.target.value
+                                  )
+                                }
+                                className="w-28 rounded border border-yellow-300 bg-yellow-50 px-2 py-1 text-right"
+                              />
+                            </td>
+
+                            <Celda
+                              fuerte
+                              clase="bg-green-50"
+                            >
+                              {money(
+                                c.total
+                              )}
+                            </Celda>
+
+                            <Celda
+                              clase={colorPct(
+                                c.cumplimientoFinal
+                              )}
+                            >
+                              {pct(
+                                c.cumplimientoFinal
+                              )}
+                            </Celda>
+                          </tr>
+                        );
                       }
-                      className="hover:bg-gray-50"
-                    >
-                      <td className="px-4 py-3 font-semibold">
-                        {r.zona}
-                      </td>
-
-                      <td className="px-4 py-3 text-right">
-                        {dinero(
-                          r.meta
-                        )}
-                      </td>
-
-                      <td className="px-4 py-3 text-right">
-                        {dinero(
-                          r.ventaQ
-                        )}
-                      </td>
-
-                      <td
-                        className={`px-4 py-3 text-right font-semibold ${colorPorcentaje(
-                          avance
-                        )}`}
-                      >
-                        {porcentaje(
-                          avance
-                        )}
-                      </td>
-
-                      <td className="px-4 py-3 text-right">
-                        {dinero(
-                          r.ventaTotal
-                        )}
-                      </td>
-
-                      <td className="px-4 py-3 text-right">
-                        {dinero(
-                          r.pedidos
-                        )}
-                      </td>
-
-                      <td className="px-4 py-3 text-right">
-                        {dinero(
-                          r.entregas
-                        )}
-                      </td>
-
-                      <td className="px-4 py-3 text-right">
-                        {dinero(
-                          r.cierreQ
-                        )}
-                      </td>
-
-                      <td
-                        className={`px-4 py-3 text-right font-semibold ${colorPorcentaje(
-                          cierre
-                        )}`}
-                      >
-                        {porcentaje(
-                          cierre
-                        )}
-                      </td>
-
-                      <td className="px-4 py-3 text-right">
-                        {dinero(
-                          r.cierreTotal
-                        )}
-                      </td>
-                    </tr>
-                  );
-                }
-              )}
-            </tbody>
-          </table>
-        </div>
+                    )}
+                  </React.Fragment>
+                );
+              }
+            )}
+          </tbody>
+        </table>
       </div>
 
-      {/* DETALLE */}
-
-      <div className="overflow-hidden rounded-xl border bg-white shadow-sm">
-        <div className="border-b px-5 py-4">
-          <h2 className="font-semibold text-gray-900">
-            Detalle por Vendedor
-          </h2>
-
-          <p className="mt-1 text-xs text-gray-500">
-            {
-              filasFiltradas.length
-            }{" "}
-            registros
-          </p>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="min-w-[1650px] w-full text-sm">
-            <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-              <tr>
-                <th className="px-3 py-3 text-left">
-                  Zona
-                </th>
-
-                <th className="px-3 py-3 text-left">
-                  División
-                </th>
-
-                <th className="px-3 py-3 text-left">
-                  Equipo
-                </th>
-
-                <th className="px-3 py-3 text-left">
-                  Vendedor
-                </th>
-
-                <th className="px-3 py-3 text-right">
-                  Meta
-                </th>
-
-                <th className="px-3 py-3 text-right">
-                  Venta Q
-                </th>
-
-                <th className="px-3 py-3 text-right">
-                  % Avance
-                </th>
-
-                <th className="px-3 py-3 text-right">
-                  Otros
-                </th>
-
-                <th className="px-3 py-3 text-right">
-                  Venta Total
-                </th>
-
-                <th className="px-3 py-3 text-right">
-                  Pedidos
-                </th>
-
-                <th className="px-3 py-3 text-right">
-                  Entregas
-                </th>
-
-                <th className="px-3 py-3 text-right">
-                  Cierre Q
-                </th>
-
-                <th className="px-3 py-3 text-right">
-                  % Cierre
-                </th>
-
-                <th className="px-3 py-3 text-right">
-                  Cierre Total
-                </th>
-
-                <th className="px-3 py-3 text-right">
-                  Faltante
-                </th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y">
-              {filasFiltradas.map(
-                (r) => {
-                  const meta =
-                    numero(
-                      r.meta_mes
-                    );
-
-                  const ventaQ =
-                    numero(
-                      r.facturado_quimicos
-                    );
-
-                  const cierreQ =
-                    numero(
-                      r.cierre_quimicos
-                    );
-
-                  const avance =
-                    meta > 0
-                      ? (ventaQ /
-                          meta) *
-                        100
-                      : 0;
-
-                  const pctCierre =
-                    meta > 0
-                      ? (cierreQ /
-                          meta) *
-                        100
-                      : 0;
-
-                  const faltante =
-                    meta -
-                    ventaQ;
-
-                  return (
-                    <tr
-                      key={`${r.fecha_corte}-${r.slpcode}`}
-                      className="hover:bg-gray-50"
-                    >
-                      <td className="px-3 py-3">
-                        {r.zona ||
-                          "—"}
-                      </td>
-
-                      <td className="px-3 py-3">
-                        {r.division ||
-                          "—"}
-                      </td>
-
-                      <td className="px-3 py-3">
-                        {r.equipo ||
-                          "—"}
-                      </td>
-
-                      <td className="px-3 py-3 font-medium">
-                        {r.vendedor}
-                      </td>
-
-                      <td className="px-3 py-3 text-right">
-                        {dinero(
-                          meta
-                        )}
-                      </td>
-
-                      <td className="px-3 py-3 text-right">
-                        {dinero(
-                          ventaQ
-                        )}
-                      </td>
-
-                      <td
-                        className={`px-3 py-3 text-right font-semibold ${colorPorcentaje(
-                          avance
-                        )}`}
-                      >
-                        {porcentaje(
-                          avance
-                        )}
-                      </td>
-
-                      <td className="px-3 py-3 text-right">
-                        {dinero(
-                          r.facturado_otros
-                        )}
-                      </td>
-
-                      <td className="px-3 py-3 text-right">
-                        {dinero(
-                          r.facturado_total
-                        )}
-                      </td>
-
-                      <td className="px-3 py-3 text-right">
-                        {dinero(
-                          r.pedidos_total
-                        )}
-                      </td>
-
-                      <td className="px-3 py-3 text-right">
-                        {dinero(
-                          r.entregas_total
-                        )}
-                      </td>
-
-                      <td className="px-3 py-3 text-right">
-                        {dinero(
-                          cierreQ
-                        )}
-                      </td>
-
-                      <td
-                        className={`px-3 py-3 text-right font-semibold ${colorPorcentaje(
-                          pctCierre
-                        )}`}
-                      >
-                        {porcentaje(
-                          pctCierre
-                        )}
-                      </td>
-
-                      <td className="px-3 py-3 text-right">
-                        {dinero(
-                          r.cierre_total
-                        )}
-                      </td>
-
-                      <td
-                        className={`px-3 py-3 text-right font-semibold ${
-                          faltante <=
-                          0
-                            ? "text-green-700"
-                            : "text-red-600"
-                        }`}
-                      >
-                        {dinero(
-                          faltante
-                        )}
-                      </td>
-                    </tr>
-                  );
-                }
-              )}
-
-              {!loading &&
-                filasFiltradas.length ===
-                  0 && (
-                  <tr>
-                    <td
-                      colSpan={
-                        15
-                      }
-                      className="px-4 py-10 text-center text-gray-500"
-                    >
-                      No hay
-                      información
-                      para los
-                      filtros
-                      seleccionados.
-                    </td>
-                  </tr>
-                )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {!loading &&
+        filtrados.length === 0 && (
+          <div className="rounded-xl border bg-white p-10 text-center text-gray-500">
+            No existen registros para los filtros seleccionados.
+          </div>
+        )}
     </div>
   );
 }
 
-// ================================================================
-// KPI CARD
-// ================================================================
+// ============================================================
+// COMPONENTES
+// ============================================================
 
-function Kpi({
-  titulo,
-  valor,
-  detalle,
-  color = "text-gray-900",
+function Filtro({
+  label,
+  children,
 }: {
-  titulo: string;
-  valor: string;
-  detalle?: string;
-  color?: string;
+  label: string;
+  children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border bg-white p-5 shadow-sm">
-      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-        {titulo}
-      </div>
+    <div>
+      <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">
+        {label}
+      </label>
 
-      <div
-        className={`mt-2 text-2xl font-bold ${color}`}
-      >
-        {valor}
-      </div>
-
-      {detalle && (
-        <div className="mt-1 text-xs text-gray-500">
-          {detalle}
-        </div>
-      )}
+      {children}
     </div>
+  );
+}
+
+function Cab({
+  children,
+  amarillo = false,
+  verde = false,
+}: {
+  children: React.ReactNode;
+  amarillo?: boolean;
+  verde?: boolean;
+}) {
+  return (
+    <th
+      className={`border px-2 py-2 text-center font-bold ${
+        amarillo
+          ? "bg-yellow-200"
+          : verde
+          ? "bg-green-200"
+          : "bg-gray-100"
+      }`}
+    >
+      {children}
+    </th>
+  );
+}
+
+function Celda({
+  children,
+  izquierda = false,
+  fuerte = false,
+  clase = "",
+}: {
+  children: React.ReactNode;
+  izquierda?: boolean;
+  fuerte?: boolean;
+  clase?: string;
+}) {
+  return (
+    <td
+      className={`border px-2 py-2 ${
+        izquierda
+          ? "text-left"
+          : "text-right"
+      } ${
+        fuerte
+          ? "font-semibold"
+          : ""
+      } ${clase}`}
+    >
+      {children}
+    </td>
+  );
+}
+
+function FilaTotal({
+  zona,
+  nombre,
+  t,
+}: {
+  zona: string;
+  nombre: string;
+  t: {
+    meta: number;
+    quimicos: number;
+    otros: number;
+    ventaTotal: number;
+    avance: number;
+    proyeccion: number;
+    cumplimiento: number;
+    diferencia: number;
+    mitigacion: number;
+    total: number;
+    cumplimientoFinal: number;
+  };
+}) {
+  return (
+    <tr className="bg-gray-200 font-bold">
+      <td className="border px-2 py-2 text-left">
+        {zona}
+      </td>
+
+      <td className="border px-2 py-2 text-left">
+        {nombre}
+      </td>
+
+      <td className="border px-2 py-2 text-right">
+        {money(t.meta)}
+      </td>
+
+      <td className="border px-2 py-2 text-right">
+        {money(t.quimicos)}
+      </td>
+
+      <td
+        className={`border px-2 py-2 text-right ${colorPct(
+          t.avance
+        )}`}
+      >
+        {pct(t.avance)}
+      </td>
+
+      <td className="border px-2 py-2 text-right">
+        {money(t.otros)}
+      </td>
+
+      <td className="border px-2 py-2 text-right">
+        {money(t.ventaTotal)}
+      </td>
+
+      <td className="border bg-yellow-100 px-2 py-2 text-right">
+        {money(t.proyeccion)}
+      </td>
+
+      <td
+        className={`border px-2 py-2 text-right ${colorPct(
+          t.cumplimiento
+        )}`}
+      >
+        {pct(t.cumplimiento)}
+      </td>
+
+      <td
+        className={`border px-2 py-2 text-right ${colorDiferencia(
+          t.diferencia
+        )}`}
+      >
+        {money(t.diferencia)}
+      </td>
+
+      <td className="border bg-gray-100" />
+
+      <td className="border bg-gray-100" />
+
+      <td className="border bg-yellow-100 px-2 py-2 text-right">
+        {money(t.mitigacion)}
+      </td>
+
+      <td className="border bg-green-100 px-2 py-2 text-right">
+        {money(t.total)}
+      </td>
+
+      <td
+        className={`border px-2 py-2 text-right ${colorPct(
+          t.cumplimientoFinal
+        )}`}
+      >
+        {pct(
+          t.cumplimientoFinal
+        )}
+      </td>
+    </tr>
   );
 }
