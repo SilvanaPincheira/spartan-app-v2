@@ -1238,7 +1238,7 @@ function FilaTotal({
         )}
       </Td>
 
-      <Td className="bg-yellow-100">
+      <Td class="bg-yellow-100">
         {money(
           t.mitigacion
         )}
