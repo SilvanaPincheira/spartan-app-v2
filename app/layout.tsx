@@ -101,8 +101,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       { name: "Herramientas", href: "/herramientas", icon: "🧰" },
     ];
 
-    if (perfil?.role === "gerencia" || perfil?.department?.startsWith("gerencia_")) {
-      baseMenu.push({ name: "Gerencia", href: "/gerencia", icon: "🏢" });
+    if (
+      perfil?.role === "gerencia" ||
+      perfil?.department?.startsWith("gerencia_")
+    ) {
+      baseMenu.push({
+        name: "Gerencia",
+        href: "/gerencia",
+        icon: "🏢",
+      });
+    
+      baseMenu.push({
+        name: "Avance Diario",
+        href: "/avance-diario",
+        icon: "📊",
+      });
+    
     }
     if (loggedEmail === EMAIL_GERENCIA_EVALUACIONES) {
       baseMenu.push({
