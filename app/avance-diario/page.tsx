@@ -7,13 +7,17 @@ import React, {
   useState,
 } from "react";
 
+import Link from "next/link";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 type ReporteRow = {
-  id: number;
   fecha_corte: string;
+  anio: number;
+  mes: number;
+
   slpcode: number;
   vendedor: string;
+
   zona: string | null;
   division: string | null;
   equipo: string | null;
@@ -24,44 +28,38 @@ type ReporteRow = {
   facturado_otros: number | string | null;
   facturado_total: number | string | null;
 
+  pedidos_quimicos: number | string | null;
+  pedidos_otros: number | string | null;
   pedidos_total: number | string | null;
+
+  entregas_quimicos: number | string | null;
+  entregas_otros: number | string | null;
   entregas_total: number | string | null;
 
   cierre_quimicos: number | string | null;
+  cierre_otros: number | string | null;
   cierre_total: number | string | null;
 
   synced_at: string | null;
 };
 
-type GestionRow = {
-  fecha_corte: string;
-  slpcode: number;
-  proyeccion_total_mes: number | string | null;
-  driver: string | null;
-  acciones_mitigacion: string | null;
-  monto_mitigacion: number | string | null;
-  updated_at?: string | null;
-  updated_by?: string | null;
-};
+function num(value: unknown) {
+  const n = Number(value ?? 0);
 
-type GestionEdit = {
-  proyeccion_total_mes: string;
-  driver: string;
-  acciones_mitigacion: string;
-  monto_mitigacion: string;
-};
-
-function n(value: unknown) {
-  const num = Number(value ?? 0);
-  return Number.isFinite(num) ? num : 0;
+  return Number.isFinite(n)
+    ? n
+    : 0;
 }
 
 function money(value: unknown) {
-  return n(value).toLocaleString("es-CL", {
-    style: "currency",
-    currency: "CLP",
-    maximumFractionDigits: 0,
-  });
+  return num(value).toLocaleString(
+    "es-CL",
+    {
+      style: "currency",
+      currency: "CLP",
+      maximumFractionDigits: 0,
+    }
+  );
 }
 
 function pct(value: number) {
@@ -71,19 +69,7 @@ function pct(value: number) {
   })}%`;
 }
 
-function fechaHora(value?: string | null) {
-  if (!value) return "—";
-
-  const d = new Date(value);
-
-  if (Number.isNaN(d.getTime())) {
-    return value;
-  }
-
-  return d.toLocaleString("es-CL");
-}
-
-function colorPct(value: number) {
+function clasePct(value: number) {
   if (value >= 100) {
     return "bg-green-100 text-green-800";
   }
@@ -95,12 +81,20 @@ function colorPct(value: number) {
   return "bg-red-100 text-red-700";
 }
 
-function colorDiferencia(value: number) {
-  if (value >= 0) {
-    return "bg-green-50 text-green-800";
+function formatSync(value: string | null) {
+  if (!value) {
+    return "—";
   }
 
-  return "bg-red-50 text-red-700";
+  const date = new Date(value);
+
+  return date.toLocaleString(
+    "es-CL",
+    {
+      dateStyle: "short",
+      timeStyle: "medium",
+    }
+  );
 }
 
 export default function AvanceDiarioPage() {
@@ -109,96 +103,103 @@ export default function AvanceDiarioPage() {
     []
   );
 
-  const [rows, setRows] = useState<ReporteRow[]>([]);
-  const [gestion, setGestion] = useState<Record<number, GestionEdit>>({});
+  const [rows, setRows] =
+    useState<ReporteRow[]>([]);
 
-  const [fechaCorte, setFechaCorte] = useState("");
-  const [zonaFiltro, setZonaFiltro] = useState("TODAS");
-  const [divisionFiltro, setDivisionFiltro] = useState("TODAS");
-  const [equipoFiltro, setEquipoFiltro] = useState("TODOS");
+  const [fechaCorte, setFechaCorte] =
+    useState("");
 
-  const [loading, setLoading] = useState(true);
-  const [guardando, setGuardando] = useState(false);
-  const [mensaje, setMensaje] = useState("");
-  const [error, setError] = useState("");
+  const [zonaFiltro, setZonaFiltro] =
+    useState("TODAS");
 
-  const [emailUsuario, setEmailUsuario] = useState("");
+  const [divisionFiltro, setDivisionFiltro] =
+    useState("TODAS");
 
-  // ============================================================
-  // SESIÓN
-  // ============================================================
+  const [equipoFiltro, setEquipoFiltro] =
+    useState("TODOS");
 
-  const validarSesion = useCallback(async () => {
-    const { data } = await supabase.auth.getSession();
+  const [loading, setLoading] =
+    useState(true);
 
-    const session = data.session;
+  const [error, setError] =
+    useState("");
 
-    if (!session?.user) {
-      window.location.href = "/login";
-      return false;
-    }
+  // =========================================================
+  // OBTENER ÚLTIMA FECHA DISPONIBLE
+  // =========================================================
 
-    setEmailUsuario(
-      session.user.email || ""
-    );
+  const obtenerUltimaFecha =
+    useCallback(async () => {
+      const {
+        data,
+        error,
+      } = await supabase
+        .from(
+          "reporte_ventas_diario"
+        )
+        .select("fecha_corte")
+        .order(
+          "fecha_corte",
+          {
+            ascending: false,
+          }
+        )
+        .limit(1);
 
-    return true;
-  }, [supabase]);
+      if (error) {
+        throw error;
+      }
 
-  // ============================================================
-  // ÚLTIMA FECHA
-  // ============================================================
+      return (
+        data?.[0]
+          ?.fecha_corte || ""
+      );
+    }, [supabase]);
 
-  const obtenerUltimaFecha = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("reporte_ventas_diario")
-      .select("fecha_corte")
-      .order("fecha_corte", {
-        ascending: false,
-      })
-      .limit(1);
+  // =========================================================
+  // CARGAR DATOS
+  // =========================================================
 
-    if (error) {
-      throw error;
-    }
+  const cargar =
+    useCallback(
+      async (
+        fechaSolicitada?: string
+      ) => {
+        try {
+          setLoading(true);
+          setError("");
 
-    return data?.[0]?.fecha_corte || "";
-  }, [supabase]);
-
-  // ============================================================
-  // CARGAR
-  // ============================================================
-
-  const cargar = useCallback(
-    async (fechaSolicitada?: string) => {
-      try {
-        setLoading(true);
-        setError("");
-        setMensaje("");
-
-        let fecha = fechaSolicitada || fechaCorte;
-
-        if (!fecha) {
-          fecha = await obtenerUltimaFecha();
+          let fecha =
+            fechaSolicitada || "";
 
           if (!fecha) {
-            setError("No existen datos de Avance Diario.");
+            fecha =
+              await obtenerUltimaFecha();
+          }
+
+          if (!fecha) {
             setRows([]);
+
+            setError(
+              "No existen datos disponibles."
+            );
+
             return;
           }
 
           setFechaCorte(fecha);
-        }
 
-        const [
-          reporteResult,
-          gestionResult,
-        ] = await Promise.all([
-          supabase
-            .from("reporte_ventas_diario")
+          const {
+            data,
+            error,
+          } = await supabase
+            .from(
+              "reporte_ventas_diario"
+            )
             .select(`
-              id,
               fecha_corte,
+              anio,
+              mes,
               slpcode,
               vendedor,
               zona,
@@ -208,523 +209,477 @@ export default function AvanceDiarioPage() {
               facturado_quimicos,
               facturado_otros,
               facturado_total,
+              pedidos_quimicos,
+              pedidos_otros,
               pedidos_total,
+              entregas_quimicos,
+              entregas_otros,
               entregas_total,
               cierre_quimicos,
+              cierre_otros,
               cierre_total,
               synced_at
             `)
-            .eq("fecha_corte", fecha)
+            .eq(
+              "fecha_corte",
+              fecha
+            )
             .order("zona")
-            .order("vendedor"),
+            .order("vendedor");
 
-          supabase
-            .from("avance_diario_gestion")
-            .select(`
-              fecha_corte,
-              slpcode,
-              proyeccion_total_mes,
-              driver,
-              acciones_mitigacion,
-              monto_mitigacion,
-              updated_at,
-              updated_by
-            `)
-            .eq("fecha_corte", fecha),
-        ]);
+          if (error) {
+            throw error;
+          }
 
-        if (reporteResult.error) {
-          throw reporteResult.error;
-        }
-
-        if (gestionResult.error) {
-          throw gestionResult.error;
-        }
-
-        const reporte =
-          (reporteResult.data || []) as ReporteRow[];
-
-        const gestionDb =
-          (gestionResult.data || []) as GestionRow[];
-
-        setRows(reporte);
-
-        const gestionMap: Record<number, GestionEdit> = {};
-
-        reporte.forEach((r) => {
-          const existente = gestionDb.find(
-            (g) => Number(g.slpcode) === Number(r.slpcode)
+          setRows(
+            (data ||
+              []) as ReporteRow[]
           );
+        } catch (err: any) {
+          console.error(err);
 
-          gestionMap[r.slpcode] = {
-            proyeccion_total_mes:
-              existente?.proyeccion_total_mes != null
-                ? String(existente.proyeccion_total_mes)
-                : "",
+          setError(
+            err?.message ||
+              "No fue posible cargar el Avance Diario."
+          );
+        } finally {
+          setLoading(false);
+        }
+      },
+      [
+        supabase,
+        obtenerUltimaFecha,
+      ]
+    );
 
-            driver:
-              existente?.driver || "",
-
-            acciones_mitigacion:
-              existente?.acciones_mitigacion || "",
-
-            monto_mitigacion:
-              existente?.monto_mitigacion != null
-                ? String(existente.monto_mitigacion)
-                : "",
-          };
-        });
-
-        setGestion(gestionMap);
-      } catch (err: any) {
-        console.error(err);
-
-        setError(
-          err?.message ||
-            "No fue posible cargar el Avance Diario."
-        );
-      } finally {
-        setLoading(false);
-      }
-    },
-    [
-      supabase,
-      fechaCorte,
-      obtenerUltimaFecha,
-    ]
-  );
-
-  // ============================================================
-  // INICIO
-  // ============================================================
+  // =========================================================
+  // CARGA INICIAL
+  // =========================================================
 
   useEffect(() => {
-    async function iniciar() {
-      const ok = await validarSesion();
+    cargar();
+  }, [cargar]);
 
-      if (!ok) {
-        setLoading(false);
-        return;
-      }
+  // =========================================================
+  // REFRESCO AUTOMÁTICO CADA 5 MIN
+  // =========================================================
 
-      await cargar();
+  useEffect(() => {
+    if (!fechaCorte) {
+      return;
     }
 
-    iniciar();
-  }, []);
+    const interval =
+      window.setInterval(() => {
+        cargar(fechaCorte);
+      }, 5 * 60 * 1000);
 
-  // ============================================================
-  // ACTUALIZACIÓN AUTOMÁTICA
-  // ============================================================
-
-  useEffect(() => {
-    if (!fechaCorte) return;
-
-    const timer = window.setInterval(() => {
-      cargar(fechaCorte);
-    }, 5 * 60 * 1000);
-
-    return () => {
-      window.clearInterval(timer);
-    };
+    return () =>
+      window.clearInterval(
+        interval
+      );
   }, [
     fechaCorte,
     cargar,
   ]);
 
-  // ============================================================
+  // =========================================================
   // FILTROS
-  // ============================================================
+  // =========================================================
 
-  const zonas = useMemo(() => {
-    return [
-      ...new Set(
-        rows
-          .map((r) => r.zona || "")
-          .filter(Boolean)
-      ),
-    ].sort();
-  }, [rows]);
+  const zonas =
+    useMemo(() => {
+      return [
+        ...new Set(
+          rows
+            .map(
+              (r) =>
+                r.zona || ""
+            )
+            .filter(Boolean)
+        ),
+      ].sort();
+    }, [rows]);
 
-  const divisiones = useMemo(() => {
-    return [
-      ...new Set(
-        rows
-          .filter(
-            (r) =>
-              zonaFiltro === "TODAS" ||
-              r.zona === zonaFiltro
-          )
-          .map((r) => r.division || "")
-          .filter(Boolean)
-      ),
-    ].sort();
-  }, [
-    rows,
-    zonaFiltro,
-  ]);
+  const divisiones =
+    useMemo(() => {
+      return [
+        ...new Set(
+          rows
+            .filter(
+              (r) =>
+                zonaFiltro ===
+                  "TODAS" ||
+                r.zona ===
+                  zonaFiltro
+            )
+            .map(
+              (r) =>
+                r.division ||
+                ""
+            )
+            .filter(Boolean)
+        ),
+      ].sort();
+    }, [
+      rows,
+      zonaFiltro,
+    ]);
 
-  const equipos = useMemo(() => {
-    return [
-      ...new Set(
-        rows
-          .filter((r) => {
-            if (
-              zonaFiltro !== "TODAS" &&
-              r.zona !== zonaFiltro
-            ) {
-              return false;
-            }
+  const equipos =
+    useMemo(() => {
+      return [
+        ...new Set(
+          rows
+            .filter(
+              (r) => {
+                if (
+                  zonaFiltro !==
+                    "TODAS" &&
+                  r.zona !==
+                    zonaFiltro
+                ) {
+                  return false;
+                }
 
-            if (
-              divisionFiltro !== "TODAS" &&
-              r.division !== divisionFiltro
-            ) {
-              return false;
-            }
+                if (
+                  divisionFiltro !==
+                    "TODAS" &&
+                  r.division !==
+                    divisionFiltro
+                ) {
+                  return false;
+                }
 
-            return true;
-          })
-          .map((r) => r.equipo || "")
-          .filter(Boolean)
-      ),
-    ].sort();
-  }, [
-    rows,
-    zonaFiltro,
-    divisionFiltro,
-  ]);
+                return true;
+              }
+            )
+            .map(
+              (r) =>
+                r.equipo || ""
+            )
+            .filter(Boolean)
+        ),
+      ].sort();
+    }, [
+      rows,
+      zonaFiltro,
+      divisionFiltro,
+    ]);
 
-  const filtrados = useMemo(() => {
-    return rows.filter((r) => {
-      if (
-        zonaFiltro !== "TODAS" &&
-        r.zona !== zonaFiltro
-      ) {
-        return false;
-      }
+  const filtrados =
+    useMemo(() => {
+      return rows.filter(
+        (r) => {
+          if (
+            zonaFiltro !==
+              "TODAS" &&
+            r.zona !==
+              zonaFiltro
+          ) {
+            return false;
+          }
 
-      if (
-        divisionFiltro !== "TODAS" &&
-        r.division !== divisionFiltro
-      ) {
-        return false;
-      }
+          if (
+            divisionFiltro !==
+              "TODAS" &&
+            r.division !==
+              divisionFiltro
+          ) {
+            return false;
+          }
 
-      if (
-        equipoFiltro !== "TODOS" &&
-        r.equipo !== equipoFiltro
-      ) {
-        return false;
-      }
+          if (
+            equipoFiltro !==
+              "TODOS" &&
+            r.equipo !==
+              equipoFiltro
+          ) {
+            return false;
+          }
 
-      return true;
-    });
-  }, [
-    rows,
-    zonaFiltro,
-    divisionFiltro,
-    equipoFiltro,
-  ]);
+          return true;
+        }
+      );
+    }, [
+      rows,
+      zonaFiltro,
+      divisionFiltro,
+      equipoFiltro,
+    ]);
 
   useEffect(() => {
-    setDivisionFiltro("TODAS");
-    setEquipoFiltro("TODOS");
+    setDivisionFiltro(
+      "TODAS"
+    );
+
+    setEquipoFiltro(
+      "TODOS"
+    );
   }, [zonaFiltro]);
 
   useEffect(() => {
-    setEquipoFiltro("TODOS");
+    setEquipoFiltro(
+      "TODOS"
+    );
   }, [divisionFiltro]);
 
-  // ============================================================
-  // EDITAR
-  // ============================================================
+  // =========================================================
+  // TOTALIZAR
+  // =========================================================
 
-  function editar(
-    slpcode: number,
-    campo: keyof GestionEdit,
-    valor: string
-  ) {
-    setGestion((prev) => ({
-      ...prev,
-      [slpcode]: {
-        ...(prev[slpcode] || {
-          proyeccion_total_mes: "",
-          driver: "",
-          acciones_mitigacion: "",
-          monto_mitigacion: "",
-        }),
-        [campo]: valor,
-      },
-    }));
-  }
-
-  // ============================================================
-  // GUARDAR
-  // ============================================================
-
-  async function guardarCambios() {
-    if (!fechaCorte) return;
-
-    try {
-      setGuardando(true);
-      setMensaje("");
-      setError("");
-
-      const payload = filtrados.map((r) => {
-        const g = gestion[r.slpcode] || {
-          proyeccion_total_mes: "",
-          driver: "",
-          acciones_mitigacion: "",
-          monto_mitigacion: "",
-        };
-
-        return {
-          fecha_corte: fechaCorte,
-          slpcode: r.slpcode,
-
-          proyeccion_total_mes:
-            n(g.proyeccion_total_mes),
-
-          driver:
-            g.driver?.trim() || null,
-
-          acciones_mitigacion:
-            g.acciones_mitigacion?.trim() || null,
-
-          monto_mitigacion:
-            n(g.monto_mitigacion),
-
-          updated_at:
-            new Date().toISOString(),
-
-          updated_by:
-            emailUsuario || null,
-        };
-      });
-
-      const { error } = await supabase
-        .from("avance_diario_gestion")
-        .upsert(
-          payload,
-          {
-            onConflict:
-              "fecha_corte,slpcode",
-          }
-        );
-
-      if (error) {
-        throw error;
-      }
-
-      setMensaje(
-        "Cambios guardados correctamente."
-      );
-    } catch (err: any) {
-      console.error(err);
-
-      setError(
-        err?.message ||
-          "No fue posible guardar los cambios."
-      );
-    } finally {
-      setGuardando(false);
-    }
-  }
-
-  // ============================================================
-  // CÁLCULO POR VENDEDOR
-  // ============================================================
-
-  function calc(r: ReporteRow) {
-    const g = gestion[r.slpcode];
-
-    const meta =
-      n(r.meta_mes);
-
-    const quimicos =
-      n(r.facturado_quimicos);
-
-    const otros =
-      n(r.facturado_otros);
-
-    const ventaTotal =
-      n(r.facturado_total);
-
-    const proyeccion =
-      n(g?.proyeccion_total_mes);
-
-    const mitigacion =
-      n(g?.monto_mitigacion);
-
-    const avance =
-      meta > 0
-        ? (quimicos / meta) * 100
-        : 0;
-
-    const cumplimiento =
-      meta > 0
-        ? (proyeccion / meta) * 100
-        : 0;
-
-    const diferencia =
-      proyeccion - meta;
-
-    const total =
-      proyeccion + mitigacion;
-
-    const cumplimientoFinal =
-      meta > 0
-        ? (total / meta) * 100
-        : 0;
-
-    return {
-      meta,
-      quimicos,
-      otros,
-      ventaTotal,
-      avance,
-      proyeccion,
-      cumplimiento,
-      diferencia,
-      mitigacion,
-      total,
-      cumplimientoFinal,
-    };
-  }
-
-  // ============================================================
-  // AGRUPACIÓN ZONA
-  // ============================================================
-
-  const grupos = useMemo(() => {
-    const mapa = new Map<string, ReporteRow[]>();
-
-    filtrados.forEach((r) => {
-      const zona =
-        r.zona || "SIN ZONA";
-
-      if (!mapa.has(zona)) {
-        mapa.set(zona, []);
-      }
-
-      mapa.get(zona)!.push(r);
-    });
-
-    return [...mapa.entries()];
-  }, [filtrados]);
-
-  // ============================================================
-  // TOTALES
-  // ============================================================
-
-  function totalGrupo(
+  function totalizar(
     lista: ReporteRow[]
   ) {
-    let meta = 0;
-    let quimicos = 0;
-    let otros = 0;
-    let ventaTotal = 0;
-    let proyeccion = 0;
-    let mitigacion = 0;
+    const total = {
+      meta: 0,
+
+      facturadoQuimicos: 0,
+      facturadoOtros: 0,
+      facturadoTotal: 0,
+
+      pedidosQuimicos: 0,
+      pedidosOtros: 0,
+      pedidosTotal: 0,
+
+      entregasQuimicos: 0,
+      entregasOtros: 0,
+      entregasTotal: 0,
+
+      cierreQuimicos: 0,
+      cierreOtros: 0,
+      cierreTotal: 0,
+    };
 
     lista.forEach((r) => {
-      const c = calc(r);
+      total.meta +=
+        num(r.meta_mes);
 
-      meta += c.meta;
-      quimicos += c.quimicos;
-      otros += c.otros;
-      ventaTotal += c.ventaTotal;
-      proyeccion += c.proyeccion;
-      mitigacion += c.mitigacion;
+      total.facturadoQuimicos +=
+        num(
+          r.facturado_quimicos
+        );
+
+      total.facturadoOtros +=
+        num(
+          r.facturado_otros
+        );
+
+      total.facturadoTotal +=
+        num(
+          r.facturado_total
+        );
+
+      total.pedidosQuimicos +=
+        num(
+          r.pedidos_quimicos
+        );
+
+      total.pedidosOtros +=
+        num(
+          r.pedidos_otros
+        );
+
+      total.pedidosTotal +=
+        num(
+          r.pedidos_total
+        );
+
+      total.entregasQuimicos +=
+        num(
+          r.entregas_quimicos
+        );
+
+      total.entregasOtros +=
+        num(
+          r.entregas_otros
+        );
+
+      total.entregasTotal +=
+        num(
+          r.entregas_total
+        );
+
+      total.cierreQuimicos +=
+        num(
+          r.cierre_quimicos
+        );
+
+      total.cierreOtros +=
+        num(
+          r.cierre_otros
+        );
+
+      total.cierreTotal +=
+        num(
+          r.cierre_total
+        );
     });
 
-    const avance =
-      meta > 0
-        ? (quimicos / meta) * 100
-        : 0;
-
-    const cumplimiento =
-      meta > 0
-        ? (proyeccion / meta) * 100
-        : 0;
-
-    const diferencia =
-      proyeccion - meta;
-
-    const total =
-      proyeccion + mitigacion;
-
-    const cumplimientoFinal =
-      meta > 0
-        ? (total / meta) * 100
-        : 0;
-
     return {
-      meta,
-      quimicos,
-      otros,
-      ventaTotal,
-      avance,
-      proyeccion,
-      cumplimiento,
-      diferencia,
-      mitigacion,
-      total,
-      cumplimientoFinal,
+      ...total,
+
+      avance:
+        total.meta > 0
+          ? (
+              total.facturadoQuimicos /
+              total.meta
+            ) *
+            100
+          : 0,
+
+      cierrePct:
+        total.meta > 0
+          ? (
+              total.cierreQuimicos /
+              total.meta
+            ) *
+            100
+          : 0,
+
+      faltante:
+        total.meta -
+        total.facturadoQuimicos,
     };
   }
 
-  const totalEmpresa =
+  const totalGeneral =
     useMemo(
-      () => totalGrupo(filtrados),
-      [
-        filtrados,
-        gestion,
-      ]
+      () =>
+        totalizar(
+          filtrados
+        ),
+      [filtrados]
     );
+
+  // =========================================================
+  // AGRUPAR POR ZONA
+  // =========================================================
+
+  const grupos =
+    useMemo(() => {
+      const mapa =
+        new Map<
+          string,
+          ReporteRow[]
+        >();
+
+      filtrados.forEach(
+        (r) => {
+          const zona =
+            r.zona ||
+            "SIN ZONA";
+
+          if (
+            !mapa.has(zona)
+          ) {
+            mapa.set(
+              zona,
+              []
+            );
+          }
+
+          mapa
+            .get(zona)!
+            .push(r);
+        }
+      );
+
+      const orden: Record<
+        string,
+        number
+      > = {
+        CENTRO: 1,
+        NORTE: 2,
+        SUR: 3,
+      };
+
+      return [
+        ...mapa.entries(),
+      ].sort(
+        ([a], [b]) =>
+          (orden[a] || 99) -
+          (orden[b] || 99)
+      );
+    }, [filtrados]);
+
+  // =========================================================
+  // ÚLTIMA SINCRONIZACIÓN
+  // =========================================================
 
   const ultimaSync =
     useMemo(() => {
-      const fechas = rows
-        .map((r) => r.synced_at)
-        .filter(
-          (x): x is string =>
-            Boolean(x)
-        )
-        .sort();
+      if (
+        rows.length === 0
+      ) {
+        return null;
+      }
 
-      return fechas.length
-        ? fechas[
-            fechas.length - 1
-          ]
+      const fechas =
+        rows
+          .map(
+            (r) =>
+              r.synced_at
+          )
+          .filter(
+            (
+              x
+            ): x is string =>
+              !!x
+          )
+          .map(
+            (x) =>
+              new Date(x)
+          )
+          .sort(
+            (a, b) =>
+              b.getTime() -
+              a.getTime()
+          );
+
+      return fechas[0]
+        ? fechas[0].toISOString()
         : null;
     }, [rows]);
 
-  // ============================================================
+  // =========================================================
   // RENDER
-  // ============================================================
+  // =========================================================
 
   return (
     <div className="space-y-5">
-      {/* CABECERA */}
+      {/* HEADER */}
 
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">
             Avance Diario
           </h1>
 
           <p className="mt-1 text-sm text-gray-500">
-            Ventas netas, proyección de cierre y acciones de mitigación.
+            Seguimiento automático de
+            ventas, metas, pedidos,
+            entregas y cierre potencial.
           </p>
         </div>
 
-        <div className="text-sm text-gray-500">
-          Última sincronización SAP:{" "}
-          <strong>
-            {fechaHora(ultimaSync)}
-          </strong>
+        <div className="text-right">
+          <div className="text-xs uppercase text-gray-400">
+            Última sincronización SAP
+          </div>
+
+          <div className="mt-1 text-sm font-semibold text-gray-700">
+            {formatSync(
+              ultimaSync
+            )}
+          </div>
+
+          <Link
+            href="/tablero-control"
+            className="mt-2 inline-block text-sm font-semibold text-[#1f4ed8] hover:underline"
+          >
+            ← Volver al Tablero
+          </Link>
         </div>
       </div>
 
@@ -735,7 +690,9 @@ export default function AvanceDiarioPage() {
           <Filtro label="Fecha de corte">
             <input
               type="date"
-              value={fechaCorte}
+              value={
+                fechaCorte
+              }
               onChange={(e) =>
                 setFechaCorte(
                   e.target.value
@@ -747,7 +704,9 @@ export default function AvanceDiarioPage() {
 
           <Filtro label="Zona">
             <select
-              value={zonaFiltro}
+              value={
+                zonaFiltro
+              }
               onChange={(e) =>
                 setZonaFiltro(
                   e.target.value
@@ -759,20 +718,24 @@ export default function AvanceDiarioPage() {
                 Todas
               </option>
 
-              {zonas.map((z) => (
-                <option
-                  key={z}
-                  value={z}
-                >
-                  {z}
-                </option>
-              ))}
+              {zonas.map(
+                (z) => (
+                  <option
+                    key={z}
+                    value={z}
+                  >
+                    {z}
+                  </option>
+                )
+              )}
             </select>
           </Filtro>
 
           <Filtro label="División">
             <select
-              value={divisionFiltro}
+              value={
+                divisionFiltro
+              }
               onChange={(e) =>
                 setDivisionFiltro(
                   e.target.value
@@ -799,7 +762,9 @@ export default function AvanceDiarioPage() {
 
           <Filtro label="Equipo">
             <select
-              value={equipoFiltro}
+              value={
+                equipoFiltro
+              }
               onChange={(e) =>
                 setEquipoFiltro(
                   e.target.value
@@ -824,24 +789,21 @@ export default function AvanceDiarioPage() {
             </select>
           </Filtro>
 
-          <div className="flex items-end gap-2">
+          <div className="flex items-end">
             <button
               onClick={() =>
-                cargar(fechaCorte)
+                cargar(
+                  fechaCorte
+                )
               }
-              className="flex-1 rounded-lg border px-4 py-2 font-semibold hover:bg-gray-50"
+              disabled={
+                loading
+              }
+              className="w-full rounded-lg bg-[#1f4ed8] px-4 py-2 font-semibold text-white hover:bg-[#163bb8] disabled:opacity-50"
             >
-              Actualizar
-            </button>
-
-            <button
-              onClick={guardarCambios}
-              disabled={guardando}
-              className="flex-1 rounded-lg bg-[#1f4ed8] px-4 py-2 font-semibold text-white hover:bg-[#163bb8] disabled:opacity-50"
-            >
-              {guardando
-                ? "Guardando..."
-                : "Guardar"}
+              {loading
+                ? "Actualizando..."
+                : "Actualizar"}
             </button>
           </div>
         </div>
@@ -853,311 +815,390 @@ export default function AvanceDiarioPage() {
         </div>
       )}
 
-      {mensaje && (
-        <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
-          {mensaje}
-        </div>
-      )}
+      {/* KPIs */}
 
-      {/* TOTAL EMPRESA */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Kpi
+          titulo="Meta Químicos"
+          valor={money(
+            totalGeneral.meta
+          )}
+          detalle="Meta mensual"
+        />
 
-      <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
-        <table className="min-w-[1900px] w-full border-collapse text-xs">
-          <thead>
-            <tr>
-              <th
-                colSpan={7}
-                className="border bg-gray-100 px-3 py-2 text-left text-sm font-bold"
-              >
-                AVANCE REAL
-              </th>
+        <Kpi
+          titulo="Venta Químicos"
+          valor={money(
+            totalGeneral.facturadoQuimicos
+          )}
+          detalle={`${pct(
+            totalGeneral.avance
+          )} de la meta`}
+          destacado
+        />
 
-              <th
-                colSpan={8}
-                className="border bg-yellow-100 px-3 py-2 text-center text-sm font-bold"
-              >
-                PROYECCIÓN Y ACCIONES DE MITIGACIÓN
-              </th>
-            </tr>
+        <Kpi
+          titulo="Venta Total"
+          valor={money(
+            totalGeneral.facturadoTotal
+          )}
+          detalle={`Otros: ${money(
+            totalGeneral.facturadoOtros
+          )}`}
+        />
 
-            <tr className="bg-gray-50">
-              <Cab>Zona</Cab>
-              <Cab>Empleado Ventas</Cab>
-              <Cab>Meta del Mes</Cab>
-              <Cab>Vta Neta Químicos</Cab>
-              <Cab>% Tot</Cab>
-              <Cab>Venta Neta Otros</Cab>
-              <Cab>Venta Neta Total</Cab>
+        <Kpi
+          titulo="Faltante Meta"
+          valor={money(
+            Math.max(
+              totalGeneral.faltante,
+              0
+            )
+          )}
+          detalle={
+            totalGeneral.faltante <=
+            0
+              ? "Meta alcanzada"
+              : "Sólo químicos"
+          }
+        />
 
-              <Cab amarillo>
-                Proyección Total Mes
-              </Cab>
+        <Kpi
+          titulo="Pedidos Abiertos"
+          valor={money(
+            totalGeneral.pedidosTotal
+          )}
+          detalle={`Químicos: ${money(
+            totalGeneral.pedidosQuimicos
+          )}`}
+        />
 
-              <Cab verde>
-                % Cum
-              </Cab>
+        <Kpi
+          titulo="Entregas"
+          valor={money(
+            totalGeneral.entregasTotal
+          )}
+          detalle={`Químicos: ${money(
+            totalGeneral.entregasQuimicos
+          )}`}
+        />
 
-              <Cab>
-                Diferencia
-              </Cab>
+        <Kpi
+          titulo="Cierre Potencial Q"
+          valor={money(
+            totalGeneral.cierreQuimicos
+          )}
+          detalle={`${pct(
+            totalGeneral.cierrePct
+          )} de la meta`}
+          destacado
+        />
 
-              <Cab>
-                Driver
-              </Cab>
-
-              <Cab>
-                Acciones de Mitigación para llegar a Meta con Riesgo
-              </Cab>
-
-              <Cab amarillo>
-                $$ Mitigación
-              </Cab>
-
-              <Cab verde>
-                Total
-              </Cab>
-
-              <Cab verde>
-                % Cum
-              </Cab>
-            </tr>
-          </thead>
-
-          <tbody>
-            {/* TOTAL EMPRESA */}
-
-            <FilaTotal
-              nombre="TOTAL"
-              zona=""
-              t={totalEmpresa}
-            />
-
-            {/* ZONAS */}
-
-            {grupos.map(
-              ([zona, lista]) => {
-                const totalZona =
-                  totalGrupo(lista);
-
-                return (
-                  <React.Fragment
-                    key={zona}
-                  >
-                    <FilaTotal
-                      nombre={`Total ${zona}`}
-                      zona={zona}
-                      t={totalZona}
-                    />
-
-                    {lista.map(
-                      (r) => {
-                        const c =
-                          calc(r);
-
-                        const g =
-                          gestion[
-                            r.slpcode
-                          ] || {
-                            proyeccion_total_mes:
-                              "",
-                            driver: "",
-                            acciones_mitigacion:
-                              "",
-                            monto_mitigacion:
-                              "",
-                          };
-
-                        return (
-                          <tr
-                            key={`${r.fecha_corte}-${r.slpcode}`}
-                            className="hover:bg-blue-50"
-                          >
-                            <Celda>
-                              {r.zona}
-                            </Celda>
-
-                            <Celda
-                              izquierda
-                              fuerte
-                            >
-                              {r.vendedor}
-                            </Celda>
-
-                            <Celda>
-                              {money(
-                                c.meta
-                              )}
-                            </Celda>
-
-                            <Celda>
-                              {money(
-                                c.quimicos
-                              )}
-                            </Celda>
-
-                            <Celda
-                              clase={colorPct(
-                                c.avance
-                              )}
-                            >
-                              {pct(
-                                c.avance
-                              )}
-                            </Celda>
-
-                            <Celda>
-                              {money(
-                                c.otros
-                              )}
-                            </Celda>
-
-                            <Celda fuerte>
-                              {money(
-                                c.ventaTotal
-                              )}
-                            </Celda>
-
-                            {/* PROYECCIÓN */}
-
-                            <td className="border bg-yellow-50 p-1">
-                              <input
-                                type="number"
-                                value={
-                                  g.proyeccion_total_mes
-                                }
-                                onChange={(
-                                  e
-                                ) =>
-                                  editar(
-                                    r.slpcode,
-                                    "proyeccion_total_mes",
-                                    e.target.value
-                                  )
-                                }
-                                className="w-32 rounded border border-yellow-300 bg-yellow-50 px-2 py-1 text-right"
-                              />
-                            </td>
-
-                            <Celda
-                              clase={colorPct(
-                                c.cumplimiento
-                              )}
-                            >
-                              {pct(
-                                c.cumplimiento
-                              )}
-                            </Celda>
-
-                            <Celda
-                              clase={colorDiferencia(
-                                c.diferencia
-                              )}
-                            >
-                              {money(
-                                c.diferencia
-                              )}
-                            </Celda>
-
-                            <td className="min-w-[220px] border p-1">
-                              <textarea
-                                value={
-                                  g.driver
-                                }
-                                onChange={(
-                                  e
-                                ) =>
-                                  editar(
-                                    r.slpcode,
-                                    "driver",
-                                    e.target.value
-                                  )
-                                }
-                                rows={2}
-                                className="w-full resize-y rounded border px-2 py-1"
-                              />
-                            </td>
-
-                            <td className="min-w-[300px] border p-1">
-                              <textarea
-                                value={
-                                  g.acciones_mitigacion
-                                }
-                                onChange={(
-                                  e
-                                ) =>
-                                  editar(
-                                    r.slpcode,
-                                    "acciones_mitigacion",
-                                    e.target.value
-                                  )
-                                }
-                                rows={2}
-                                className="w-full resize-y rounded border px-2 py-1"
-                              />
-                            </td>
-
-                            <td className="border bg-yellow-50 p-1">
-                              <input
-                                type="number"
-                                value={
-                                  g.monto_mitigacion
-                                }
-                                onChange={(
-                                  e
-                                ) =>
-                                  editar(
-                                    r.slpcode,
-                                    "monto_mitigacion",
-                                    e.target.value
-                                  )
-                                }
-                                className="w-28 rounded border border-yellow-300 bg-yellow-50 px-2 py-1 text-right"
-                              />
-                            </td>
-
-                            <Celda
-                              fuerte
-                              clase="bg-green-50"
-                            >
-                              {money(
-                                c.total
-                              )}
-                            </Celda>
-
-                            <Celda
-                              clase={colorPct(
-                                c.cumplimientoFinal
-                              )}
-                            >
-                              {pct(
-                                c.cumplimientoFinal
-                              )}
-                            </Celda>
-                          </tr>
-                        );
-                      }
-                    )}
-                  </React.Fragment>
-                );
-              }
-            )}
-          </tbody>
-        </table>
+        <Kpi
+          titulo="Cierre Potencial Total"
+          valor={money(
+            totalGeneral.cierreTotal
+          )}
+          detalle={`Otros: ${money(
+            totalGeneral.cierreOtros
+          )}`}
+        />
       </div>
 
-      {!loading &&
-        filtrados.length === 0 && (
-          <div className="rounded-xl border bg-white p-10 text-center text-gray-500">
-            No existen registros para los filtros seleccionados.
-          </div>
-        )}
+      {/* RESUMEN POR ZONA */}
+
+      <div className="rounded-xl border bg-white shadow-sm">
+        <div className="border-b px-5 py-4">
+          <h2 className="font-bold text-gray-900">
+            Resumen por Zona
+          </h2>
+
+          <p className="mt-1 text-xs text-gray-500">
+            Valores acumulados a la fecha
+            seleccionada.
+          </p>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-[1100px] w-full border-collapse text-sm">
+            <thead>
+              <tr className="bg-gray-50">
+                <Th>Zona</Th>
+                <Th>Meta Q</Th>
+                <Th>Venta Q</Th>
+                <Th>% Avance</Th>
+                <Th>Venta Otros</Th>
+                <Th>Venta Total</Th>
+                <Th>Pedidos</Th>
+                <Th>Entregas</Th>
+                <Th>Cierre Q</Th>
+                <Th>% Cierre</Th>
+                <Th>Cierre Total</Th>
+              </tr>
+            </thead>
+
+            <tbody>
+              <FilaResumen
+                nombre="TOTAL"
+                total={
+                  totalGeneral
+                }
+                totalGeneral
+              />
+
+              {grupos.map(
+                ([
+                  zona,
+                  lista,
+                ]) => {
+                  const t =
+                    totalizar(
+                      lista
+                    );
+
+                  return (
+                    <FilaResumen
+                      key={
+                        zona
+                      }
+                      nombre={
+                        zona
+                      }
+                      total={
+                        t
+                      }
+                    />
+                  );
+                }
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* DETALLE VENDEDORES */}
+
+      <div className="rounded-xl border bg-white shadow-sm">
+        <div className="border-b px-5 py-4">
+          <h2 className="font-bold text-gray-900">
+            Detalle por Vendedor
+          </h2>
+
+          <p className="mt-1 text-xs text-gray-500">
+            Información proveniente
+            automáticamente de SAP.
+          </p>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-[1450px] w-full border-collapse text-xs">
+            <thead>
+              <tr className="bg-gray-50">
+                <Th>
+                  Zona
+                </Th>
+
+                <Th>
+                  Vendedor
+                </Th>
+
+                <Th>
+                  División
+                </Th>
+
+                <Th>
+                  Equipo
+                </Th>
+
+                <Th>
+                  Meta Q
+                </Th>
+
+                <Th>
+                  Venta Q
+                </Th>
+
+                <Th>
+                  % Avance
+                </Th>
+
+                <Th>
+                  Otros
+                </Th>
+
+                <Th>
+                  Venta Total
+                </Th>
+
+                <Th>
+                  Pedidos
+                </Th>
+
+                <Th>
+                  Entregas
+                </Th>
+
+                <Th>
+                  Cierre Q
+                </Th>
+
+                <Th>
+                  % Cierre
+                </Th>
+
+                <Th>
+                  Cierre Total
+                </Th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {filtrados.map(
+                (r) => {
+                  const meta =
+                    num(
+                      r.meta_mes
+                    );
+
+                  const ventaQ =
+                    num(
+                      r.facturado_quimicos
+                    );
+
+                  const cierreQ =
+                    num(
+                      r.cierre_quimicos
+                    );
+
+                  const avance =
+                    meta > 0
+                      ? (
+                          ventaQ /
+                          meta
+                        ) *
+                        100
+                      : 0;
+
+                  const cierrePct =
+                    meta > 0
+                      ? (
+                          cierreQ /
+                          meta
+                        ) *
+                        100
+                      : 0;
+
+                  return (
+                    <tr
+                      key={`${r.fecha_corte}-${r.slpcode}`}
+                      className="hover:bg-gray-50"
+                    >
+                      <Td izquierda>
+                        {r.zona ||
+                          "—"}
+                      </Td>
+
+                      <Td
+                        izquierda
+                        fuerte
+                      >
+                        {
+                          r.vendedor
+                        }
+                      </Td>
+
+                      <Td izquierda>
+                        {r.division ||
+                          "—"}
+                      </Td>
+
+                      <Td izquierda>
+                        {r.equipo ||
+                          "—"}
+                      </Td>
+
+                      <Td>
+                        {money(
+                          meta
+                        )}
+                      </Td>
+
+                      <Td>
+                        {money(
+                          ventaQ
+                        )}
+                      </Td>
+
+                      <Td
+                        clase={clasePct(
+                          avance
+                        )}
+                      >
+                        {pct(
+                          avance
+                        )}
+                      </Td>
+
+                      <Td>
+                        {money(
+                          r.facturado_otros
+                        )}
+                      </Td>
+
+                      <Td fuerte>
+                        {money(
+                          r.facturado_total
+                        )}
+                      </Td>
+
+                      <Td>
+                        {money(
+                          r.pedidos_total
+                        )}
+                      </Td>
+
+                      <Td>
+                        {money(
+                          r.entregas_total
+                        )}
+                      </Td>
+
+                      <Td>
+                        {money(
+                          cierreQ
+                        )}
+                      </Td>
+
+                      <Td
+                        clase={clasePct(
+                          cierrePct
+                        )}
+                      >
+                        {pct(
+                          cierrePct
+                        )}
+                      </Td>
+
+                      <Td fuerte>
+                        {money(
+                          r.cierre_total
+                        )}
+                      </Td>
+                    </tr>
+                  );
+                }
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
 
-// ============================================================
+// =========================================================
 // COMPONENTES
-// ============================================================
+// =========================================================
 
 function Filtro({
   label,
@@ -1177,31 +1218,59 @@ function Filtro({
   );
 }
 
-function Cab({
-  children,
-  amarillo = false,
-  verde = false,
+function Kpi({
+  titulo,
+  valor,
+  detalle,
+  destacado = false,
 }: {
-  children: React.ReactNode;
-  amarillo?: boolean;
-  verde?: boolean;
+  titulo: string;
+  valor: string;
+  detalle: string;
+  destacado?: boolean;
 }) {
   return (
-    <th
-      className={`border px-2 py-2 text-center font-bold ${
-        amarillo
-          ? "bg-yellow-200"
-          : verde
-          ? "bg-green-200"
-          : "bg-gray-100"
+    <div
+      className={`rounded-xl border bg-white p-5 shadow-sm ${
+        destacado
+          ? "border-blue-200"
+          : ""
       }`}
     >
+      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+        {titulo}
+      </div>
+
+      <div className="mt-2 text-2xl font-bold text-gray-900">
+        {valor}
+      </div>
+
+      <div
+        className={`mt-2 text-sm ${
+          destacado
+            ? "font-semibold text-[#1f4ed8]"
+            : "text-gray-500"
+        }`}
+      >
+        {detalle}
+      </div>
+    </div>
+  );
+}
+
+function Th({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <th className="border-b border-r px-3 py-3 text-center font-semibold text-gray-700 last:border-r-0">
       {children}
     </th>
   );
 }
 
-function Celda({
+function Td({
   children,
   izquierda = false,
   fuerte = false,
@@ -1214,7 +1283,7 @@ function Celda({
 }) {
   return (
     <td
-      className={`border px-2 py-2 ${
+      className={`border-b border-r px-3 py-2.5 last:border-r-0 ${
         izquierda
           ? "text-left"
           : "text-right"
@@ -1229,102 +1298,113 @@ function Celda({
   );
 }
 
-function FilaTotal({
-  zona,
+function FilaResumen({
   nombre,
-  t,
+  total,
+  totalGeneral = false,
 }: {
-  zona: string;
   nombre: string;
-  t: {
+
+  total: {
     meta: number;
-    quimicos: number;
-    otros: number;
-    ventaTotal: number;
+    facturadoQuimicos: number;
+    facturadoOtros: number;
+    facturadoTotal: number;
+    pedidosQuimicos: number;
+    pedidosOtros: number;
+    pedidosTotal: number;
+    entregasQuimicos: number;
+    entregasOtros: number;
+    entregasTotal: number;
+    cierreQuimicos: number;
+    cierreOtros: number;
+    cierreTotal: number;
     avance: number;
-    proyeccion: number;
-    cumplimiento: number;
-    diferencia: number;
-    mitigacion: number;
-    total: number;
-    cumplimientoFinal: number;
+    cierrePct: number;
+    faltante: number;
   };
+
+  totalGeneral?: boolean;
 }) {
   return (
-    <tr className="bg-gray-200 font-bold">
-      <td className="border px-2 py-2 text-left">
-        {zona}
-      </td>
-
-      <td className="border px-2 py-2 text-left">
+    <tr
+      className={
+        totalGeneral
+          ? "bg-gray-200 font-bold"
+          : "bg-white font-semibold"
+      }
+    >
+      <Td izquierda>
         {nombre}
-      </td>
+      </Td>
 
-      <td className="border px-2 py-2 text-right">
-        {money(t.meta)}
-      </td>
+      <Td>
+        {money(
+          total.meta
+        )}
+      </Td>
 
-      <td className="border px-2 py-2 text-right">
-        {money(t.quimicos)}
-      </td>
+      <Td>
+        {money(
+          total.facturadoQuimicos
+        )}
+      </Td>
 
-      <td
-        className={`border px-2 py-2 text-right ${colorPct(
-          t.avance
-        )}`}
-      >
-        {pct(t.avance)}
-      </td>
-
-      <td className="border px-2 py-2 text-right">
-        {money(t.otros)}
-      </td>
-
-      <td className="border px-2 py-2 text-right">
-        {money(t.ventaTotal)}
-      </td>
-
-      <td className="border bg-yellow-100 px-2 py-2 text-right">
-        {money(t.proyeccion)}
-      </td>
-
-      <td
-        className={`border px-2 py-2 text-right ${colorPct(
-          t.cumplimiento
-        )}`}
-      >
-        {pct(t.cumplimiento)}
-      </td>
-
-      <td
-        className={`border px-2 py-2 text-right ${colorDiferencia(
-          t.diferencia
-        )}`}
-      >
-        {money(t.diferencia)}
-      </td>
-
-      <td className="border bg-gray-100" />
-
-      <td className="border bg-gray-100" />
-
-      <td className="border bg-yellow-100 px-2 py-2 text-right">
-        {money(t.mitigacion)}
-      </td>
-
-      <td className="border bg-green-100 px-2 py-2 text-right">
-        {money(t.total)}
-      </td>
-
-      <td
-        className={`border px-2 py-2 text-right ${colorPct(
-          t.cumplimientoFinal
-        )}`}
+      <Td
+        clase={clasePct(
+          total.avance
+        )}
       >
         {pct(
-          t.cumplimientoFinal
+          total.avance
         )}
-      </td>
+      </Td>
+
+      <Td>
+        {money(
+          total.facturadoOtros
+        )}
+      </Td>
+
+      <Td>
+        {money(
+          total.facturadoTotal
+        )}
+      </Td>
+
+      <Td>
+        {money(
+          total.pedidosTotal
+        )}
+      </Td>
+
+      <Td>
+        {money(
+          total.entregasTotal
+        )}
+      </Td>
+
+      <Td>
+        {money(
+          total.cierreQuimicos
+        )}
+      </Td>
+
+      <Td
+        clase={clasePct(
+          total.cierrePct
+        )}
+      >
+        {pct(
+          total.cierrePct
+        )}
+      </Td>
+
+      <Td>
+        {money(
+          total.cierreTotal
+        )}
+      </Td>
     </tr>
   );
 }
