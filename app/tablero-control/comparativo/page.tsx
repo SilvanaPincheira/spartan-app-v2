@@ -134,15 +134,11 @@ function zonaDe(row: VentaRow) {
 }
 
 function vendedorKey(nombre: string) {
-  return String(nombre || "")
-    .trim()
-    .toUpperCase()
-    .replace(
-      /^(IND_HL|IND_PR|IND|BSC|FB|HC|IN)\s+/i,
-      ""
-    )
-    .replace(/\s+/g, " ");
-}
+    return String(nombre || "")
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, " ");
+  }
 
 function valorMetrica(
   row: VentaRow,
