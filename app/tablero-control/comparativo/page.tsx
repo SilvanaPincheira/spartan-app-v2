@@ -242,162 +242,302 @@ export default function ComparativoPage() {
   // CARGAR CY + LY
   // ========================================================
 
-  const cargar =
-    useCallback(
-      async (
-        anioSolicitado?: number,
-        mesSolicitado?: number
-      ) => {
-        try {
-          setLoading(true);
-          setError("");
-
-          let year =
-            anioSolicitado ||
-            anio;
-
-          let month =
-            mesSolicitado ||
-            mes;
-
-          if (!year) {
-            const ultimo =
-              await obtenerUltimoPeriodo();
-
-            if (!ultimo) {
-              setError(
-                "No existen datos históricos."
-              );
-
-              return;
-            }
-
-            year =
-              ultimo.anio;
-
-            month =
-              ultimo.mes;
-
-            setAnio(year);
-            setMes(month);
+  const cargar = useCallback(
+    async (
+      anioSolicitado?: number,
+      mesSolicitado?: number
+    ) => {
+      try {
+        setLoading(true);
+        setError("");
+  
+        let year = anioSolicitado || anio;
+        let month = mesSolicitado || mes;
+  
+        // =====================================================
+        // DETERMINAR PERÍODO
+        // =====================================================
+  
+        if (!year) {
+          const ultimo =
+            await obtenerUltimoPeriodo();
+  
+          if (!ultimo) {
+            setError(
+              "No existen datos históricos."
+            );
+            return;
           }
-
-          if (!month) {
-            const {
-              data: ultimoMes,
-              error: mesError,
-            } = await supabase
-              .from(
-                "reporte_ventas_mensual"
-              )
-              .select("mes")
-              .eq(
-                "anio",
-                year
-              )
-              .order("mes", {
-                ascending: false,
-              })
-              .limit(1);
-
-            if (mesError) {
-              throw mesError;
-            }
-
-            month =
-              Number(
-                ultimoMes?.[0]
-                  ?.mes || 1
-              );
-
-            setMes(month);
+  
+          year = ultimo.anio;
+          month = ultimo.mes;
+  
+          setAnio(year);
+          setMes(month);
+        }
+  
+        if (!month) {
+          const {
+            data: ultimoMes,
+            error: mesError,
+          } = await supabase
+            .from("reporte_ventas_mensual")
+            .select("mes")
+            .eq("anio", year)
+            .order("mes", {
+              ascending: false,
+            })
+            .limit(1);
+  
+          if (mesError) {
+            throw mesError;
           }
-
-          const campos = `
-            anio,
-            mes,
+  
+          month = Number(
+            ultimoMes?.[0]?.mes || 1
+          );
+  
+          setMes(month);
+        }
+  
+        // =====================================================
+        // HISTÓRICO MENSUAL
+        // =====================================================
+  
+        const camposMensual = `
+          anio,
+          mes,
+          vendedor,
+          zona,
+          gerencia,
+          supervisor,
+          division,
+          equipo,
+          venta_quimicos,
+          venta_otros,
+          venta_total
+        `;
+  
+        const [
+          actualResult,
+          anteriorResult,
+        ] = await Promise.all([
+          supabase
+            .from("reporte_ventas_mensual")
+            .select(camposMensual)
+            .eq("anio", year)
+            .order("mes"),
+  
+          supabase
+            .from("reporte_ventas_mensual")
+            .select(camposMensual)
+            .eq("anio", year - 1)
+            .order("mes"),
+        ]);
+  
+        if (actualResult.error) {
+          throw actualResult.error;
+        }
+  
+        if (anteriorResult.error) {
+          throw anteriorResult.error;
+        }
+  
+        const mensualCY =
+          (actualResult.data || []) as VentaRow[];
+  
+        const mensualLY =
+          (anteriorResult.data || []) as VentaRow[];
+  
+        // =====================================================
+        // ¿ES EL MES ACTUAL?
+        // =====================================================
+  
+        const hoy = new Date();
+  
+        const esMesActual =
+          year === hoy.getFullYear() &&
+          month === hoy.getMonth() + 1;
+  
+        // Si NO es el mes actual, usamos solamente histórico.
+        if (!esMesActual) {
+          setRows([
+            ...mensualLY,
+            ...mensualCY,
+          ]);
+  
+          return;
+        }
+  
+        // =====================================================
+        // BUSCAR ÚLTIMO CORTE DEL AVANCE DIARIO
+        // =====================================================
+  
+        const {
+          data: corteData,
+          error: corteError,
+        } = await supabase
+          .from("reporte_ventas_diario")
+          .select("fecha_corte")
+          .eq("anio", year)
+          .eq("mes", month)
+          .order("fecha_corte", {
+            ascending: false,
+          })
+          .limit(1);
+  
+        if (corteError) {
+          throw corteError;
+        }
+  
+        const fechaCorte =
+          corteData?.[0]?.fecha_corte;
+  
+        // Si todavía no hay Avance Diario,
+        // mantenemos el histórico importado.
+        if (!fechaCorte) {
+          setRows([
+            ...mensualLY,
+            ...mensualCY,
+          ]);
+  
+          return;
+        }
+  
+        // =====================================================
+        // LEER MES ACTUAL DIRECTAMENTE DEL DIARIO
+        // =====================================================
+  
+        const {
+          data: diarioData,
+          error: diarioError,
+        } = await supabase
+          .from("reporte_ventas_diario")
+          .select(`
             vendedor,
             zona,
-            gerencia,
-            supervisor,
             division,
             equipo,
-            venta_quimicos,
-            venta_otros,
-            venta_total
-          `;
-
-          /*
-           * Se consultan los años por separado.
-           * Así evitamos el límite habitual de 1000 filas
-           * de una consulta grande.
-           */
-
-          const [
-            actualResult,
-            anteriorResult,
-          ] = await Promise.all([
-            supabase
-              .from(
-                "reporte_ventas_mensual"
-              )
-              .select(campos)
-              .eq(
-                "anio",
-                year
-              )
-              .order("mes"),
-
-            supabase
-              .from(
-                "reporte_ventas_mensual"
-              )
-              .select(campos)
-              .eq(
-                "anio",
-                year - 1
-              )
-              .order("mes"),
-          ]);
-
-          if (
-            actualResult.error
-          ) {
-            throw actualResult.error;
-          }
-
-          if (
-            anteriorResult.error
-          ) {
-            throw anteriorResult.error;
-          }
-
-          setRows([
-            ...((anteriorResult.data ||
-              []) as VentaRow[]),
-
-            ...((actualResult.data ||
-              []) as VentaRow[]),
-          ]);
-        } catch (err: any) {
-          console.error(err);
-
-          setError(
-            err?.message ||
-              "No fue posible cargar el comparativo."
-          );
-        } finally {
-          setLoading(false);
+            facturado_quimicos,
+            facturado_otros,
+            facturado_total
+          `)
+          .eq("fecha_corte", fechaCorte);
+  
+        if (diarioError) {
+          throw diarioError;
         }
-      },
-      [
-        supabase,
-        anio,
-        mes,
-        obtenerUltimoPeriodo,
-      ]
-    );
-
+  
+        // =====================================================
+        // METADATOS DEL HISTÓRICO
+        // gerencia / supervisor
+        // =====================================================
+  
+        const metadataMap =
+          new Map<string, VentaRow>();
+  
+        mensualCY
+          .filter(
+            (r) => Number(r.mes) === month
+          )
+          .forEach((r) => {
+            metadataMap.set(
+              vendedorKey(r.vendedor),
+              r
+            );
+          });
+  
+        // =====================================================
+        // TRANSFORMAR DIARIO A FORMATO MENSUAL
+        // =====================================================
+  
+        const mesActualEnVivo: VentaRow[] =
+          (diarioData || []).map(
+            (d: any) => {
+              const historico =
+                metadataMap.get(
+                  vendedorKey(
+                    d.vendedor
+                  )
+                );
+  
+              return {
+                anio: year,
+                mes: month,
+  
+                vendedor:
+                  d.vendedor,
+  
+                zona:
+                  d.zona ??
+                  historico?.zona ??
+                  null,
+  
+                gerencia:
+                  historico?.gerencia ??
+                  null,
+  
+                supervisor:
+                  historico?.supervisor ??
+                  null,
+  
+                division:
+                  d.division ??
+                  historico?.division ??
+                  null,
+  
+                equipo:
+                  d.equipo ??
+                  historico?.equipo ??
+                  null,
+  
+                venta_quimicos:
+                  d.facturado_quimicos,
+  
+                venta_otros:
+                  d.facturado_otros,
+  
+                venta_total:
+                  d.facturado_total,
+              };
+            }
+          );
+  
+        // =====================================================
+        // CY:
+        // Enero - mes anterior = histórico
+        // Mes actual           = SAP / Diario
+        // =====================================================
+  
+        const mesesCerradosCY =
+          mensualCY.filter(
+            (r) =>
+              Number(r.mes) !== month
+          );
+  
+        setRows([
+          ...mensualLY,
+          ...mesesCerradosCY,
+          ...mesActualEnVivo,
+        ]);
+      } catch (err: any) {
+        console.error(err);
+  
+        setError(
+          err?.message ||
+            "No fue posible cargar el comparativo."
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [
+      supabase,
+      anio,
+      mes,
+      obtenerUltimoPeriodo,
+    ]
+  );
   useEffect(() => {
     cargar();
   }, []);
