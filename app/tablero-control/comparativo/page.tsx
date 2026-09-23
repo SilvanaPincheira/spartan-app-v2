@@ -96,7 +96,7 @@ function pct(value: number | null) {
   )}%`;
 }
 
-function variacion(
+function porcentajeCYLY(
   actual: number,
   anterior: number
 ) {
@@ -104,25 +104,21 @@ function variacion(
     return null;
   }
 
-  return (
-    ((actual - anterior) /
-      anterior) *
-    100
-  );
+  return (actual / anterior) * 100;
 }
 
-function claseVariacion(
+function claseCYLY(
   value: number | null
 ) {
   if (value === null) {
     return "bg-gray-50 text-gray-500";
   }
 
-  if (value > 0) {
+  if (value > 100) {
     return "bg-green-100 text-green-800";
   }
 
-  if (value < 0) {
+  if (value < 100) {
     return "bg-red-100 text-red-700";
   }
 
@@ -808,7 +804,7 @@ export default function ComparativoPage() {
           mesLY,
 
         mesVar:
-          variacion(
+          porcentajeCYLY(
             mesCY,
             mesLY
           ),
@@ -821,7 +817,7 @@ export default function ComparativoPage() {
           ytdLY,
 
         ytdVar:
-          variacion(
+          porcentajeCYLY(
             ytdCY,
             ytdLY
           ),
@@ -1090,13 +1086,13 @@ export default function ComparativoPage() {
       ...total,
 
       mesVar:
-        variacion(
+        porcentajeCYLY(
           total.mesCY,
           total.mesLY
         ),
 
       ytdVar:
-        variacion(
+        porcentajeCYLY(
           total.ytdCY,
           total.ytdLY
         ),
@@ -1484,12 +1480,12 @@ export default function ComparativoPage() {
           />
 
           <Kpi
-            titulo="Variación %"
+            titulo="% CY/LY"
             valor={pct(
               totalGeneral.mesVar
             )}
-            detalle="CY vs LY"
-            clase={claseVariacion(
+            detalle="CY / LY"
+            clase={claseCYLY(
               totalGeneral.mesVar
             )}
           />
@@ -1531,12 +1527,12 @@ export default function ComparativoPage() {
           />
 
           <Kpi
-            titulo="Variación YTD %"
+            titulo="% YTD CY/LY"
             valor={pct(
               totalGeneral.ytdVar
             )}
-            detalle="CY vs LY"
-            clase={claseVariacion(
+            detalle="CY / LY"
+            clase={claseCYLY(
               totalGeneral.ytdVar
             )}
           />
@@ -1576,7 +1572,7 @@ export default function ComparativoPage() {
               </Th>
 
               <Th>
-                Var. %
+                % CY/LY
               </Th>
 
               <Th>
@@ -1592,7 +1588,7 @@ export default function ComparativoPage() {
               </Th>
 
               <Th>
-                Var. YTD %
+                % YTD CY/LY
               </Th>
             </tr>
           </thead>
@@ -1814,7 +1810,7 @@ function FilaComparativo({
     mesLY;
 
   const mesVar =
-    variacion(
+    porcentajeCYLY(
       mesCY,
       mesLY
     );
@@ -1824,7 +1820,7 @@ function FilaComparativo({
     ytdLY;
 
   const ytdVar =
-    variacion(
+    porcentajeCYLY(
       ytdCY,
       ytdLY
     );
@@ -1871,7 +1867,7 @@ function FilaComparativo({
       </Td>
 
       <Td
-        clase={claseVariacion(
+        clase={claseCYLY(
           mesVar
         )}
       >
@@ -1899,7 +1895,7 @@ function FilaComparativo({
       </Td>
 
       <Td
-        clase={claseVariacion(
+        clase={claseCYLY(
           ytdVar
         )}
       >
