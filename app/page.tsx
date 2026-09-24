@@ -839,27 +839,8 @@ export default function HomeMenu() {
             {mensaje}
           </p>
 
-          {ejecutivos.length >
-            0 && (
-            <div className="mt-3 text-sm text-gray-500">
-              Vista comercial:{" "}
-              <span className="font-semibold text-gray-700">
-                {ejecutivos.join(
-                  " + "
-                )}
-              </span>
-            </div>
-          )}
-
-          {ultimaSync && (
-            <div className="mt-1 text-xs text-gray-400">
-              Última sincronización
-              SAP:{" "}
-              {formatSync(
-                ultimaSync
-              )}
-            </div>
-          )}
+          
+         
         </section>
 
         {/* MENSAJE ERROR */}
@@ -944,7 +925,7 @@ export default function HomeMenu() {
 
           {/* KPIS PRINCIPALES */}
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 content-start self-start">
             <KpiCard
               titulo="Venta Químicos"
               valor={money(
@@ -1123,37 +1104,26 @@ function KpiCard({
     | "purple";
 }) {
   const estilos = {
-    default:
-      "border-gray-200",
-
-    blue:
-      "border-blue-200",
-
-    green:
-      "border-green-200",
-
-    orange:
-      "border-orange-200",
-
-    purple:
-      "border-purple-200",
+    default: "border-gray-200",
+    blue: "border-blue-200",
+    green: "border-green-200",
+    orange: "border-orange-200",
+    purple: "border-purple-200",
   };
 
   return (
-    <Card
-      className={`${estilos[tipo]} h-full`}
-    >
-      <CardContent className="p-5">
+    <Card className={estilos[tipo]}>
+      <CardContent className="p-4">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
           {titulo}
         </h3>
 
-        <p className="mt-2 text-2xl font-bold text-gray-900">
+        <p className="mt-1.5 text-xl font-bold text-gray-900">
           {valor}
         </p>
 
         {detalle && (
-          <p className="mt-2 text-sm text-gray-500">
+          <p className="mt-1 text-sm text-gray-500">
             {detalle}
           </p>
         )}
