@@ -8,6 +8,7 @@ import {
 } from "react";
 
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+
 import {
   Card,
   CardContent,
@@ -88,7 +89,7 @@ function money(value: unknown) {
  * JUAN PRIETO
  * HC JUAN PRIETO
  *
- * son vendedores comerciales diferentes.
+ * son vendedores comerciales distintos.
  */
 function nombreKey(value: string) {
   return String(value || "")
@@ -111,28 +112,24 @@ export default function HomeMenu() {
   const [
     userEmail,
     setUserEmail,
-  ] =
-    useState<string | null>(
-      null
-    );
+  ] = useState<string | null>(
+    null
+  );
 
   const [
     fechaCorte,
     setFechaCorte,
-  ] =
-    useState("");
+  ] = useState("");
 
   const [
     loading,
     setLoading,
-  ] =
-    useState(true);
+  ] = useState(true);
 
   const [
     errorVentas,
     setErrorVentas,
-  ] =
-    useState("");
+  ] = useState("");
 
   // ============================================================
   // DATOS COMERCIALES
@@ -320,7 +317,6 @@ export default function HomeMenu() {
         /*
          * Se conservan los nombres completos.
          *
-         * Ejemplo:
          * JUAN PRIETO
          * HC JUAN PRIETO
          *
@@ -338,7 +334,8 @@ export default function HomeMenu() {
         // ======================================================
 
         const {
-          data: corteData,
+          data:
+            corteData,
           error:
             corteError,
         } = await supabase
@@ -762,8 +759,8 @@ export default function HomeMenu() {
    * GaugeChart funciona entre 0 y 1.
    *
    * Si supera 100%, la aguja llega
-   * al máximo, pero el porcentaje
-   * mostrado mantiene el valor real.
+   * al máximo, pero mostramos el
+   * porcentaje real.
    */
   const porcentajeGauge =
     Math.min(
@@ -790,7 +787,8 @@ export default function HomeMenu() {
     fechaReferencia.toLocaleDateString(
       "es-CL",
       {
-        month: "long",
+        month:
+          "long",
       }
     );
 
@@ -901,11 +899,15 @@ export default function HomeMenu() {
           </h2>
 
           <p className="mt-1 text-sm text-zinc-600">
-            {today}
+            {
+              today
+            }
           </p>
 
           <p className="mt-1.5 text-base font-medium">
-            {mensaje}
+            {
+              mensaje
+            }
           </p>
         </section>
 
@@ -927,10 +929,10 @@ export default function HomeMenu() {
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
           {/* ================================================= */}
-          {/* TACÓMETRO */}
+          {/* TACÓMETRO - 5/12 */}
           {/* ================================================= */}
 
-          <div className="xl:col-span-4">
+          <div className="xl:col-span-5">
             <div className="flex h-full min-h-[245px] flex-col rounded-2xl border bg-white p-4 shadow-sm">
               <h2 className="text-center text-lg font-semibold text-blue-600">
                 Avance Meta{" "}
@@ -948,7 +950,7 @@ export default function HomeMenu() {
                 </div>
               ) : (
                 <div className="flex flex-1 items-center justify-center">
-                  <div className="w-full max-w-[265px]">
+                  <div className="w-full max-w-[315px]">
                     <GaugeChart
                       id="gauge-chart"
                       nrOfLevels={
@@ -988,10 +990,10 @@ export default function HomeMenu() {
           </div>
 
           {/* ================================================= */}
-          {/* 4 KPI PRINCIPALES */}
+          {/* 4 KPI PRINCIPALES - 7/12 */}
           {/* ================================================= */}
 
-          <div className="xl:col-span-8">
+          <div className="xl:col-span-7">
             <div className="grid h-full grid-cols-1 gap-4 sm:grid-cols-2 sm:grid-rows-2">
               <KpiCard
                 titulo="Venta Químicos"
