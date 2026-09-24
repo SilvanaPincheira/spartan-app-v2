@@ -8,7 +8,11 @@ import {
 } from "react";
 
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
-import { Card, CardContent } from "@/app/components/ui/card";
+import {
+  Card,
+  CardContent,
+} from "@/app/components/ui/card";
+
 import GaugeChart from "react-gauge-chart";
 
 const LOGO_URL =
@@ -79,12 +83,12 @@ function money(value: unknown) {
 /*
  * IMPORTANTE:
  *
- * No quitamos prefijos.
+ * NO quitamos prefijos.
  *
  * JUAN PRIETO
  * HC JUAN PRIETO
  *
- * son vendedores comerciales distintos.
+ * son vendedores comerciales diferentes.
  */
 function nombreKey(value: string) {
   return String(value || "")
@@ -131,11 +135,13 @@ export default function HomeMenu() {
     useState("");
 
   // ============================================================
-  // DATOS COMERCIALES PERSONALES
+  // DATOS COMERCIALES
   // ============================================================
 
-  const [meta, setMeta] =
-    useState(0);
+  const [
+    meta,
+    setMeta,
+  ] = useState(0);
 
   const [
     ventaQuimicos,
@@ -207,7 +213,7 @@ export default function HomeMenu() {
   ] = useState(0);
 
   // ============================================================
-  // CARGA DEL DASHBOARD
+  // CARGAR DASHBOARD
   // ============================================================
 
   useEffect(() => {
@@ -239,7 +245,9 @@ export default function HomeMenu() {
           return;
         }
 
-        setUserEmail(email);
+        setUserEmail(
+          email
+        );
 
         if (!email) {
           setErrorVentas(
@@ -250,15 +258,18 @@ export default function HomeMenu() {
         }
 
         // ======================================================
-        // 2. EJECUTIVOS ASOCIADOS AL CORREO
+        // 2. EJECUTIVOS ASOCIADOS AL LOGIN
         // ======================================================
 
         const {
-          data: ejecutivosData,
+          data:
+            ejecutivosData,
           error:
             ejecutivosError,
         } = await supabase
-          .from("ejecutivos")
+          .from(
+            "ejecutivos"
+          )
           .select(`
             nombre,
             email
@@ -275,8 +286,10 @@ export default function HomeMenu() {
         }
 
         const registrosEjecutivo =
-          (ejecutivosData ||
-            []) as EjecutivoRow[];
+          (
+            ejecutivosData ||
+            []
+          ) as EjecutivoRow[];
 
         const nombres = [
           ...new Set(
@@ -287,7 +300,9 @@ export default function HomeMenu() {
                     ""
                 ).trim()
               )
-              .filter(Boolean)
+              .filter(
+                Boolean
+              )
           ),
         ];
 
@@ -302,6 +317,15 @@ export default function HomeMenu() {
           return;
         }
 
+        /*
+         * Se conservan los nombres completos.
+         *
+         * Ejemplo:
+         * JUAN PRIETO
+         * HC JUAN PRIETO
+         *
+         * NO se mezclan.
+         */
         const nombresPermitidos =
           new Set(
             nombres.map(
@@ -315,7 +339,8 @@ export default function HomeMenu() {
 
         const {
           data: corteData,
-          error: corteError,
+          error:
+            corteError,
         } = await supabase
           .from(
             "reporte_ventas_diario"
@@ -332,7 +357,9 @@ export default function HomeMenu() {
           )
           .limit(1);
 
-        if (corteError) {
+        if (
+          corteError
+        ) {
           throw corteError;
         }
 
@@ -341,7 +368,9 @@ export default function HomeMenu() {
             ?.fecha_corte ||
           "";
 
-        if (!ultimaFecha) {
+        if (
+          !ultimaFecha
+        ) {
           setErrorVentas(
             "No existen datos comerciales disponibles para tu usuario."
           );
@@ -358,12 +387,14 @@ export default function HomeMenu() {
         );
 
         // ======================================================
-        // 4. INFORMACIÓN DEL ÚLTIMO CORTE
+        // 4. DATOS DEL ÚLTIMO CORTE
         // ======================================================
 
         const {
-          data: avanceData,
-          error: avanceError,
+          data:
+            avanceData,
+          error:
+            avanceError,
         } = await supabase
           .from(
             "reporte_ventas_diario"
@@ -395,18 +426,15 @@ export default function HomeMenu() {
             ultimaFecha
           );
 
-        if (avanceError) {
+        if (
+          avanceError
+        ) {
           throw avanceError;
         }
 
-        /*
-         * Seguridad adicional:
-         * conservamos el nombre completo.
-         *
-         * FB EDUARDO RIOS PACHECO
-         * no es igual a
-         * EDUARDO RIOS PACHECO
-         */
+        // ======================================================
+        // 5. FILTRAR SEGÚN LOGIN
+        // ======================================================
 
         const filasUsuario =
           (
@@ -432,7 +460,7 @@ export default function HomeMenu() {
         }
 
         // ======================================================
-        // 5. CONSOLIDAR DATOS DEL LOGIN
+        // 6. CONSOLIDAR
         // ======================================================
 
         const totales =
@@ -501,19 +529,35 @@ export default function HomeMenu() {
             {
               meta: 0,
 
-              ventaQuimicos: 0,
-              ventaOtros: 0,
-              ventaTotal: 0,
+              ventaQuimicos:
+                0,
 
-              pedidosQuimicos: 0,
-              pedidosTotal: 0,
+              ventaOtros:
+                0,
 
-              entregasQuimicos: 0,
-              entregasTotal: 0,
+              ventaTotal:
+                0,
 
-              cierreQuimicos: 0,
-              cierreOtros: 0,
-              cierreTotal: 0,
+              pedidosQuimicos:
+                0,
+
+              pedidosTotal:
+                0,
+
+              entregasQuimicos:
+                0,
+
+              entregasTotal:
+                0,
+
+              cierreQuimicos:
+                0,
+
+              cierreOtros:
+                0,
+
+              cierreTotal:
+                0,
             }
           );
 
@@ -566,7 +610,7 @@ export default function HomeMenu() {
         );
 
         // ======================================================
-        // 6. INDICADORES EXISTENTES DEL HOME
+        // 7. INDICADORES EXISTENTES
         // ======================================================
 
         const [
@@ -574,21 +618,27 @@ export default function HomeMenu() {
           facturasRes,
           alertasRes,
         ] =
-          await Promise.all([
-            fetch(
-              "/api/comodatos"
-            ),
+          await Promise.all(
+            [
+              fetch(
+                "/api/comodatos"
+              ),
 
-            fetch(
-              `/api/facturas?email=${encodeURIComponent(
-                email
-              )}`
-            ),
+              fetch(
+                `/api/facturas?email=${encodeURIComponent(
+                  email
+                )}`
+              ),
 
-            fetch(
-              "/api/kpi/alertas-clientes-comodatos"
-            ),
-          ]);
+              fetch(
+                "/api/kpi/alertas-clientes-comodatos"
+              ),
+            ]
+          );
+
+        // ======================================================
+        // COMODATOS
+        // ======================================================
 
         if (
           comodatosRes.ok
@@ -598,9 +648,14 @@ export default function HomeMenu() {
 
           setComodatos(
             json?.data
-              ?.length || 0
+              ?.length ||
+              0
           );
         }
+
+        // ======================================================
+        // FACTURAS
+        // ======================================================
 
         if (
           facturasRes.ok
@@ -628,6 +683,10 @@ export default function HomeMenu() {
           );
         }
 
+        // ======================================================
+        // ALERTAS
+        // ======================================================
+
         if (
           alertasRes.ok
         ) {
@@ -636,10 +695,13 @@ export default function HomeMenu() {
 
           setAlertas(
             json?.data
-              ?.length || 0
+              ?.length ||
+              0
           );
         }
-      } catch (err: any) {
+      } catch (
+        err: any
+      ) {
         console.error(
           "❌ Error cargando dashboard:",
           err
@@ -653,7 +715,9 @@ export default function HomeMenu() {
         }
       } finally {
         if (activo) {
-          setLoading(false);
+          setLoading(
+            false
+          );
         }
       }
     }
@@ -671,15 +735,19 @@ export default function HomeMenu() {
 
   const porcentaje =
     meta > 0
-      ? (ventaQuimicos /
-          meta) *
+      ? (
+          ventaQuimicos /
+          meta
+        ) *
         100
       : 0;
 
   const porcentajeCierre =
     meta > 0
-      ? (cierreQuimicos /
-          meta) *
+      ? (
+          cierreQuimicos /
+          meta
+        ) *
         100
       : 0;
 
@@ -691,14 +759,17 @@ export default function HomeMenu() {
     );
 
   /*
-   * GaugeChart trabaja entre 0 y 1.
-   * Si supera 100%, dejamos la aguja en el máximo,
-   * pero mostramos el porcentaje real.
+   * GaugeChart funciona entre 0 y 1.
+   *
+   * Si supera 100%, la aguja llega
+   * al máximo, pero el porcentaje
+   * mostrado mantiene el valor real.
    */
   const porcentajeGauge =
     Math.min(
       Math.max(
-        porcentaje / 100,
+        porcentaje /
+          100,
         0
       ),
       1
@@ -740,10 +811,17 @@ export default function HomeMenu() {
     new Date().toLocaleDateString(
       "es-CL",
       {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
+        weekday:
+          "long",
+
+        year:
+          "numeric",
+
+        month:
+          "long",
+
+        day:
+          "numeric",
       }
     );
 
@@ -754,10 +832,6 @@ export default function HomeMenu() {
     "✅ No olvides dar seguimiento a tus clientes.",
   ];
 
-  /*
-   * Usamos el día para evitar que cambie
-   * aleatoriamente en cada render.
-   */
   const mensaje =
     mensajes[
       new Date().getDate() %
@@ -779,15 +853,21 @@ export default function HomeMenu() {
 
         <div className="absolute inset-y-0 right-[-20%] w-[60%] rotate-[-8deg] bg-sky-400/60" />
 
-        <div className="relative mx-auto max-w-7xl px-6 py-7">
+        <div className="relative mx-auto max-w-7xl px-6 py-6">
           <div className="flex items-center gap-4 md:gap-6">
             <Image
-              src={LOGO_URL}
+              src={
+                LOGO_URL
+              }
               alt="Spartan"
-              width={200}
-              height={60}
+              width={
+                200
+              }
+              height={
+                60
+              }
               unoptimized
-              className="h-12 w-auto object-contain drop-shadow-sm md:h-24"
+              className="h-12 w-auto object-contain drop-shadow-sm md:h-20"
             />
 
             <div>
@@ -807,24 +887,24 @@ export default function HomeMenu() {
       {/* CONTENIDO */}
       {/* ===================================================== */}
 
-      <main className="relative mx-auto max-w-7xl space-y-6 px-6 py-7">
+      <main className="relative mx-auto max-w-7xl space-y-5 px-6 py-6">
         {/* ================================================= */}
         {/* SALUDO */}
         {/* ================================================= */}
 
-        <section className="rounded-2xl border bg-white p-5 text-center shadow-sm">
-          <h2 className="text-2xl font-bold text-[#2B6CFF]">
+        <section className="rounded-2xl border bg-white p-4 text-center shadow-sm">
+          <h2 className="text-xl font-bold text-[#2B6CFF] md:text-2xl">
             👋 Bienvenido
             {userEmail
               ? `, ${userEmail}`
               : ""}
           </h2>
 
-          <p className="mt-1 text-zinc-600">
+          <p className="mt-1 text-sm text-zinc-600">
             {today}
           </p>
 
-          <p className="mt-2 text-base font-medium">
+          <p className="mt-1.5 text-base font-medium">
             {mensaje}
           </p>
         </section>
@@ -835,41 +915,45 @@ export default function HomeMenu() {
 
         {errorVentas && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-            {errorVentas}
+            {
+              errorVentas
+            }
           </div>
         )}
 
         {/* ================================================= */}
-        {/* TACÓMETRO + KPIS PRINCIPALES */}
+        {/* TACÓMETRO + KPIS */}
         {/* ================================================= */}
 
-        <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-12">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
           {/* ================================================= */}
           {/* TACÓMETRO */}
           {/* ================================================= */}
 
-          <div className="xl:col-span-5">
-            <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <div className="xl:col-span-4">
+            <div className="flex h-full min-h-[245px] flex-col rounded-2xl border bg-white p-4 shadow-sm">
               <h2 className="text-center text-lg font-semibold text-blue-600">
                 Avance Meta{" "}
-                {mesTitulo}{" "}
-                {anioLabel}
+                {
+                  mesTitulo
+                }{" "}
+                {
+                  anioLabel
+                }
               </h2>
 
-              <p className="mt-1 text-center text-xs text-gray-400">
-                Venta de químicos / Meta de químicos
-              </p>
-
               {loading ? (
-                <div className="flex min-h-[240px] items-center justify-center text-gray-400">
+                <div className="flex flex-1 items-center justify-center text-sm text-gray-400">
                   Cargando información...
                 </div>
               ) : (
-                <>
-                  <div className="mx-auto mt-3 w-full max-w-[360px]">
+                <div className="flex flex-1 items-center justify-center">
+                  <div className="w-full max-w-[265px]">
                     <GaugeChart
                       id="gauge-chart"
-                      nrOfLevels={20}
+                      nrOfLevels={
+                        20
+                      }
                       percent={
                         porcentajeGauge
                       }
@@ -878,10 +962,15 @@ export default function HomeMenu() {
                         "#eab308",
                         "#16a34a",
                       ]}
-                      arcWidth={0.28}
+                      arcWidth={
+                        0.24
+                      }
                       textColor="#000000"
                       needleColor="#4b5563"
                       needleBaseColor="#4b5563"
+                      hideText={
+                        false
+                      }
                       formatTextValue={() =>
                         `${porcentaje.toLocaleString(
                           "es-CL",
@@ -893,27 +982,17 @@ export default function HomeMenu() {
                       }
                     />
                   </div>
-
-                  <div className="mt-1 text-center">
-                    <p className="text-sm font-medium text-gray-600">
-                      {money(
-                        ventaQuimicos
-                      )}{" "}
-                      de{" "}
-                      {money(meta)}
-                    </p>
-                  </div>
-                </>
+                </div>
               )}
             </div>
           </div>
 
           {/* ================================================= */}
-          {/* 4 KPIS PRINCIPALES */}
+          {/* 4 KPI PRINCIPALES */}
           {/* ================================================= */}
 
-          <div className="xl:col-span-7">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="xl:col-span-8">
+            <div className="grid h-full grid-cols-1 gap-4 sm:grid-cols-2 sm:grid-rows-2">
               <KpiCard
                 titulo="Venta Químicos"
                 valor={money(
@@ -972,7 +1051,7 @@ export default function HomeMenu() {
         </div>
 
         {/* ================================================= */}
-        {/* SEGUNDA FILA KPIS */}
+        {/* SEGUNDA FILA */}
         {/* ================================================= */}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -1026,31 +1105,35 @@ export default function HomeMenu() {
         {/* ================================================= */}
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Card>
+          <Card className="rounded-2xl shadow-sm">
             <CardContent className="p-4">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                 Comodatos Activos
               </h3>
 
               <p className="mt-1.5 text-xl font-bold text-orange-600">
-                {comodatos}
+                {
+                  comodatos
+                }
               </p>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="rounded-2xl shadow-sm">
             <CardContent className="p-4">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                 Facturas Emitidas
               </h3>
 
               <p className="mt-1.5 text-xl font-bold text-purple-600">
-                {facturas}
+                {
+                  facturas
+                }
               </p>
             </CardContent>
           </Card>
 
-          <Card className="border-l-4 border-red-600 md:col-span-2">
+          <Card className="rounded-2xl border-l-4 border-red-600 shadow-sm md:col-span-2">
             <CardContent className="p-4">
               <h3 className="text-sm font-semibold text-red-600">
                 ⚠️ Alertas
@@ -1058,7 +1141,9 @@ export default function HomeMenu() {
 
               <p className="mt-1 text-lg font-bold text-red-700">
                 Tienes{" "}
-                {alertas}{" "}
+                {
+                  alertas
+                }{" "}
                 clientes sin comprar
               </p>
 
@@ -1116,20 +1201,26 @@ function KpiCard({
 
   return (
     <Card
-      className={`${estilos[tipo]} rounded-2xl shadow-sm`}
+      className={`${estilos[tipo]} h-full rounded-2xl shadow-sm`}
     >
-      <CardContent className="p-4">
+      <CardContent className="flex h-full min-h-[112px] flex-col justify-center p-4">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-          {titulo}
+          {
+            titulo
+          }
         </h3>
 
         <p className="mt-1.5 text-xl font-bold text-gray-900">
-          {valor}
+          {
+            valor
+          }
         </p>
 
         {detalle && (
           <p className="mt-1 text-sm text-gray-500">
-            {detalle}
+            {
+              detalle
+            }
           </p>
         )}
       </CardContent>
