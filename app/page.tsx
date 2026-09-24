@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+
 import {
   useEffect,
   useMemo,
@@ -34,7 +35,6 @@ const LOGO_URL =
 
 // ============================================================
 // FERIADOS CHILE
-// Revisar / actualizar cada año
 // ============================================================
 
 const FERIADOS_CL = new Set<string>([
@@ -54,19 +54,18 @@ const FERIADOS_CL = new Set<string>([
 // TIPOS
 // ============================================================
 
-type EjecutivoRow = {
-  nombre: string;
-  email: string | null;
-};
+type NivelVista =
+  | "global"
+  | "division"
+  | "equipo"
+  | "ejecutivo";
 
-type AvanceRow = {
-  fecha_corte: string;
-  slpcode: number;
-  vendedor: string;
+type DashboardRow = {
+  fecha_corte: string | null;
 
-  zona: string | null;
-  division: string | null;
-  equipo: string | null;
+  nivel: NivelVista | null;
+  alcance: string | null;
+  registros: number | string | null;
 
   meta_mes: number | string | null;
 
@@ -129,23 +128,6 @@ function pct(value: number) {
   )}%`;
 }
 
-/*
- * IMPORTANTE:
- *
- * NO eliminamos prefijos.
- *
- * JUAN PRIETO
- * HC JUAN PRIETO
- *
- * son vendedores comerciales distintos.
- */
-function nombreKey(value: string) {
-  return String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/\s+/g, " ");
-}
-
 function nombreDesdeEmail(
   email: string | null
 ) {
@@ -173,8 +155,7 @@ function ymd(d: Date) {
 }
 
 function esHabil(d: Date) {
-  const dow =
-    d.getDay();
+  const dow = d.getDay();
 
   return (
     dow !== 0 &&
@@ -185,13 +166,10 @@ function esHabil(d: Date) {
   );
 }
 
-/*
- * Ritmo esperado:
- *
- * días hábiles transcurridos
- * ---------------------------
- * días hábiles totales del mes
- */
+// ============================================================
+// RITMO DEL MES
+// ============================================================
+
 function calcularRitmo(
   base: Date
 ) {
@@ -254,8 +232,10 @@ function calcularRitmo(
 
     ritmo:
       total > 0
-        ? (transcurridos /
-            total) *
+        ? (
+            transcurridos /
+            total
+          ) *
           100
         : 0,
   };
@@ -280,6 +260,20 @@ export default function HomeMenu() {
     useState<
       string | null
     >(null);
+
+  const [
+    nivelVista,
+    setNivelVista,
+  ] =
+    useState<NivelVista>(
+      "ejecutivo"
+    );
+
+  const [
+    alcanceVista,
+    setAlcanceVista,
+  ] =
+    useState("");
 
   const [
     fechaCorte,
@@ -444,364 +438,155 @@ export default function HomeMenu() {
         }
 
         // ======================================================
-        // 2. EJECUTIVOS ASOCIADOS AL LOGIN
+        // 2. DASHBOARD SEGÚN JERARQUÍA
         // ======================================================
 
         const {
           data:
-            ejecutivosData,
+            dashboardData,
 
           error:
-            ejecutivosError,
+            dashboardError,
         } =
-          await supabase
-            .from(
-              "ejecutivos"
-            )
-            .select(`
-              nombre,
-              email
-            `)
-            .ilike(
-              "email",
-              email
-            );
+          await supabase.rpc(
+            "get_home_dashboard"
+          );
 
         if (
-          ejecutivosError
+          dashboardError
         ) {
-          throw ejecutivosError;
+          throw dashboardError;
         }
 
-        const registrosEjecutivo =
-          (
-            ejecutivosData ||
-            []
-          ) as EjecutivoRow[];
+        const row =
+          dashboardData?.[0] as
+            | DashboardRow
+            | undefined;
 
-        const nombres = [
-          ...new Set(
-            registrosEjecutivo
-              .map((r) =>
-                String(
-                  r.nombre ||
-                    ""
-                ).trim()
-              )
-              .filter(
-                Boolean
-              )
-          ),
-        ];
+        if (!row) {
+          setErrorVentas(
+            "No existen datos comerciales disponibles."
+          );
+
+          return;
+        }
 
         if (
-          nombres.length ===
-          0
+          num(
+            row.registros
+          ) === 0
         ) {
           setErrorVentas(
-            "Tu correo no tiene un ejecutivo comercial asociado."
+            "No se encontraron datos asociados al alcance comercial de este usuario."
           );
 
           return;
         }
 
-        const nombresPermitidos =
-          new Set(
-            nombres.map(
-              nombreKey
-            )
-          );
+        if (!activo) {
+          return;
+        }
 
         // ======================================================
-        // 3. ÚLTIMA FECHA DISPONIBLE
+        // 3. IDENTIFICAR NIVEL
         // ======================================================
 
-        const {
-          data:
-            corteData,
+        setNivelVista(
+          row.nivel ||
+            "ejecutivo"
+        );
 
-          error:
-            corteError,
-        } =
-          await supabase
-            .from(
-              "reporte_ventas_diario"
-            )
-            .select(
-              "fecha_corte"
-            )
-            .order(
-              "fecha_corte",
-              {
-                ascending:
-                  false,
-              }
-            )
-            .limit(
-              1
-            );
-
-        if (
-          corteError
-        ) {
-          throw corteError;
-        }
-
-        const ultimaFecha =
-          corteData?.[0]
-            ?.fecha_corte ||
-          "";
-
-        if (
-          !ultimaFecha
-        ) {
-          setErrorVentas(
-            "No existen datos comerciales disponibles para tu usuario."
-          );
-
-          return;
-        }
-
-        if (
-          !activo
-        ) {
-          return;
-        }
-
-        setFechaCorte(
-          ultimaFecha
+        setAlcanceVista(
+          String(
+            row.alcance ||
+              ""
+          )
         );
 
         // ======================================================
-        // 4. DATOS DEL ÚLTIMO CORTE
+        // 4. FECHA
         // ======================================================
 
-        const {
-          data:
-            avanceData,
-
-          error:
-            avanceError,
-        } =
-          await supabase
-            .from(
-              "reporte_ventas_diario"
-            )
-            .select(`
-              fecha_corte,
-              slpcode,
-              vendedor,
-              zona,
-              division,
-              equipo,
-              meta_mes,
-              facturado_quimicos,
-              facturado_otros,
-              facturado_total,
-              pedidos_quimicos,
-              pedidos_otros,
-              pedidos_total,
-              entregas_quimicos,
-              entregas_otros,
-              entregas_total,
-              cierre_quimicos,
-              cierre_otros,
-              cierre_total,
-              synced_at
-            `)
-            .eq(
-              "fecha_corte",
-              ultimaFecha
-            );
-
-        if (
-          avanceError
-        ) {
-          throw avanceError;
-        }
+        setFechaCorte(
+          row.fecha_corte ||
+            ""
+        );
 
         // ======================================================
-        // 5. FILTRAR SEGÚN LOGIN
+        // 5. VALORES CONSOLIDADOS
         // ======================================================
-
-        const filasUsuario =
-          (
-            (avanceData ||
-              []) as AvanceRow[]
-          ).filter(
-            (r) =>
-              nombresPermitidos.has(
-                nombreKey(
-                  r.vendedor
-                )
-              )
-          );
-
-        if (
-          filasUsuario.length ===
-          0
-        ) {
-          setErrorVentas(
-            "Se encontró tu ejecutivo, pero no existe información de ventas asociada al último corte."
-          );
-
-          return;
-        }
-
-        // ======================================================
-        // 6. CONSOLIDAR
-        // ======================================================
-
-        const totales =
-          filasUsuario.reduce(
-            (
-              acc,
-              r
-            ) => {
-              acc.meta +=
-                num(
-                  r.meta_mes
-                );
-
-              acc.ventaQuimicos +=
-                num(
-                  r.facturado_quimicos
-                );
-
-              acc.ventaOtros +=
-                num(
-                  r.facturado_otros
-                );
-
-              acc.ventaTotal +=
-                num(
-                  r.facturado_total
-                );
-
-              acc.pedidosQuimicos +=
-                num(
-                  r.pedidos_quimicos
-                );
-
-              acc.pedidosTotal +=
-                num(
-                  r.pedidos_total
-                );
-
-              acc.entregasQuimicos +=
-                num(
-                  r.entregas_quimicos
-                );
-
-              acc.entregasTotal +=
-                num(
-                  r.entregas_total
-                );
-
-              acc.cierreQuimicos +=
-                num(
-                  r.cierre_quimicos
-                );
-
-              acc.cierreOtros +=
-                num(
-                  r.cierre_otros
-                );
-
-              acc.cierreTotal +=
-                num(
-                  r.cierre_total
-                );
-
-              return acc;
-            },
-            {
-              meta: 0,
-
-              ventaQuimicos:
-                0,
-
-              ventaOtros:
-                0,
-
-              ventaTotal:
-                0,
-
-              pedidosQuimicos:
-                0,
-
-              pedidosTotal:
-                0,
-
-              entregasQuimicos:
-                0,
-
-              entregasTotal:
-                0,
-
-              cierreQuimicos:
-                0,
-
-              cierreOtros:
-                0,
-
-              cierreTotal:
-                0,
-            }
-          );
-
-        if (
-          !activo
-        ) {
-          return;
-        }
 
         setMeta(
-          totales.meta
+          num(
+            row.meta_mes
+          )
         );
 
         setVentaQuimicos(
-          totales.ventaQuimicos
+          num(
+            row.facturado_quimicos
+          )
         );
 
         setVentaOtros(
-          totales.ventaOtros
+          num(
+            row.facturado_otros
+          )
         );
 
         setVentaTotal(
-          totales.ventaTotal
+          num(
+            row.facturado_total
+          )
         );
 
         setPedidosQuimicos(
-          totales.pedidosQuimicos
+          num(
+            row.pedidos_quimicos
+          )
         );
 
         setPedidosTotal(
-          totales.pedidosTotal
+          num(
+            row.pedidos_total
+          )
         );
 
         setEntregasQuimicos(
-          totales.entregasQuimicos
+          num(
+            row.entregas_quimicos
+          )
         );
 
         setEntregasTotal(
-          totales.entregasTotal
+          num(
+            row.entregas_total
+          )
         );
 
         setCierreQuimicos(
-          totales.cierreQuimicos
+          num(
+            row.cierre_quimicos
+          )
         );
 
         setCierreOtros(
-          totales.cierreOtros
+          num(
+            row.cierre_otros
+          )
         );
 
         setCierreTotal(
-          totales.cierreTotal
+          num(
+            row.cierre_total
+          )
         );
 
         // ======================================================
-        // 7. INDICADORES EXISTENTES
+        // 6. OTROS INDICADORES EXISTENTES
+        //
+        // Estos mantienen por ahora su lógica actual.
+        // Las métricas SAP de arriba YA son jerárquicas.
         // ======================================================
 
         const [
@@ -809,23 +594,21 @@ export default function HomeMenu() {
           facturasRes,
           alertasRes,
         ] =
-          await Promise.all(
-            [
-              fetch(
-                "/api/comodatos"
-              ),
+          await Promise.all([
+            fetch(
+              "/api/comodatos"
+            ),
 
-              fetch(
-                `/api/facturas?email=${encodeURIComponent(
-                  email
-                )}`
-              ),
+            fetch(
+              `/api/facturas?email=${encodeURIComponent(
+                email
+              )}`
+            ),
 
-              fetch(
-                "/api/kpi/alertas-clientes-comodatos"
-              ),
-            ]
-          );
+            fetch(
+              "/api/kpi/alertas-clientes-comodatos"
+            ),
+          ]);
 
         // ======================================================
         // COMODATOS
@@ -838,8 +621,7 @@ export default function HomeMenu() {
             await comodatosRes.json();
 
           setComodatos(
-            json?.data
-              ?.length ||
+            json?.data?.length ||
               0
           );
         }
@@ -885,8 +667,7 @@ export default function HomeMenu() {
             await alertasRes.json();
 
           setAlertas(
-            json?.data
-              ?.length ||
+            json?.data?.length ||
               0
           );
         }
@@ -932,15 +713,19 @@ export default function HomeMenu() {
 
   const porcentaje =
     meta > 0
-      ? (ventaQuimicos /
-          meta) *
+      ? (
+          ventaQuimicos /
+          meta
+        ) *
         100
       : 0;
 
   const porcentajeCierre =
     meta > 0
-      ? (cierreQuimicos /
-          meta) *
+      ? (
+          cierreQuimicos /
+          meta
+        ) *
         100
       : 0;
 
@@ -952,7 +737,7 @@ export default function HomeMenu() {
     );
 
   // ============================================================
-  // FECHA DEL CORTE
+  // FECHA
   // ============================================================
 
   const fechaReferencia =
@@ -977,25 +762,30 @@ export default function HomeMenu() {
       : faltanteMeta;
 
   // ============================================================
-  // ESTADO
+  // ESTADO DE RITMO
   // ============================================================
 
   const estado: Estado =
     meta <= 0
       ? "neutral"
+
       : faltanteMeta ===
         0
       ? "done"
+
       : porcentaje >=
         ritmo
       ? "ok"
+
       : porcentaje >=
-        ritmo - 10
+        ritmo -
+          10
       ? "warn"
+
       : "bad";
 
   // ============================================================
-  // FECHAS
+  // ETIQUETAS
   // ============================================================
 
   const mesLabel =
@@ -1044,29 +834,43 @@ export default function HomeMenu() {
       userEmail
     );
 
+  const esPersonal =
+    nivelVista ===
+    "ejecutivo";
+
   // ============================================================
   // RENDER
   // ============================================================
 
   return (
     <div className="min-h-screen bg-slate-50 text-zinc-900">
+
       {/* ===================================================== */}
-      {/* HEADER RESPONSIVE */}
+      {/* HEADER */}
       {/* ===================================================== */}
 
       <header className="relative overflow-hidden bg-[#1f4ed8]">
-        {/* Decoración solo escritorio/tablet */}
+
+        {/* Decoración escritorio */}
+
         <div className="pointer-events-none absolute inset-0 hidden md:block">
+
           <div className="absolute inset-y-0 right-[-12%] w-[48%] -skew-x-12 bg-sky-500/70" />
 
           <div className="absolute inset-y-0 right-[-18%] w-[28%] -skew-x-12 bg-sky-300/30" />
+
         </div>
 
         <div className="relative mx-auto max-w-7xl px-5 py-5 sm:px-6 md:py-6">
+
           <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between md:gap-6">
-            {/* LOGO + INFORMACIÓN */}
+
+            {/* ================================================= */}
+            {/* LOGO + SALUDO */}
+            {/* ================================================= */}
 
             <div className="flex min-w-0 items-center gap-4 md:gap-6">
+
               <Image
                 src={
                   LOGO_URL
@@ -1083,12 +887,13 @@ export default function HomeMenu() {
               />
 
               <div className="min-w-0">
+
                 <h1 className="whitespace-nowrap text-2xl font-semibold uppercase tracking-[0.16em] text-white sm:text-3xl md:tracking-[0.2em]">
                   Spartan One
                 </h1>
 
-                {/* En móvil saludo y fecha separados */}
                 <div className="mt-2 flex flex-col gap-0.5 text-sm text-blue-100 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2">
+
                   {nombre && (
                     <span className="font-medium text-white">
                       Hola,{" "}
@@ -1099,7 +904,7 @@ export default function HomeMenu() {
                   )}
 
                   {nombre && (
-                    <span className="hidden sm:inline text-blue-200">
+                    <span className="hidden text-blue-200 sm:inline">
                       ·
                     </span>
                   )}
@@ -1109,35 +914,48 @@ export default function HomeMenu() {
                       today
                     }
                   </span>
+
                 </div>
+
               </div>
+
             </div>
 
-            {/* DÍAS HÁBILES
-                En móvil queda debajo.
-                En escritorio queda a la derecha.
-            */}
+            {/* ================================================= */}
+            {/* DÍAS HÁBILES */}
+            {/* ================================================= */}
 
             {!loading &&
               meta >
                 0 && (
+
                 <div className="inline-flex w-fit max-w-full shrink-0 items-center gap-2 self-start rounded-xl border border-white/30 bg-white/10 px-3.5 py-2.5 text-sm font-medium text-white shadow-sm backdrop-blur-sm md:self-center">
+
                   <CalendarDays className="h-4 w-4 shrink-0" />
 
                   <span className="whitespace-nowrap">
+
                     {
                       restantes
                     }{" "}
+
                     {restantes ===
                     1
                       ? "día hábil"
                       : "días hábiles"}{" "}
+
                     restantes
+
                   </span>
+
                 </div>
+
               )}
+
           </div>
+
         </div>
+
       </header>
 
       {/* ===================================================== */}
@@ -1145,28 +963,34 @@ export default function HomeMenu() {
       {/* ===================================================== */}
 
       <main className="relative mx-auto max-w-7xl space-y-5 px-4 py-5 sm:px-6 sm:py-6">
+
         {/* ================================================= */}
         {/* ERROR */}
         {/* ================================================= */}
 
         {errorVentas && (
+
           <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
 
             {
               errorVentas
             }
+
           </div>
+
         )}
 
         {/* ================================================= */}
-        {/* AVISO DE RITMO */}
+        {/* RITMO */}
         {/* ================================================= */}
 
         {!loading &&
           !errorVentas &&
           estado !==
             "neutral" && (
+
             <RitmoBanner
               estado={
                 estado
@@ -1183,7 +1007,11 @@ export default function HomeMenu() {
               faltante={
                 faltanteMeta
               }
+              personal={
+                esPersonal
+              }
             />
+
           )}
 
         {/* ================================================= */}
@@ -1191,28 +1019,37 @@ export default function HomeMenu() {
         {/* ================================================= */}
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-          {/* ================================================= */}
+
           {/* TACÓMETRO */}
-          {/* ================================================= */}
 
           <div className="xl:col-span-5">
+
             <div className="flex h-full min-h-[250px] flex-col items-center rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-sm sm:min-h-[260px] sm:p-5">
+
               <h2 className="text-center text-lg font-semibold text-blue-600 first-letter:uppercase sm:text-xl">
+
                 Avance meta{" "}
+
                 {
                   mesLabel
                 }{" "}
+
                 {
                   anioLabel
                 }
+
               </h2>
 
               {loading ? (
+
                 <div className="flex flex-1 items-center justify-center text-sm text-zinc-400">
                   Cargando información...
                 </div>
+
               ) : (
+
                 <>
+
                   <Gauge
                     value={
                       porcentaje
@@ -1223,54 +1060,79 @@ export default function HomeMenu() {
                   />
 
                   <p className="-mt-1 text-3xl font-bold tracking-tight sm:-mt-2 sm:text-4xl">
+
                     {pct(
                       porcentaje
                     )}
+
                   </p>
 
                   <p className="text-sm text-zinc-500">
+
                     de{" "}
+
                     {money(
                       meta
                     )}
+
                   </p>
 
                   <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-zinc-500">
+
                     <span className="flex items-center gap-1.5">
+
                       <span className="h-2.5 w-2.5 rounded-sm bg-[#1f4ed8]" />
 
-                      Tu avance
+                      {esPersonal
+                        ? "Tu avance"
+                        : "Avance actual"}
+
                     </span>
 
                     <span className="flex items-center gap-1.5">
+
                       <span className="h-3 w-0.5 bg-zinc-900" />
 
                       Ritmo esperado{" "}
+
                       {pct(
                         ritmo
                       )}
+
                     </span>
+
                   </div>
 
                   {fechaCorteLabel && (
+
                     <p className="mt-2 text-[11px] text-zinc-400">
+
                       Datos al{" "}
+
                       {
                         fechaCorteLabel
                       }
+
                     </p>
+
                   )}
+
                 </>
+
               )}
+
             </div>
+
           </div>
 
           {/* ================================================= */}
-          {/* 4 KPI PRINCIPALES */}
+          {/* KPI PRINCIPALES */}
           {/* ================================================= */}
 
           <div className="xl:col-span-7">
+
             <div className="grid h-full grid-cols-1 gap-4 sm:grid-cols-2 sm:grid-rows-2">
+
               <KpiCard
                 titulo="Venta químicos"
                 valor={money(
@@ -1314,6 +1176,7 @@ export default function HomeMenu() {
                   meta >
                     0
                     ? "Meta alcanzada"
+
                     : `${pct(
                         Math.max(
                           100 -
@@ -1350,8 +1213,11 @@ export default function HomeMenu() {
                   loading
                 }
               />
+
             </div>
+
           </div>
+
         </div>
 
         {/* ================================================= */}
@@ -1359,6 +1225,7 @@ export default function HomeMenu() {
         {/* ================================================= */}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+
           <MiniKpi
             titulo="Venta total"
             valor={money(
@@ -1422,13 +1289,15 @@ export default function HomeMenu() {
               loading
             }
           />
+
         </div>
 
         {/* ================================================= */}
-        {/* OTROS INDICADORES */}
+        {/* INDICADORES EXISTENTES */}
         {/* ================================================= */}
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+
           <MiniKpi
             titulo="Comodatos activos"
             valor={String(
@@ -1459,31 +1328,44 @@ export default function HomeMenu() {
             href="/kpi/alertas-clientes-comodatos"
             className="group flex items-center gap-4 rounded-2xl border border-red-200 bg-red-50 p-4 shadow-sm transition hover:border-red-300 hover:shadow-md"
           >
+
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-600">
+
               <AlertTriangle className="h-5 w-5" />
+
             </div>
 
             <div className="min-w-0 flex-1">
+
               <p className="text-xs font-medium uppercase tracking-wide text-red-600">
                 Alertas
               </p>
 
               <p className="text-base font-semibold text-red-800">
+
                 {
                   alertas
                 }{" "}
+
                 {alertas ===
                 1
                   ? "cliente"
                   : "clientes"}{" "}
+
                 sin comprar
+
               </p>
+
             </div>
 
             <ArrowRight className="h-4 w-4 shrink-0 text-red-400 transition group-hover:translate-x-0.5 group-hover:text-red-600" />
+
           </a>
+
         </div>
+
       </main>
+
     </div>
   );
 }
@@ -1498,17 +1380,25 @@ function RitmoBanner({
   necesarioPorDia,
   restantes,
   faltante,
+  personal,
 }: {
   estado: Estado;
+
   ritmo: number;
+
   necesarioPorDia: number;
+
   restantes: number;
+
   faltante: number;
+
+  personal: boolean;
 }) {
-  const estilos: Record<
-    Estado,
-    string
-  > = {
+  const estilos:
+    Record<
+      Estado,
+      string
+    > = {
     ok:
       "border-emerald-200 bg-emerald-50 text-emerald-800",
 
@@ -1541,7 +1431,7 @@ function RitmoBanner({
     texto = (
       <>
         ¡Meta alcanzada! Todo lo
-        que factures desde ahora
+        que se facture desde ahora
         suma sobre la meta.
       </>
     );
@@ -1553,11 +1443,13 @@ function RitmoBanner({
       <>
         Último día hábil del mes.
         Faltan{" "}
+
         <b>
           {money(
             faltante
           )}
         </b>{" "}
+
         para la meta.
       </>
     );
@@ -1567,40 +1459,54 @@ function RitmoBanner({
   ) {
     texto = (
       <>
-        Tu avance está sobre el
-        ritmo esperado del mes (
-        {pct(
-          ritmo
-        )}
-        ). Para alcanzar la meta
-        necesitas promediar{" "}
+        {personal
+          ? "Tu avance está"
+          : "El avance está"}{" "}
+
+        sobre el ritmo esperado del
+        mes ({
+
+          pct(
+            ritmo
+          )
+
+        }). Para alcanzar la meta
+        se necesita promediar{" "}
+
         <b>
           {money(
             necesarioPorDia
           )}
         </b>{" "}
+
         por día hábil restante.
       </>
     );
   } else {
     texto = (
       <>
-        Tu avance está bajo el
-        ritmo esperado del mes. A
-        esta fecha, el avance
+        {personal
+          ? "Tu avance está"
+          : "El avance está"}{" "}
+
+        bajo el ritmo esperado del
+        mes. A esta fecha, el avance
         esperado es{" "}
+
         <b>
           {pct(
             ritmo
           )}
         </b>
-        . Para alcanzar la meta
-        necesitas promediar{" "}
+        . Para alcanzar la meta se
+        necesita promediar{" "}
+
         <b>
           {money(
             necesarioPorDia
           )}
         </b>{" "}
+
         por día hábil restante.
       </>
     );
@@ -1610,6 +1516,7 @@ function RitmoBanner({
     <div
       className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm leading-relaxed sm:items-center ${estilos[estado]}`}
     >
+
       <Icono className="mt-0.5 h-5 w-5 shrink-0 sm:mt-0" />
 
       <p className="[&_b]:font-semibold">
@@ -1617,12 +1524,13 @@ function RitmoBanner({
           texto
         }
       </p>
+
     </div>
   );
 }
 
 // ============================================================
-// TACÓMETRO SVG
+// TACÓMETRO
 // ============================================================
 
 function Gauge({
@@ -1667,7 +1575,10 @@ function Gauge({
   ) => {
     const a =
       Math.PI *
-      (1 - t);
+      (
+        1 -
+        t
+      );
 
     return {
       x:
@@ -1698,8 +1609,10 @@ function Gauge({
         i
       ) => {
         const t =
-          (i +
-            0.5) /
+          (
+            i +
+            0.5
+          ) /
           n;
 
         const p1 =
@@ -1718,9 +1631,11 @@ function Gauge({
           t <
           0.34
             ? "#ef4444"
+
             : t <
               0.67
             ? "#f59e0b"
+
             : "#16a34a";
 
         return {
@@ -1763,6 +1678,7 @@ function Gauge({
         1
       )}% de la meta`}
     >
+
       {segmentos.map(
         (
           s,
@@ -1795,7 +1711,7 @@ function Gauge({
         )
       )}
 
-      {/* Marca ritmo esperado */}
+      {/* RITMO ESPERADO */}
 
       <line
         x1={
@@ -1816,7 +1732,7 @@ function Gauge({
         }
       />
 
-      {/* Aguja */}
+      {/* AGUJA */}
 
       <line
         x1={
@@ -1867,6 +1783,7 @@ function Gauge({
         }
         fill="#fff"
       />
+
     </svg>
   );
 }
@@ -1881,14 +1798,15 @@ type Tone =
   | "amber"
   | "emerald";
 
-const TONOS: Record<
-  Tone,
-  {
-    barra: string;
-    icono: string;
-    progreso: string;
-  }
-> = {
+const TONOS:
+  Record<
+    Tone,
+    {
+      barra: string;
+      icono: string;
+      progreso: string;
+    }
+  > = {
   blue: {
     barra:
       "bg-blue-500",
@@ -1944,11 +1862,17 @@ function KpiCard({
   loading,
 }: {
   titulo: string;
+
   valor: string;
+
   detalle?: string;
+
   icon: LucideIcon;
+
   tone: Tone;
+
   progress?: number;
+
   loading?: boolean;
 }) {
   const t =
@@ -1958,37 +1882,52 @@ function KpiCard({
 
   return (
     <div className="relative flex h-full min-h-[115px] flex-col justify-center overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-4 pt-5 shadow-sm transition hover:shadow-md sm:min-h-[120px]">
+
       <div
         className={`absolute inset-x-0 top-0 h-1 ${t.barra}`}
       />
 
       <div className="flex items-center gap-2">
+
         <span
           className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${t.icono}`}
         >
+
           <Icon className="h-4 w-4" />
+
         </span>
 
         <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+
           {
             titulo
           }
+
         </h3>
+
       </div>
 
       {loading ? (
+
         <Skeleton />
+
       ) : (
+
         <>
+
           <p className="mt-2 break-words text-xl font-bold tracking-tight sm:text-2xl">
+
             {
               valor
             }
+
           </p>
 
           {typeof progress ===
             "number" && (
+
             <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-zinc-100">
+
               <div
                 className={`h-full rounded-full ${t.progreso} transition-all duration-700`}
                 style={{
@@ -2001,18 +1940,27 @@ function KpiCard({
                   )}%`,
                 }}
               />
+
             </div>
+
           )}
 
           {detalle && (
+
             <p className="mt-1 text-sm text-zinc-500">
+
               {
                 detalle
               }
+
             </p>
+
           )}
+
         </>
+
       )}
+
     </div>
   );
 }
@@ -2029,46 +1977,70 @@ function MiniKpi({
   loading,
 }: {
   titulo: string;
+
   valor: string;
+
   detalle?: string;
+
   icon: LucideIcon;
+
   loading?: boolean;
 }) {
   return (
     <div className="flex items-center gap-4 rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-sm transition hover:shadow-md">
+
       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-[#1f4ed8]">
+
         <Icon className="h-5 w-5" />
+
       </div>
 
       <div className="min-w-0 flex-1">
+
         <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+
           {
             titulo
           }
+
         </h3>
 
         {loading ? (
+
           <Skeleton
             small
           />
+
         ) : (
+
           <>
+
             <p className="truncate text-lg font-bold tracking-tight">
+
               {
                 valor
               }
+
             </p>
 
             {detalle && (
+
               <p className="truncate text-xs text-zinc-500">
+
                 {
                   detalle
                 }
+
               </p>
+
             )}
+
           </>
+
         )}
+
       </div>
+
     </div>
   );
 }
@@ -2078,12 +2050,14 @@ function MiniKpi({
 // ============================================================
 
 function Skeleton({
-  small = false,
+  small =
+    false,
 }: {
   small?: boolean;
 }) {
   return (
     <div className="mt-2 space-y-2">
+
       <div
         className={`animate-pulse rounded bg-zinc-100 ${
           small
@@ -2093,6 +2067,7 @@ function Skeleton({
       />
 
       <div className="h-3 w-24 animate-pulse rounded bg-zinc-100" />
+
     </div>
   );
 }
