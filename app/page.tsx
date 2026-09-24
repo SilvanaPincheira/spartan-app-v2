@@ -1,23 +1,47 @@
 "use client";
 
 import Image from "next/image";
-import {
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-
+import { useEffect, useMemo, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
-
 import {
-  Card,
-  CardContent,
-} from "@/app/components/ui/card";
-
-import GaugeChart from "react-gauge-chart";
+  AlertTriangle,
+  ArrowRight,
+  Banknote,
+  CalendarDays,
+  CheckCircle2,
+  FileText,
+  FlaskConical,
+  Hourglass,
+  Lightbulb,
+  PackageCheck,
+  ShoppingCart,
+  Target,
+  TrendingUp,
+  Truck,
+  Wrench,
+  type LucideIcon,
+} from "lucide-react";
 
 const LOGO_URL =
   "https://assets.jumpseller.com/store/spartan-de-chile/themes/317202/options/27648963/Logo-spartan-white.png?1600810625";
+
+// ============================================================
+// FERIADOS CHILE
+// Revisar / actualizar cada año
+// ============================================================
+
+const FERIADOS_CL = new Set<string>([
+  "2026-01-01",
+  "2026-04-03",
+  "2026-05-01",
+  "2026-05-21",
+  "2026-06-29",
+  "2026-07-16",
+  "2026-09-18",
+  "2026-10-12",
+  "2026-12-08",
+  "2026-12-25",
+]);
 
 // ============================================================
 // TIPOS
@@ -58,33 +82,41 @@ type AvanceRow = {
   synced_at: string | null;
 };
 
+type Estado =
+  | "ok"
+  | "warn"
+  | "bad"
+  | "done"
+  | "neutral";
+
 // ============================================================
 // HELPERS
 // ============================================================
 
 function num(value: unknown) {
   const n = Number(value ?? 0);
-
-  return Number.isFinite(n)
-    ? n
-    : 0;
+  return Number.isFinite(n) ? n : 0;
 }
 
 function money(value: unknown) {
-  return num(value).toLocaleString(
-    "es-CL",
-    {
-      style: "currency",
-      currency: "CLP",
-      maximumFractionDigits: 0,
-    }
-  );
+  return num(value).toLocaleString("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    maximumFractionDigits: 0,
+  });
+}
+
+function pct(value: number) {
+  return `${value.toLocaleString("es-CL", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })}%`;
 }
 
 /*
  * IMPORTANTE:
  *
- * NO quitamos prefijos.
+ * NO eliminamos prefijos.
  *
  * JUAN PRIETO
  * HC JUAN PRIETO
@@ -96,6 +128,97 @@ function nombreKey(value: string) {
     .trim()
     .toUpperCase()
     .replace(/\s+/g, " ");
+}
+
+function nombreDesdeEmail(email: string | null) {
+  if (!email) return "";
+
+  const primero =
+    email
+      .split("@")[0]
+      .split(/[._-]/)[0] || "";
+
+  return primero
+    ? primero.charAt(0).toUpperCase() +
+        primero.slice(1)
+    : "";
+}
+
+function ymd(d: Date) {
+  return `${d.getFullYear()}-${String(
+    d.getMonth() + 1
+  ).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
+}
+
+function esHabil(d: Date) {
+  const dow = d.getDay();
+
+  return (
+    dow !== 0 &&
+    dow !== 6 &&
+    !FERIADOS_CL.has(ymd(d))
+  );
+}
+
+/*
+ * Ritmo esperado:
+ *
+ * días hábiles transcurridos
+ * ---------------------------
+ * días hábiles totales mes
+ */
+function calcularRitmo(base: Date) {
+  const year = base.getFullYear();
+  const month = base.getMonth();
+  const diaActual = base.getDate();
+
+  const ultimoDia =
+    new Date(
+      year,
+      month + 1,
+      0
+    ).getDate();
+
+  let total = 0;
+  let transcurridos = 0;
+
+  for (
+    let dia = 1;
+    dia <= ultimoDia;
+    dia++
+  ) {
+    const fecha =
+      new Date(
+        year,
+        month,
+        dia,
+        12
+      );
+
+    if (esHabil(fecha)) {
+      total++;
+
+      if (dia <= diaActual) {
+        transcurridos++;
+      }
+    }
+  }
+
+  return {
+    total,
+    transcurridos,
+    restantes:
+      total - transcurridos,
+
+    ritmo:
+      total > 0
+        ? (transcurridos /
+            total) *
+          100
+        : 0,
+  };
 }
 
 // ============================================================
@@ -112,24 +235,28 @@ export default function HomeMenu() {
   const [
     userEmail,
     setUserEmail,
-  ] = useState<string | null>(
-    null
-  );
+  ] =
+    useState<string | null>(
+      null
+    );
 
   const [
     fechaCorte,
     setFechaCorte,
-  ] = useState("");
+  ] =
+    useState("");
 
   const [
     loading,
     setLoading,
-  ] = useState(true);
+  ] =
+    useState(true);
 
   const [
     errorVentas,
     setErrorVentas,
-  ] = useState("");
+  ] =
+    useState("");
 
   // ============================================================
   // DATOS COMERCIALES
@@ -138,57 +265,68 @@ export default function HomeMenu() {
   const [
     meta,
     setMeta,
-  ] = useState(0);
+  ] =
+    useState(0);
 
   const [
     ventaQuimicos,
     setVentaQuimicos,
-  ] = useState(0);
+  ] =
+    useState(0);
 
   const [
     ventaOtros,
     setVentaOtros,
-  ] = useState(0);
+  ] =
+    useState(0);
 
   const [
     ventaTotal,
     setVentaTotal,
-  ] = useState(0);
+  ] =
+    useState(0);
 
   const [
     pedidosQuimicos,
     setPedidosQuimicos,
-  ] = useState(0);
+  ] =
+    useState(0);
 
   const [
     pedidosTotal,
     setPedidosTotal,
-  ] = useState(0);
+  ] =
+    useState(0);
 
   const [
     entregasQuimicos,
     setEntregasQuimicos,
-  ] = useState(0);
+  ] =
+    useState(0);
 
   const [
     entregasTotal,
     setEntregasTotal,
-  ] = useState(0);
+  ] =
+    useState(0);
 
   const [
     cierreQuimicos,
     setCierreQuimicos,
-  ] = useState(0);
+  ] =
+    useState(0);
 
   const [
     cierreOtros,
     setCierreOtros,
-  ] = useState(0);
+  ] =
+    useState(0);
 
   const [
     cierreTotal,
     setCierreTotal,
-  ] = useState(0);
+  ] =
+    useState(0);
 
   // ============================================================
   // INDICADORES EXISTENTES
@@ -197,17 +335,20 @@ export default function HomeMenu() {
   const [
     comodatos,
     setComodatos,
-  ] = useState(0);
+  ] =
+    useState(0);
 
   const [
     facturas,
     setFacturas,
-  ] = useState(0);
+  ] =
+    useState(0);
 
   const [
     alertas,
     setAlertas,
-  ] = useState(0);
+  ] =
+    useState(0);
 
   // ============================================================
   // CARGAR DASHBOARD
@@ -226,9 +367,7 @@ export default function HomeMenu() {
         // ======================================================
 
         const {
-          data: {
-            session,
-          },
+          data: { session },
         } =
           await supabase.auth.getSession();
 
@@ -242,9 +381,7 @@ export default function HomeMenu() {
           return;
         }
 
-        setUserEmail(
-          email
-        );
+        setUserEmail(email);
 
         if (!email) {
           setErrorVentas(
@@ -263,18 +400,19 @@ export default function HomeMenu() {
             ejecutivosData,
           error:
             ejecutivosError,
-        } = await supabase
-          .from(
-            "ejecutivos"
-          )
-          .select(`
-            nombre,
-            email
-          `)
-          .ilike(
-            "email",
-            email
-          );
+        } =
+          await supabase
+            .from(
+              "ejecutivos"
+            )
+            .select(`
+              nombre,
+              email
+            `)
+            .ilike(
+              "email",
+              email
+            );
 
         if (
           ejecutivosError
@@ -317,10 +455,10 @@ export default function HomeMenu() {
         /*
          * Se conservan los nombres completos.
          *
-         * JUAN PRIETO
-         * HC JUAN PRIETO
+         * FB JUAN PEREZ
+         * HC JUAN PEREZ
          *
-         * NO se mezclan.
+         * se mantienen separados.
          */
         const nombresPermitidos =
           new Set(
@@ -338,21 +476,22 @@ export default function HomeMenu() {
             corteData,
           error:
             corteError,
-        } = await supabase
-          .from(
-            "reporte_ventas_diario"
-          )
-          .select(
-            "fecha_corte"
-          )
-          .order(
-            "fecha_corte",
-            {
-              ascending:
-                false,
-            }
-          )
-          .limit(1);
+        } =
+          await supabase
+            .from(
+              "reporte_ventas_diario"
+            )
+            .select(
+              "fecha_corte"
+            )
+            .order(
+              "fecha_corte",
+              {
+                ascending:
+                  false,
+              }
+            )
+            .limit(1);
 
         if (
           corteError
@@ -392,36 +531,37 @@ export default function HomeMenu() {
             avanceData,
           error:
             avanceError,
-        } = await supabase
-          .from(
-            "reporte_ventas_diario"
-          )
-          .select(`
-            fecha_corte,
-            slpcode,
-            vendedor,
-            zona,
-            division,
-            equipo,
-            meta_mes,
-            facturado_quimicos,
-            facturado_otros,
-            facturado_total,
-            pedidos_quimicos,
-            pedidos_otros,
-            pedidos_total,
-            entregas_quimicos,
-            entregas_otros,
-            entregas_total,
-            cierre_quimicos,
-            cierre_otros,
-            cierre_total,
-            synced_at
-          `)
-          .eq(
-            "fecha_corte",
-            ultimaFecha
-          );
+        } =
+          await supabase
+            .from(
+              "reporte_ventas_diario"
+            )
+            .select(`
+              fecha_corte,
+              slpcode,
+              vendedor,
+              zona,
+              division,
+              equipo,
+              meta_mes,
+              facturado_quimicos,
+              facturado_otros,
+              facturado_total,
+              pedidos_quimicos,
+              pedidos_otros,
+              pedidos_total,
+              entregas_quimicos,
+              entregas_otros,
+              entregas_total,
+              cierre_quimicos,
+              cierre_otros,
+              cierre_total,
+              synced_at
+            `)
+            .eq(
+              "fecha_corte",
+              ultimaFecha
+            );
 
         if (
           avanceError
@@ -615,23 +755,21 @@ export default function HomeMenu() {
           facturasRes,
           alertasRes,
         ] =
-          await Promise.all(
-            [
-              fetch(
-                "/api/comodatos"
-              ),
+          await Promise.all([
+            fetch(
+              "/api/comodatos"
+            ),
 
-              fetch(
-                `/api/facturas?email=${encodeURIComponent(
-                  email
-                )}`
-              ),
+            fetch(
+              `/api/facturas?email=${encodeURIComponent(
+                email
+              )}`
+            ),
 
-              fetch(
-                "/api/kpi/alertas-clientes-comodatos"
-              ),
-            ]
-          );
+            fetch(
+              "/api/kpi/alertas-clientes-comodatos"
+            ),
+          ]);
 
         // ======================================================
         // COMODATOS
@@ -755,23 +893,6 @@ export default function HomeMenu() {
       0
     );
 
-  /*
-   * GaugeChart funciona entre 0 y 1.
-   *
-   * Si supera 100%, la aguja llega
-   * al máximo, pero mostramos el
-   * porcentaje real.
-   */
-  const porcentajeGauge =
-    Math.min(
-      Math.max(
-        porcentaje /
-          100,
-        0
-      ),
-      1
-    );
-
   // ============================================================
   // FECHA DEL CORTE
   // ============================================================
@@ -783,6 +904,42 @@ export default function HomeMenu() {
         )
       : new Date();
 
+  const {
+    restantes,
+    ritmo,
+  } =
+    calcularRitmo(
+      fechaReferencia
+    );
+
+  const necesarioPorDia =
+    restantes > 0
+      ? faltanteMeta /
+        restantes
+      : faltanteMeta;
+
+  // ============================================================
+  // ESTADO DE RITMO
+  // ============================================================
+
+  const estado: Estado =
+    meta <= 0
+      ? "neutral"
+      : faltanteMeta ===
+        0
+      ? "done"
+      : porcentaje >=
+        ritmo
+      ? "ok"
+      : porcentaje >=
+        ritmo - 10
+      ? "warn"
+      : "bad";
+
+  // ============================================================
+  // FECHAS
+  // ============================================================
+
   const mesLabel =
     fechaReferencia.toLocaleDateString(
       "es-CL",
@@ -792,18 +949,22 @@ export default function HomeMenu() {
       }
     );
 
-  const mesTitulo =
-    mesLabel
-      .charAt(0)
-      .toUpperCase() +
-    mesLabel.slice(1);
-
   const anioLabel =
     fechaReferencia.getFullYear();
 
-  // ============================================================
-  // FECHA ACTUAL
-  // ============================================================
+  const fechaCorteLabel =
+    fechaCorte
+      ? fechaReferencia.toLocaleDateString(
+          "es-CL",
+          {
+            day:
+              "numeric",
+
+            month:
+              "long",
+          }
+        )
+      : "";
 
   const today =
     new Date().toLocaleDateString(
@@ -812,72 +973,77 @@ export default function HomeMenu() {
         weekday:
           "long",
 
-        year:
+        day:
           "numeric",
 
         month:
           "long",
-
-        day:
-          "numeric",
       }
     );
 
-  const mensajes = [
-    "🚀 Listo para un día productivo.",
-    "📊 Revisa tus reportes y KPIs.",
-    "⚡ Gestiona tus comodatos y ventas fácilmente.",
-    "✅ No olvides dar seguimiento a tus clientes.",
-  ];
-
-  const mensaje =
-    mensajes[
-      new Date().getDate() %
-        mensajes.length
-    ];
+  const nombre =
+    nombreDesdeEmail(
+      userEmail
+    );
 
   // ============================================================
   // RENDER
   // ============================================================
 
   return (
-    <div className="min-h-screen bg-zinc-50 text-zinc-900">
+    <div className="min-h-screen bg-slate-50 text-zinc-900">
       {/* ===================================================== */}
       {/* HEADER */}
       {/* ===================================================== */}
 
-      <header className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-[#1f4ed8]" />
+      <header className="relative overflow-hidden bg-[#1f4ed8]">
+        <div className="absolute inset-y-0 right-[-12%] w-[48%] -skew-x-12 bg-sky-500/70" />
 
-        <div className="absolute inset-y-0 right-[-20%] w-[60%] rotate-[-8deg] bg-sky-400/60" />
+        <div className="absolute inset-y-0 right-[-18%] w-[28%] -skew-x-12 bg-sky-300/30" />
 
-        <div className="relative mx-auto max-w-7xl px-6 py-6">
-          <div className="flex items-center gap-4 md:gap-6">
-            <Image
-              src={
-                LOGO_URL
-              }
-              alt="Spartan"
-              width={
-                200
-              }
-              height={
-                60
-              }
-              unoptimized
-              className="h-12 w-auto object-contain drop-shadow-sm md:h-20"
-            />
+        <div className="relative mx-auto flex max-w-7xl flex-wrap items-center gap-4 px-6 py-6 md:gap-6">
+          <Image
+            src={
+              LOGO_URL
+            }
+            alt="Spartan"
+            width={
+              200
+            }
+            height={
+              60
+            }
+            unoptimized
+            className="h-12 w-auto object-contain drop-shadow-sm md:h-20"
+          />
 
-            <div>
-              <h1 className="text-2xl font-semibold uppercase tracking-widest text-white md:text-3xl">
-                Spartan One
-              </h1>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-2xl font-semibold uppercase tracking-[0.2em] text-white md:text-3xl">
+              Spartan One
+            </h1>
 
-              <p className="mt-1 max-w-2xl text-sm text-white/80">
-                Bienvenido al panel central de gestión y reportes.
-              </p>
-            </div>
+            <p className="mt-1 text-sm text-blue-100 first-letter:uppercase">
+              {nombre
+                ? `Hola, ${nombre} · `
+                : ""}
+
+              {today}
+            </p>
           </div>
+
+          {!loading &&
+            meta > 0 && (
+              <div className="flex items-center gap-2 rounded-xl border border-white/30 bg-white/15 px-3 py-2 text-sm text-white backdrop-blur-sm">
+                <CalendarDays className="h-4 w-4" />
+
+                {restantes}{" "}
+                {restantes ===
+                1
+                  ? "día hábil"
+                  : "días hábiles"}{" "}
+                restantes
+              </div>
+            )}
         </div>
       </header>
 
@@ -887,140 +1053,157 @@ export default function HomeMenu() {
 
       <main className="relative mx-auto max-w-7xl space-y-5 px-6 py-6">
         {/* ================================================= */}
-        {/* SALUDO */}
-        {/* ================================================= */}
-
-        <section className="rounded-2xl border bg-white p-4 text-center shadow-sm">
-          <h2 className="text-xl font-bold text-[#2B6CFF] md:text-2xl">
-            👋 Bienvenido
-            {userEmail
-              ? `, ${userEmail}`
-              : ""}
-          </h2>
-
-          <p className="mt-1 text-sm text-zinc-600">
-            {
-              today
-            }
-          </p>
-
-          <p className="mt-1.5 text-base font-medium">
-            {
-              mensaje
-            }
-          </p>
-        </section>
-
-        {/* ================================================= */}
         {/* ERROR */}
         {/* ================================================= */}
 
         {errorVentas && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-            {
-              errorVentas
-            }
+          <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+
+            {errorVentas}
           </div>
         )}
+
+        {/* ================================================= */}
+        {/* AVISO RITMO */}
+        {/* ================================================= */}
+
+        {!loading &&
+          !errorVentas &&
+          estado !==
+            "neutral" && (
+            <RitmoBanner
+              estado={
+                estado
+              }
+              ritmo={
+                ritmo
+              }
+              necesarioPorDia={
+                necesarioPorDia
+              }
+              restantes={
+                restantes
+              }
+              faltante={
+                faltanteMeta
+              }
+            />
+          )}
 
         {/* ================================================= */}
         {/* TACÓMETRO + KPIS */}
         {/* ================================================= */}
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-          {/* ================================================= */}
-          {/* TACÓMETRO - 5/12 */}
-          {/* ================================================= */}
+          {/* TACÓMETRO */}
 
           <div className="xl:col-span-5">
-            <div className="flex h-full min-h-[245px] flex-col rounded-2xl border bg-white p-4 shadow-sm">
-              <h2 className="text-center text-lg font-semibold text-blue-600">
-                Avance Meta{" "}
-                {
-                  mesTitulo
-                }{" "}
-                {
-                  anioLabel
-                }
+            <div className="flex h-full min-h-[260px] flex-col items-center rounded-2xl border border-zinc-200/80 bg-white p-5 shadow-sm">
+              <h2 className="text-center text-lg font-semibold text-blue-600 first-letter:uppercase">
+                Avance meta{" "}
+                {mesLabel}{" "}
+                {anioLabel}
               </h2>
 
               {loading ? (
-                <div className="flex flex-1 items-center justify-center text-sm text-gray-400">
+                <div className="flex flex-1 items-center justify-center text-sm text-zinc-400">
                   Cargando información...
                 </div>
               ) : (
-                <div className="flex flex-1 items-center justify-center">
-                  <div className="w-full max-w-[315px]">
-                    <GaugeChart
-                      id="gauge-chart"
-                      nrOfLevels={
-                        20
-                      }
-                      percent={
-                        porcentajeGauge
-                      }
-                      colors={[
-                        "#dc2626",
-                        "#eab308",
-                        "#16a34a",
-                      ]}
-                      arcWidth={
-                        0.24
-                      }
-                      textColor="#000000"
-                      needleColor="#4b5563"
-                      needleBaseColor="#4b5563"
-                      hideText={
-                        false
-                      }
-                      formatTextValue={() =>
-                        `${porcentaje.toLocaleString(
-                          "es-CL",
-                          {
-                            minimumFractionDigits: 1,
-                            maximumFractionDigits: 1,
-                          }
-                        )}%`
-                      }
-                    />
+                <>
+                  <Gauge
+                    value={
+                      porcentaje
+                    }
+                    pace={
+                      ritmo
+                    }
+                  />
+
+                  <p className="-mt-2 text-4xl font-bold tracking-tight">
+                    {pct(
+                      porcentaje
+                    )}
+                  </p>
+
+                  <p className="text-sm text-zinc-500">
+                    de{" "}
+                    {money(
+                      meta
+                    )}
+                  </p>
+
+                  <div className="mt-3 flex items-center gap-4 text-xs text-zinc-500">
+                    <span className="flex items-center gap-1.5">
+                      <span className="h-2.5 w-2.5 rounded-sm bg-[#1f4ed8]" />
+
+                      Tu avance
+                    </span>
+
+                    <span className="flex items-center gap-1.5">
+                      <span className="h-3 w-0.5 bg-zinc-900" />
+
+                      Ritmo esperado{" "}
+                      {pct(
+                        ritmo
+                      )}
+                    </span>
                   </div>
-                </div>
+
+                  {fechaCorteLabel && (
+                    <p className="mt-2 text-[11px] text-zinc-400">
+                      Datos al{" "}
+                      {
+                        fechaCorteLabel
+                      }
+                    </p>
+                  )}
+                </>
               )}
             </div>
           </div>
 
           {/* ================================================= */}
-          {/* 4 KPI PRINCIPALES - 7/12 */}
+          {/* KPIS PRINCIPALES */}
           {/* ================================================= */}
 
           <div className="xl:col-span-7">
             <div className="grid h-full grid-cols-1 gap-4 sm:grid-cols-2 sm:grid-rows-2">
               <KpiCard
-                titulo="Venta Químicos"
+                titulo="Venta químicos"
                 valor={money(
                   ventaQuimicos
                 )}
-                detalle={`${porcentaje.toLocaleString(
-                  "es-CL",
-                  {
-                    minimumFractionDigits: 1,
-                    maximumFractionDigits: 1,
-                  }
-                )}% de la meta`}
-                tipo="blue"
+                detalle={`${pct(
+                  porcentaje
+                )} de la meta`}
+                icon={
+                  FlaskConical
+                }
+                tone="blue"
+                loading={
+                  loading
+                }
               />
 
               <KpiCard
-                titulo="Meta Químicos"
+                titulo="Meta químicos"
                 valor={money(
                   meta
                 )}
                 detalle="Meta mensual"
-                tipo="blue"
+                icon={
+                  Target
+                }
+                tone="violet"
+                loading={
+                  loading
+                }
               />
 
               <KpiCard
-                titulo="Faltante Meta"
+                titulo="Faltante meta"
                 valor={money(
                   faltanteMeta
                 )}
@@ -1029,24 +1212,41 @@ export default function HomeMenu() {
                     0 &&
                   meta > 0
                     ? "Meta alcanzada"
-                    : "Sólo químicos"
+                    : `${pct(
+                        Math.max(
+                          100 -
+                            porcentaje,
+                          0
+                        )
+                      )} por cubrir`
                 }
-                tipo="orange"
+                icon={
+                  Hourglass
+                }
+                tone="amber"
+                loading={
+                  loading
+                }
               />
 
               <KpiCard
-                titulo="Cierre Potencial Q"
+                titulo="Cierre potencial Q"
                 valor={money(
                   cierreQuimicos
                 )}
-                detalle={`${porcentajeCierre.toLocaleString(
-                  "es-CL",
-                  {
-                    minimumFractionDigits: 1,
-                    maximumFractionDigits: 1,
-                  }
-                )}% de la meta`}
-                tipo="green"
+                detalle={`${pct(
+                  porcentajeCierre
+                )} de la meta`}
+                icon={
+                  TrendingUp
+                }
+                tone="emerald"
+                progress={
+                  porcentajeCierre
+                }
+                loading={
+                  loading
+                }
               />
             </div>
           </div>
@@ -1057,29 +1257,39 @@ export default function HomeMenu() {
         {/* ================================================= */}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <KpiCard
-            titulo="Venta Total"
+          <MiniKpi
+            titulo="Venta total"
             valor={money(
               ventaTotal
             )}
             detalle={`Otros: ${money(
               ventaOtros
             )}`}
-            tipo="green"
+            icon={
+              Banknote
+            }
+            loading={
+              loading
+            }
           />
 
-          <KpiCard
-            titulo="Pedidos Abiertos"
+          <MiniKpi
+            titulo="Pedidos abiertos"
             valor={money(
               pedidosTotal
             )}
             detalle={`Químicos: ${money(
               pedidosQuimicos
             )}`}
-            tipo="blue"
+            icon={
+              ShoppingCart
+            }
+            loading={
+              loading
+            }
           />
 
-          <KpiCard
+          <MiniKpi
             titulo="Entregas"
             valor={money(
               entregasTotal
@@ -1087,76 +1297,86 @@ export default function HomeMenu() {
             detalle={`Químicos: ${money(
               entregasQuimicos
             )}`}
-            tipo="purple"
+            icon={
+              Truck
+            }
+            loading={
+              loading
+            }
           />
 
-          <KpiCard
-            titulo="Cierre Potencial Total"
+          <MiniKpi
+            titulo="Cierre potencial total"
             valor={money(
               cierreTotal
             )}
             detalle={`Otros: ${money(
               cierreOtros
             )}`}
-            tipo="green"
+            icon={
+              PackageCheck
+            }
+            loading={
+              loading
+            }
           />
         </div>
 
         {/* ================================================= */}
-        {/* INDICADORES EXISTENTES */}
+        {/* OTROS INDICADORES */}
         {/* ================================================= */}
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Card className="rounded-2xl shadow-sm">
-            <CardContent className="p-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Comodatos Activos
-              </h3>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <MiniKpi
+            titulo="Comodatos activos"
+            valor={String(
+              comodatos
+            )}
+            icon={
+              Wrench
+            }
+            loading={
+              loading
+            }
+          />
 
-              <p className="mt-1.5 text-xl font-bold text-orange-600">
-                {
-                  comodatos
-                }
-              </p>
-            </CardContent>
-          </Card>
+          <MiniKpi
+            titulo="Facturas emitidas"
+            valor={String(
+              facturas
+            )}
+            icon={
+              FileText
+            }
+            loading={
+              loading
+            }
+          />
 
-          <Card className="rounded-2xl shadow-sm">
-            <CardContent className="p-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Facturas Emitidas
-              </h3>
+          <a
+            href="/kpi/alertas-clientes-comodatos"
+            className="group flex items-center gap-4 rounded-2xl border border-red-200 bg-red-50 p-4 shadow-sm transition hover:border-red-300 hover:shadow-md"
+          >
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-600">
+              <AlertTriangle className="h-5 w-5" />
+            </div>
 
-              <p className="mt-1.5 text-xl font-bold text-purple-600">
-                {
-                  facturas
-                }
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border-l-4 border-red-600 shadow-sm md:col-span-2">
-            <CardContent className="p-4">
-              <h3 className="text-sm font-semibold text-red-600">
-                ⚠️ Alertas
-              </h3>
-
-              <p className="mt-1 text-lg font-bold text-red-700">
-                Tienes{" "}
-                {
-                  alertas
-                }{" "}
-                clientes sin comprar
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium uppercase tracking-wide text-red-600">
+                Alertas
               </p>
 
-              <a
-                href="/kpi/alertas-clientes-comodatos"
-                className="mt-1 inline-block text-sm text-blue-600 hover:underline"
-              >
-                Ver detalles →
-              </a>
-            </CardContent>
-          </Card>
+              <p className="text-base font-semibold text-red-800">
+                {alertas}{" "}
+                {alertas === 1
+                  ? "cliente"
+                  : "clientes"}{" "}
+                sin comprar
+              </p>
+            </div>
+
+            <ArrowRight className="h-4 w-4 text-red-400 transition group-hover:translate-x-0.5 group-hover:text-red-600" />
+          </a>
         </div>
       </main>
     </div>
@@ -1164,68 +1384,547 @@ export default function HomeMenu() {
 }
 
 // ============================================================
-// KPI CARD
+// BANNER DE RITMO
 // ============================================================
+
+function RitmoBanner({
+  estado,
+  ritmo,
+  necesarioPorDia,
+  restantes,
+  faltante,
+}: {
+  estado: Estado;
+  ritmo: number;
+  necesarioPorDia: number;
+  restantes: number;
+  faltante: number;
+}) {
+  const estilos: Record<
+    Estado,
+    string
+  > = {
+    ok:
+      "border-emerald-200 bg-emerald-50 text-emerald-800",
+
+    done:
+      "border-emerald-200 bg-emerald-50 text-emerald-800",
+
+    warn:
+      "border-amber-200 bg-amber-50 text-amber-800",
+
+    bad:
+      "border-red-200 bg-red-50 text-red-800",
+
+    neutral:
+      "border-zinc-200 bg-white text-zinc-700",
+  };
+
+  const Icono =
+    estado === "ok" ||
+    estado === "done"
+      ? CheckCircle2
+      : Lightbulb;
+
+  let texto:
+    React.ReactNode;
+
+  if (
+    estado === "done"
+  ) {
+    texto = (
+      <>
+        ¡Meta alcanzada!
+        Todo lo que factures
+        desde ahora suma sobre
+        la meta.
+      </>
+    );
+  } else if (
+    restantes === 0
+  ) {
+    texto = (
+      <>
+        Último día hábil del
+        mes. Faltan{" "}
+        <b>
+          {money(
+            faltante
+          )}
+        </b>{" "}
+        para la meta.
+      </>
+    );
+  } else if (
+    estado === "ok"
+  ) {
+    texto = (
+      <>
+        Vas sobre el ritmo
+        esperado (
+        {pct(
+          ritmo
+        )}
+        ). Mantén{" "}
+        <b>
+          {money(
+            necesarioPorDia
+          )}
+        </b>{" "}
+        por día hábil para
+        cerrar la meta.
+      </>
+    );
+  } else {
+    texto = (
+      <>
+        Vas bajo el ritmo
+        esperado (
+        {pct(
+          ritmo
+        )}
+        ). Necesitas{" "}
+        <b>
+          {money(
+            necesarioPorDia
+          )}
+        </b>{" "}
+        por día hábil para
+        llegar a la meta.
+      </>
+    );
+  }
+
+  return (
+    <div
+      className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm ${estilos[estado]}`}
+    >
+      <Icono className="h-5 w-5 shrink-0" />
+
+      <p className="[&_b]:font-semibold">
+        {texto}
+      </p>
+    </div>
+  );
+}
+
+// ============================================================
+// TACÓMETRO SVG
+// ============================================================
+
+function Gauge({
+  value,
+  pace,
+}: {
+  value: number;
+  pace: number;
+}) {
+  const cx = 100;
+  const cy = 100;
+
+  const segmentosCantidad =
+    24;
+
+  const avance =
+    Math.min(
+      Math.max(
+        value / 100,
+        0
+      ),
+      1
+    );
+
+  const ritmo =
+    Math.min(
+      Math.max(
+        pace / 100,
+        0
+      ),
+      1
+    );
+
+  const punto = (
+    t: number,
+    radio: number
+  ) => {
+    const angle =
+      Math.PI *
+      (1 - t);
+
+    return {
+      x:
+        cx +
+        radio *
+          Math.cos(angle),
+
+      y:
+        cy -
+        radio *
+          Math.sin(angle),
+    };
+  };
+
+  const segmentos =
+    Array.from(
+      {
+        length:
+          segmentosCantidad,
+      },
+      (_, i) => {
+        const t =
+          (i + 0.5) /
+          segmentosCantidad;
+
+        const p1 =
+          punto(
+            t,
+            66
+          );
+
+        const p2 =
+          punto(
+            t,
+            86
+          );
+
+        const color =
+          t < 0.34
+            ? "#ef4444"
+            : t < 0.67
+            ? "#f59e0b"
+            : "#16a34a";
+
+        return {
+          p1,
+          p2,
+
+          color:
+            t <= avance
+              ? color
+              : "#e4e4e7",
+        };
+      }
+    );
+
+  const r1 =
+    punto(
+      ritmo,
+      58
+    );
+
+  const r2 =
+    punto(
+      ritmo,
+      94
+    );
+
+  const aguja =
+    punto(
+      avance,
+      56
+    );
+
+  return (
+    <svg
+      viewBox="0 0 200 112"
+      className="mt-3 w-full max-w-[300px]"
+      role="img"
+      aria-label={`Avance ${value.toFixed(
+        1
+      )}% de la meta`}
+    >
+      {segmentos.map(
+        (
+          segmento,
+          index
+        ) => (
+          <line
+            key={
+              index
+            }
+            x1={
+              segmento
+                .p1.x
+            }
+            y1={
+              segmento
+                .p1.y
+            }
+            x2={
+              segmento
+                .p2.x
+            }
+            y2={
+              segmento
+                .p2.y
+            }
+            stroke={
+              segmento.color
+            }
+            strokeWidth={
+              7
+            }
+            strokeLinecap="round"
+          />
+        )
+      )}
+
+      {/* MARCA DEL RITMO ESPERADO */}
+
+      <line
+        x1={r1.x}
+        y1={r1.y}
+        x2={r2.x}
+        y2={r2.y}
+        stroke="#18181b"
+        strokeWidth={2}
+      />
+
+      {/* AGUJA */}
+
+      <line
+        x1={cx}
+        y1={cy}
+        x2={
+          aguja.x
+        }
+        y2={
+          aguja.y
+        }
+        stroke="#1f4ed8"
+        strokeWidth={4}
+        strokeLinecap="round"
+        style={{
+          transition:
+            "all 700ms ease-out",
+        }}
+      />
+
+      <circle
+        cx={cx}
+        cy={cy}
+        r={7}
+        fill="#1f4ed8"
+      />
+
+      <circle
+        cx={cx}
+        cy={cy}
+        r={3}
+        fill="#fff"
+      />
+    </svg>
+  );
+}
+
+// ============================================================
+// KPI PRINCIPAL
+// ============================================================
+
+type Tone =
+  | "blue"
+  | "violet"
+  | "amber"
+  | "emerald";
+
+const TONOS: Record<
+  Tone,
+  {
+    barra: string;
+    icono: string;
+    progreso: string;
+  }
+> = {
+  blue: {
+    barra:
+      "bg-blue-500",
+
+    icono:
+      "bg-blue-50 text-blue-600",
+
+    progreso:
+      "bg-blue-500",
+  },
+
+  violet: {
+    barra:
+      "bg-violet-500",
+
+    icono:
+      "bg-violet-50 text-violet-600",
+
+    progreso:
+      "bg-violet-500",
+  },
+
+  amber: {
+    barra:
+      "bg-amber-400",
+
+    icono:
+      "bg-amber-50 text-amber-600",
+
+    progreso:
+      "bg-amber-400",
+  },
+
+  emerald: {
+    barra:
+      "bg-emerald-500",
+
+    icono:
+      "bg-emerald-50 text-emerald-600",
+
+    progreso:
+      "bg-emerald-500",
+  },
+};
 
 function KpiCard({
   titulo,
   valor,
   detalle,
-  tipo = "default",
+  icon: Icon,
+  tone,
+  progress,
+  loading,
 }: {
   titulo: string;
   valor: string;
   detalle?: string;
-
-  tipo?:
-    | "default"
-    | "blue"
-    | "green"
-    | "orange"
-    | "purple";
+  icon: LucideIcon;
+  tone: Tone;
+  progress?: number;
+  loading?: boolean;
 }) {
-  const estilos = {
-    default:
-      "border-gray-200",
-
-    blue:
-      "border-blue-200",
-
-    green:
-      "border-green-200",
-
-    orange:
-      "border-orange-200",
-
-    purple:
-      "border-purple-200",
-  };
+  const toneData =
+    TONOS[tone];
 
   return (
-    <Card
-      className={`${estilos[tipo]} h-full rounded-2xl shadow-sm`}
-    >
-      <CardContent className="flex h-full min-h-[112px] flex-col justify-center p-4">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-          {
-            titulo
-          }
+    <div className="relative flex h-full min-h-[120px] flex-col justify-center overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-4 pt-5 shadow-sm transition hover:shadow-md">
+      <div
+        className={`absolute inset-x-0 top-0 h-1 ${toneData.barra}`}
+      />
+
+      <div className="flex items-center gap-2">
+        <span
+          className={`flex h-7 w-7 items-center justify-center rounded-lg ${toneData.icono}`}
+        >
+          <Icon className="h-4 w-4" />
+        </span>
+
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          {titulo}
+        </h3>
+      </div>
+
+      {loading ? (
+        <Skeleton />
+      ) : (
+        <>
+          <p className="mt-2 text-2xl font-bold tracking-tight">
+            {valor}
+          </p>
+
+          {typeof progress ===
+            "number" && (
+            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-zinc-100">
+              <div
+                className={`h-full rounded-full ${toneData.progreso} transition-all duration-700`}
+                style={{
+                  width: `${Math.min(
+                    Math.max(
+                      progress,
+                      0
+                    ),
+                    100
+                  )}%`,
+                }}
+              />
+            </div>
+          )}
+
+          {detalle && (
+            <p className="mt-1 text-sm text-zinc-500">
+              {detalle}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// MINI KPI
+// ============================================================
+
+function MiniKpi({
+  titulo,
+  valor,
+  detalle,
+  icon: Icon,
+  loading,
+}: {
+  titulo: string;
+  valor: string;
+  detalle?: string;
+  icon: LucideIcon;
+  loading?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-4 rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-sm transition hover:shadow-md">
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-[#1f4ed8]">
+        <Icon className="h-5 w-5" />
+      </div>
+
+      <div className="min-w-0">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          {titulo}
         </h3>
 
-        <p className="mt-1.5 text-xl font-bold text-gray-900">
-          {
-            valor
-          }
-        </p>
+        {loading ? (
+          <Skeleton
+            small
+          />
+        ) : (
+          <>
+            <p className="truncate text-lg font-bold tracking-tight">
+              {valor}
+            </p>
 
-        {detalle && (
-          <p className="mt-1 text-sm text-gray-500">
-            {
-              detalle
-            }
-          </p>
+            {detalle && (
+              <p className="truncate text-xs text-zinc-500">
+                {detalle}
+              </p>
+            )}
+          </>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// SKELETON
+// ============================================================
+
+function Skeleton({
+  small = false,
+}: {
+  small?: boolean;
+}) {
+  return (
+    <div className="mt-2 space-y-2">
+      <div
+        className={`animate-pulse rounded bg-zinc-100 ${
+          small
+            ? "h-5 w-28"
+            : "h-7 w-40"
+        }`}
+      />
+
+      <div className="h-3 w-24 animate-pulse rounded bg-zinc-100" />
+    </div>
   );
 }
