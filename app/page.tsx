@@ -14,6 +14,10 @@ import GaugeChart from "react-gauge-chart";
 const LOGO_URL =
   "https://assets.jumpseller.com/store/spartan-de-chile/themes/317202/options/27648963/Logo-spartan-white.png?1600810625";
 
+// ============================================================
+// TIPOS
+// ============================================================
+
 type EjecutivoRow = {
   nombre: string;
   email: string | null;
@@ -49,6 +53,10 @@ type AvanceRow = {
   synced_at: string | null;
 };
 
+// ============================================================
+// HELPERS
+// ============================================================
+
 function num(value: unknown) {
   const n = Number(value ?? 0);
 
@@ -70,12 +78,13 @@ function money(value: unknown) {
 
 /*
  * IMPORTANTE:
- * No quitamos FB, HC, IND, etc.
+ *
+ * No quitamos prefijos.
  *
  * JUAN PRIETO
  * HC JUAN PRIETO
  *
- * deben mantenerse como vendedores comerciales distintos.
+ * son vendedores comerciales distintos.
  */
 function nombreKey(value: string) {
   return String(value || "")
@@ -84,21 +93,9 @@ function nombreKey(value: string) {
     .replace(/\s+/g, " ");
 }
 
-function formatSync(
-  value: string | null
-) {
-  if (!value) {
-    return "Sin información";
-  }
-
-  return new Date(value).toLocaleString(
-    "es-CL",
-    {
-      dateStyle: "short",
-      timeStyle: "short",
-    }
-  );
-}
+// ============================================================
+// COMPONENTE PRINCIPAL
+// ============================================================
 
 export default function HomeMenu() {
   const supabase = useMemo(
@@ -107,22 +104,30 @@ export default function HomeMenu() {
     []
   );
 
-  const [userEmail, setUserEmail] =
-    useState<string | null>(null);
+  const [
+    userEmail,
+    setUserEmail,
+  ] =
+    useState<string | null>(
+      null
+    );
 
-  const [ejecutivos, setEjecutivos] =
-    useState<string[]>([]);
-
-  const [fechaCorte, setFechaCorte] =
+  const [
+    fechaCorte,
+    setFechaCorte,
+  ] =
     useState("");
 
-  const [ultimaSync, setUltimaSync] =
-    useState<string | null>(null);
-
-  const [loading, setLoading] =
+  const [
+    loading,
+    setLoading,
+  ] =
     useState(true);
 
-  const [errorVentas, setErrorVentas] =
+  const [
+    errorVentas,
+    setErrorVentas,
+  ] =
     useState("");
 
   // ============================================================
@@ -183,20 +188,26 @@ export default function HomeMenu() {
   ] = useState(0);
 
   // ============================================================
-  // OTROS INDICADORES EXISTENTES
+  // INDICADORES EXISTENTES
   // ============================================================
 
-  const [comodatos, setComodatos] =
-    useState(0);
+  const [
+    comodatos,
+    setComodatos,
+  ] = useState(0);
 
-  const [facturas, setFacturas] =
-    useState(0);
+  const [
+    facturas,
+    setFacturas,
+  ] = useState(0);
 
-  const [alertas, setAlertas] =
-    useState(0);
+  const [
+    alertas,
+    setAlertas,
+  ] = useState(0);
 
   // ============================================================
-  // CARGA INICIAL
+  // CARGA DEL DASHBOARD
   // ============================================================
 
   useEffect(() => {
@@ -207,12 +218,14 @@ export default function HomeMenu() {
         setLoading(true);
         setErrorVentas("");
 
-        // --------------------------------------------------------
+        // ======================================================
         // 1. SESIÓN
-        // --------------------------------------------------------
+        // ======================================================
 
         const {
-          data: { session },
+          data: {
+            session,
+          },
         } =
           await supabase.auth.getSession();
 
@@ -236,13 +249,14 @@ export default function HomeMenu() {
           return;
         }
 
-        // --------------------------------------------------------
-        // 2. EJECUTIVOS ASOCIADOS AL LOGIN
-        // --------------------------------------------------------
+        // ======================================================
+        // 2. EJECUTIVOS ASOCIADOS AL CORREO
+        // ======================================================
 
         const {
           data: ejecutivosData,
-          error: ejecutivosError,
+          error:
+            ejecutivosError,
         } = await supabase
           .from("ejecutivos")
           .select(`
@@ -254,7 +268,9 @@ export default function HomeMenu() {
             email
           );
 
-        if (ejecutivosError) {
+        if (
+          ejecutivosError
+        ) {
           throw ejecutivosError;
         }
 
@@ -262,27 +278,22 @@ export default function HomeMenu() {
           (ejecutivosData ||
             []) as EjecutivoRow[];
 
-        const nombres =
-          [
-            ...new Set(
-              registrosEjecutivo
-                .map((r) =>
-                  String(
-                    r.nombre || ""
-                  ).trim()
-                )
-                .filter(Boolean)
-            ),
-          ];
-
-        if (!activo) {
-          return;
-        }
-
-        setEjecutivos(nombres);
+        const nombres = [
+          ...new Set(
+            registrosEjecutivo
+              .map((r) =>
+                String(
+                  r.nombre ||
+                    ""
+                ).trim()
+              )
+              .filter(Boolean)
+          ),
+        ];
 
         if (
-          nombres.length === 0
+          nombres.length ===
+          0
         ) {
           setErrorVentas(
             "Tu correo no tiene un ejecutivo comercial asociado."
@@ -298,10 +309,9 @@ export default function HomeMenu() {
             )
           );
 
-        // --------------------------------------------------------
-        // 3. ÚLTIMO CORTE DISPONIBLE
-        // RLS devolverá solamente las filas permitidas al usuario.
-        // --------------------------------------------------------
+        // ======================================================
+        // 3. ÚLTIMA FECHA DISPONIBLE
+        // ======================================================
 
         const {
           data: corteData,
@@ -316,7 +326,8 @@ export default function HomeMenu() {
           .order(
             "fecha_corte",
             {
-              ascending: false,
+              ascending:
+                false,
             }
           )
           .limit(1);
@@ -346,9 +357,9 @@ export default function HomeMenu() {
           ultimaFecha
         );
 
-        // --------------------------------------------------------
-        // 4. DATOS DEL EJECUTIVO PARA EL ÚLTIMO CORTE
-        // --------------------------------------------------------
+        // ======================================================
+        // 4. INFORMACIÓN DEL ÚLTIMO CORTE
+        // ======================================================
 
         const {
           data: avanceData,
@@ -389,24 +400,25 @@ export default function HomeMenu() {
         }
 
         /*
-         * Filtrado adicional.
+         * Seguridad adicional:
+         * conservamos el nombre completo.
          *
-         * Aunque RLS ya protege las filas,
-         * verificamos nuevamente contra los nombres asociados
-         * al correo.
-         *
-         * No quitamos prefijos.
+         * FB EDUARDO RIOS PACHECO
+         * no es igual a
+         * EDUARDO RIOS PACHECO
          */
+
         const filasUsuario =
-          ((avanceData ||
-            []) as AvanceRow[])
-            .filter((r) =>
-              nombresPermitidos.has(
-                nombreKey(
-                  r.vendedor
-                )
+          (
+            (avanceData ||
+              []) as AvanceRow[]
+          ).filter((r) =>
+            nombresPermitidos.has(
+              nombreKey(
+                r.vendedor
               )
-            );
+            )
+          );
 
         if (
           filasUsuario.length ===
@@ -419,20 +431,16 @@ export default function HomeMenu() {
           return;
         }
 
-        // --------------------------------------------------------
-        // 5. CONSOLIDACIÓN
-        //
-        // Si el mismo login tiene más de un SlpCode/división:
-        // se suman ambos.
-        //
-        // Ej:
-        // JUAN PRIETO
-        // HC JUAN PRIETO
-        // --------------------------------------------------------
+        // ======================================================
+        // 5. CONSOLIDAR DATOS DEL LOGIN
+        // ======================================================
 
         const totales =
           filasUsuario.reduce(
-            (acc, r) => {
+            (
+              acc,
+              r
+            ) => {
               acc.meta +=
                 num(
                   r.meta_mes
@@ -557,39 +565,9 @@ export default function HomeMenu() {
           totales.cierreTotal
         );
 
-        // --------------------------------------------------------
-        // 6. ÚLTIMA SINCRONIZACIÓN
-        // --------------------------------------------------------
-
-        const syncs =
-          filasUsuario
-            .map(
-              (r) =>
-                r.synced_at
-            )
-            .filter(
-              (
-                value
-              ): value is string =>
-                Boolean(value)
-            )
-            .sort(
-              (a, b) =>
-                new Date(
-                  b
-                ).getTime() -
-                new Date(
-                  a
-                ).getTime()
-            );
-
-        setUltimaSync(
-          syncs[0] || null
-        );
-
-        // --------------------------------------------------------
-        // 7. INDICADORES ANTIGUOS DEL HOME
-        // --------------------------------------------------------
+        // ======================================================
+        // 6. INDICADORES EXISTENTES DEL HOME
+        // ======================================================
 
         const [
           comodatosRes,
@@ -619,8 +597,8 @@ export default function HomeMenu() {
             await comodatosRes.json();
 
           setComodatos(
-            json?.data?.length ||
-              0
+            json?.data
+              ?.length || 0
           );
         }
 
@@ -632,7 +610,8 @@ export default function HomeMenu() {
 
           const facturasUser =
             (
-              json?.data || []
+              json?.data ||
+              []
             ).filter(
               (f: any) =>
                 String(
@@ -656,8 +635,8 @@ export default function HomeMenu() {
             await alertasRes.json();
 
           setAlertas(
-            json?.data?.length ||
-              0
+            json?.data
+              ?.length || 0
           );
         }
       } catch (err: any) {
@@ -712,9 +691,9 @@ export default function HomeMenu() {
     );
 
   /*
-   * react-gauge-chart trabaja entre 0 y 1.
-   * Si el vendedor supera 100%, la aguja queda al máximo,
-   * pero abajo seguimos mostrando el porcentaje real.
+   * GaugeChart trabaja entre 0 y 1.
+   * Si supera 100%, dejamos la aguja en el máximo,
+   * pero mostramos el porcentaje real.
    */
   const porcentajeGauge =
     Math.min(
@@ -744,14 +723,14 @@ export default function HomeMenu() {
       }
     );
 
-  const anioLabel =
-    fechaReferencia.getFullYear();
-
   const mesTitulo =
     mesLabel
       .charAt(0)
       .toUpperCase() +
     mesLabel.slice(1);
+
+  const anioLabel =
+    fechaReferencia.getFullYear();
 
   // ============================================================
   // FECHA ACTUAL
@@ -775,11 +754,19 @@ export default function HomeMenu() {
     "✅ No olvides dar seguimiento a tus clientes.",
   ];
 
+  /*
+   * Usamos el día para evitar que cambie
+   * aleatoriamente en cada render.
+   */
   const mensaje =
     mensajes[
       new Date().getDate() %
         mensajes.length
     ];
+
+  // ============================================================
+  // RENDER
+  // ============================================================
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900">
@@ -792,7 +779,7 @@ export default function HomeMenu() {
 
         <div className="absolute inset-y-0 right-[-20%] w-[60%] rotate-[-8deg] bg-sky-400/60" />
 
-        <div className="relative mx-auto max-w-7xl px-6 py-8">
+        <div className="relative mx-auto max-w-7xl px-6 py-7">
           <div className="flex items-center gap-4 md:gap-6">
             <Image
               src={LOGO_URL}
@@ -800,7 +787,7 @@ export default function HomeMenu() {
               width={200}
               height={60}
               unoptimized
-              className="h-12 w-auto object-contain drop-shadow-sm md:h-28"
+              className="h-12 w-auto object-contain drop-shadow-sm md:h-24"
             />
 
             <div>
@@ -820,30 +807,31 @@ export default function HomeMenu() {
       {/* CONTENIDO */}
       {/* ===================================================== */}
 
-      <main className="relative mx-auto max-w-7xl space-y-8 px-6 py-10">
+      <main className="relative mx-auto max-w-7xl space-y-6 px-6 py-7">
+        {/* ================================================= */}
         {/* SALUDO */}
+        {/* ================================================= */}
 
-        <section className="rounded-2xl border bg-white p-6 text-center shadow-sm">
-          <h2 className="mb-2 text-2xl font-bold text-[#2B6CFF]">
+        <section className="rounded-2xl border bg-white p-5 text-center shadow-sm">
+          <h2 className="text-2xl font-bold text-[#2B6CFF]">
             👋 Bienvenido
             {userEmail
               ? `, ${userEmail}`
               : ""}
           </h2>
 
-          <p className="mb-2 text-zinc-600">
+          <p className="mt-1 text-zinc-600">
             {today}
           </p>
 
-          <p className="text-lg font-medium">
+          <p className="mt-2 text-base font-medium">
             {mensaje}
           </p>
-
-          
-         
         </section>
 
-        {/* MENSAJE ERROR */}
+        {/* ================================================= */}
+        {/* ERROR */}
+        {/* ================================================= */}
 
         {errorVentas && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
@@ -852,135 +840,139 @@ export default function HomeMenu() {
         )}
 
         {/* ================================================= */}
-        {/* DASHBOARD PERSONAL */}
+        {/* TACÓMETRO + KPIS PRINCIPALES */}
         {/* ================================================= */}
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-12">
+          {/* ================================================= */}
           {/* TACÓMETRO */}
+          {/* ================================================= */}
 
-          <div className="flex flex-col items-center rounded-2xl bg-white p-6 shadow">
-            <h2 className="mb-1 text-lg font-semibold text-blue-600">
-              Avance Meta{" "}
-              {mesTitulo}{" "}
-              {anioLabel}
-            </h2>
+          <div className="xl:col-span-5">
+            <div className="rounded-2xl border bg-white p-5 shadow-sm">
+              <h2 className="text-center text-lg font-semibold text-blue-600">
+                Avance Meta{" "}
+                {mesTitulo}{" "}
+                {anioLabel}
+              </h2>
 
-            <p className="mb-3 text-xs text-gray-400">
-              Venta de químicos /
-              Meta de químicos
-            </p>
+              <p className="mt-1 text-center text-xs text-gray-400">
+                Venta de químicos / Meta de químicos
+              </p>
 
-            {loading ? (
-              <div className="flex min-h-[270px] items-center justify-center text-gray-400">
-                Cargando información...
-              </div>
-            ) : (
-              <>
-                <GaugeChart
-                  id="gauge-chart"
-                  nrOfLevels={20}
-                  percent={
-                    porcentajeGauge
-                  }
-                  colors={[
-                    "#dc2626",
-                    "#eab308",
-                    "#16a34a",
-                  ]}
-                  arcWidth={0.3}
-                  textColor="#000000"
-                  formatTextValue={() =>
-                    `${porcentaje.toLocaleString(
-                      "es-CL",
-                      {
-                        minimumFractionDigits: 1,
-                        maximumFractionDigits: 1,
+              {loading ? (
+                <div className="flex min-h-[240px] items-center justify-center text-gray-400">
+                  Cargando información...
+                </div>
+              ) : (
+                <>
+                  <div className="mx-auto mt-3 w-full max-w-[360px]">
+                    <GaugeChart
+                      id="gauge-chart"
+                      nrOfLevels={20}
+                      percent={
+                        porcentajeGauge
                       }
-                    )}%`
-                  }
-                />
+                      colors={[
+                        "#dc2626",
+                        "#eab308",
+                        "#16a34a",
+                      ]}
+                      arcWidth={0.28}
+                      textColor="#000000"
+                      needleColor="#4b5563"
+                      needleBaseColor="#4b5563"
+                      formatTextValue={() =>
+                        `${porcentaje.toLocaleString(
+                          "es-CL",
+                          {
+                            minimumFractionDigits: 1,
+                            maximumFractionDigits: 1,
+                          }
+                        )}%`
+                      }
+                    />
+                  </div>
 
-                <p className="mt-4 text-sm text-gray-500">
-                  {money(
-                    ventaQuimicos
-                  )}{" "}
-                  de{" "}
-                  {money(meta)}
-                </p>
-
-                <p className="mt-1 text-xs text-gray-400">
-                  Cierre potencial:{" "}
-                  {porcentajeCierre.toLocaleString(
-                    "es-CL",
-                    {
-                      minimumFractionDigits: 1,
-                      maximumFractionDigits: 1,
-                    }
-                  )}
-                  %
-                </p>
-              </>
-            )}
+                  <div className="mt-1 text-center">
+                    <p className="text-sm font-medium text-gray-600">
+                      {money(
+                        ventaQuimicos
+                      )}{" "}
+                      de{" "}
+                      {money(meta)}
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
-          {/* KPIS PRINCIPALES */}
+          {/* ================================================= */}
+          {/* 4 KPIS PRINCIPALES */}
+          {/* ================================================= */}
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 content-start self-start">
-            <KpiCard
-              titulo="Venta Químicos"
-              valor={money(
-                ventaQuimicos
-              )}
-              detalle={`${porcentaje.toLocaleString(
-                "es-CL",
-                {
-                  minimumFractionDigits: 1,
-                  maximumFractionDigits: 1,
+          <div className="xl:col-span-7">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <KpiCard
+                titulo="Venta Químicos"
+                valor={money(
+                  ventaQuimicos
+                )}
+                detalle={`${porcentaje.toLocaleString(
+                  "es-CL",
+                  {
+                    minimumFractionDigits: 1,
+                    maximumFractionDigits: 1,
+                  }
+                )}% de la meta`}
+                tipo="blue"
+              />
+
+              <KpiCard
+                titulo="Meta Químicos"
+                valor={money(
+                  meta
+                )}
+                detalle="Meta mensual"
+                tipo="blue"
+              />
+
+              <KpiCard
+                titulo="Faltante Meta"
+                valor={money(
+                  faltanteMeta
+                )}
+                detalle={
+                  faltanteMeta ===
+                    0 &&
+                  meta > 0
+                    ? "Meta alcanzada"
+                    : "Sólo químicos"
                 }
-              )}% de la meta`}
-              tipo="blue"
-            />
+                tipo="orange"
+              />
 
-            <KpiCard
-              titulo="Meta Químicos"
-              valor={money(meta)}
-              detalle="Meta mensual"
-              tipo="blue"
-            />
-
-            <KpiCard
-              titulo="Faltante Meta"
-              valor={money(
-                faltanteMeta
-              )}
-              detalle={
-                faltanteMeta === 0 &&
-                meta > 0
-                  ? "Meta alcanzada"
-                  : "Sólo químicos"
-              }
-              tipo="orange"
-            />
-
-            <KpiCard
-              titulo="Cierre Potencial Q"
-              valor={money(
-                cierreQuimicos
-              )}
-              detalle={`${porcentajeCierre.toLocaleString(
-                "es-CL",
-                {
-                  minimumFractionDigits: 1,
-                  maximumFractionDigits: 1,
-                }
-              )}% de la meta`}
-              tipo="green"
-            />
+              <KpiCard
+                titulo="Cierre Potencial Q"
+                valor={money(
+                  cierreQuimicos
+                )}
+                detalle={`${porcentajeCierre.toLocaleString(
+                  "es-CL",
+                  {
+                    minimumFractionDigits: 1,
+                    maximumFractionDigits: 1,
+                  }
+                )}% de la meta`}
+                tipo="green"
+              />
+            </div>
           </div>
         </div>
 
         {/* ================================================= */}
-        {/* SEGUNDA FILA DE KPIs */}
+        {/* SEGUNDA FILA KPIS */}
         {/* ================================================= */}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -1035,43 +1027,44 @@ export default function HomeMenu() {
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Card>
-            <CardContent className="p-5">
-              <h3 className="text-sm font-medium text-gray-500">
+            <CardContent className="p-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                 Comodatos Activos
               </h3>
 
-              <p className="mt-2 text-2xl font-bold text-orange-600">
+              <p className="mt-1.5 text-xl font-bold text-orange-600">
                 {comodatos}
               </p>
             </CardContent>
           </Card>
 
           <Card>
-            <CardContent className="p-5">
-              <h3 className="text-sm font-medium text-gray-500">
+            <CardContent className="p-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                 Facturas Emitidas
               </h3>
 
-              <p className="mt-2 text-2xl font-bold text-purple-600">
+              <p className="mt-1.5 text-xl font-bold text-purple-600">
                 {facturas}
               </p>
             </CardContent>
           </Card>
 
           <Card className="border-l-4 border-red-600 md:col-span-2">
-            <CardContent className="p-5">
+            <CardContent className="p-4">
               <h3 className="text-sm font-semibold text-red-600">
                 ⚠️ Alertas
               </h3>
 
               <p className="mt-1 text-lg font-bold text-red-700">
-                Tienes {alertas}{" "}
+                Tienes{" "}
+                {alertas}{" "}
                 clientes sin comprar
               </p>
 
               <a
                 href="/kpi/alertas-clientes-comodatos"
-                className="mt-2 inline-block text-sm text-blue-600 hover:underline"
+                className="mt-1 inline-block text-sm text-blue-600 hover:underline"
               >
                 Ver detalles →
               </a>
@@ -1096,6 +1089,7 @@ function KpiCard({
   titulo: string;
   valor: string;
   detalle?: string;
+
   tipo?:
     | "default"
     | "blue"
@@ -1104,15 +1098,26 @@ function KpiCard({
     | "purple";
 }) {
   const estilos = {
-    default: "border-gray-200",
-    blue: "border-blue-200",
-    green: "border-green-200",
-    orange: "border-orange-200",
-    purple: "border-purple-200",
+    default:
+      "border-gray-200",
+
+    blue:
+      "border-blue-200",
+
+    green:
+      "border-green-200",
+
+    orange:
+      "border-orange-200",
+
+    purple:
+      "border-purple-200",
   };
 
   return (
-    <Card className={estilos[tipo]}>
+    <Card
+      className={`${estilos[tipo]} rounded-2xl shadow-sm`}
+    >
       <CardContent className="p-4">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
           {titulo}
