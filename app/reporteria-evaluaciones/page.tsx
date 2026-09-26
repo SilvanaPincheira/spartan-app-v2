@@ -75,6 +75,9 @@ type Evaluacion = {
 
   montoComision: number;
 
+   // NUEVO
+   evaluacionFinal: boolean;
+
   requiereVB: boolean;
   estadoVB: string;
 
@@ -268,13 +271,20 @@ export default function ReporteriaEvaluacionesPage() {
         );
       }
 
-      setEvaluaciones(
-        Array.isArray(
-          resultado.evaluaciones
-        )
-          ? resultado.evaluaciones
-          : []
-      );
+      const todasLasEvaluaciones =
+  Array.isArray(resultado.evaluaciones)
+    ? resultado.evaluaciones
+    : [];
+
+// Gerencia ve solamente las evaluaciones
+// marcadas como versión final.
+const evaluacionesFinales =
+  todasLasEvaluaciones.filter(
+    (evaluacion: Evaluacion) =>
+      evaluacion.evaluacionFinal === true
+  );
+
+setEvaluaciones(evaluacionesFinales);
 
     } catch (error) {
       console.error(error);
