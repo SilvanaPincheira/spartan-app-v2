@@ -745,6 +745,8 @@ async function guardarEnHistorial() {
       comentarios: "",
       meses: months,
       fleteKg: fleteKg,
+      // NUEVO
+  evaluacionFinal: enviarGerencia,
       comisionBase: commissionPct,
       comisionFinal: calc.comFinalPct,
       relacionCdtoVenta: calc.rel,
@@ -798,9 +800,13 @@ precioConFleteKg:
 
     if (data.success) {
       alert(`✅ Evaluación guardada correctamente. ID: ${data.idEvaluacion}`);
+       // Evita que la siguiente evaluación
+  // se envíe accidentalmente a Gerencia
+  setEnviarGerencia(false);
     } else {
       alert("⚠️ Error al guardar en el historial.");
     }
+    
   } catch (err) {
     console.error("❌ Error al guardar:", err);
     alert("Error al guardar en el historial.");
@@ -1087,7 +1093,7 @@ precioConFleteKg:
   >
     ✉️ Enviar por correo (si Viable)
   </button>
-  
+
   <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-900">
   <input
     type="checkbox"
