@@ -207,6 +207,8 @@ export default function Page() {
   // Parámetros
   const [months, setMonths] = useLocalStorage<number>("eval.meses", 24);
   const [commissionPct, setCommissionPct] = useLocalStorage<number>("eval.com.base", 0.105); // base
+  const [fleteKg, setFleteKg] =
+  useLocalStorage<number>("eval.flete.kg", 0);
   /* ========== DUPLICAR EVALUACIÓN DESDE HISTORIAL ========== */
 useEffect(() => {
   if (typeof window === "undefined") return;
@@ -958,6 +960,20 @@ async function guardarEnHistorial() {
                 onChange={(e) => setMonths(Math.max(1, Number(e.target.value)))}
               />
             </label>
+            <label className="flex items-center gap-2">
+  <span>Flete $/kg</span>
+
+  <input
+    type="number"
+    min={0}
+    step={1}
+    className="w-28 rounded border px-2 py-1 text-right"
+    value={fleteKg}
+    onChange={(e) =>
+      setFleteKg(Math.max(0, Number(e.target.value) || 0))
+    }
+  />
+</label>
 
             <label className="flex items-center gap-2">
               <span>% Comisión base</span>
