@@ -742,6 +742,7 @@ async function guardarEnHistorial() {
       zona: "",
       comentarios: "",
       meses: months,
+      fleteKg: fleteKg,
       comisionBase: commissionPct,
       comisionFinal: calc.comFinalPct,
       relacionCdtoVenta: calc.rel,
@@ -757,6 +758,10 @@ async function guardarEnHistorial() {
         name: p.name,
         kilos: p.kilos,
         qty: p.qty,
+        fleteKg: fleteKg,
+
+precioConFleteKg:
+  (p.priceListaKg || 0) + fleteKg,
         priceListaKg: p.priceListaKg,
         priceKg: p.priceKg,
         costoKg: p.costKg ?? 0,
