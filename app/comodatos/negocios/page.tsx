@@ -209,6 +209,8 @@ export default function Page() {
   const [commissionPct, setCommissionPct] = useLocalStorage<number>("eval.com.base", 0.105); // base
   const [fleteKg, setFleteKg] =
   useLocalStorage<number>("eval.flete.kg", 0);
+  const [enviarGerencia, setEnviarGerencia] =
+  useState(false);
   /* ========== DUPLICAR EVALUACIÓN DESDE HISTORIAL ========== */
 useEffect(() => {
   if (typeof window === "undefined") return;
@@ -1085,6 +1087,19 @@ precioConFleteKg:
   >
     ✉️ Enviar por correo (si Viable)
   </button>
+  
+  <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-900">
+  <input
+    type="checkbox"
+    checked={enviarGerencia}
+    onChange={(e) =>
+      setEnviarGerencia(e.target.checked)
+    }
+    className="h-4 w-4"
+  />
+
+  Enviar evaluación final a Gerencia
+</label>
 
   <button
     onClick={guardarEnHistorial}
