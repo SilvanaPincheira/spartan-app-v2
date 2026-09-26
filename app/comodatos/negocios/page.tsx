@@ -1115,15 +1115,18 @@ async function guardarEnHistorial() {
                   <th className="px-2 py-1 text-left">Descripción</th>
                   <th className="px-2 py-1 text-right">Cant. (pres/mes)</th>
                   <th className="px-2 py-1 text-right">Precio venta $/kg</th>
-                  <th className="px-2 py-1 text-right">Precio lista $/kg</th>
-                  <th className="px-2 py-1 text-right">Subtotal venta</th>
+                  <th className="px-2 py-1 text-right">Precio lista Stgo $/kg</th>
+
+<th className="px-2 py-1 text-right">Precio c/flete $/kg</th>
+
+<th className="px-2 py-1 text-right">Subtotal venta</th>
                   <th className="px-2 py-1"></th>
                 </tr>
               </thead>
               <tbody>
                 {sales.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-2 py-4 text-center text-zinc-500">
+                    <td colSpan={8} className="px-2 py-4 text-center text-zinc-500">
                       Sin productos agregados.
                     </td>
                   </tr>
@@ -1185,10 +1188,20 @@ async function guardarEnHistorial() {
                           }}
                         />
                       </td>
-                      {/* Precio lista $/kg (solo lectura, desde catálogo) */}
-                      <td className="px-2 py-1 text-right">{money(sales[i].priceListaKg ?? 0)}</td>
-                      {/* Subtotal (venta) */}
-                      <td className="px-2 py-1 text-right">{money(r.venta)}</td>
+                      {/* Precio lista Stgo $/kg - solo informativo */}
+<td className="px-2 py-1 text-right">
+  {money(sales[i].priceListaKg ?? 0)}
+</td>
+
+{/* Precio lista Stgo + flete $/kg - solo informativo */}
+<td className="px-2 py-1 text-right font-medium text-blue-700">
+  {money((sales[i].priceListaKg ?? 0) + fleteKg)}
+</td>
+
+{/* Subtotal venta - cálculo original */}
+<td className="px-2 py-1 text-right">
+  {money(r.venta)}
+</td>
                       <td className="px-2 py-1 text-right">
                         <button className="text-xs text-red-600" onClick={() => rmSale(i)}>
                           Eliminar
