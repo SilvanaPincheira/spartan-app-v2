@@ -1,42 +1,154 @@
 // app/api/save-reclamo/route.ts
+
 import { NextResponse } from "next/server";
 
 /**
- * Recibe los datos del formulario de Reclamos (desde /ventas/reclamos/page.tsx)
- * y los reenvía al WebApp de Google Apps Script que guarda en tu hoja "Reclamos".
+ * Recibe el nuevo reclamo desde SpartanOne
+ * y lo reenvía al WebApp de Google Apps Script.
+ *
+ * El Apps Script será responsable de:
+ * - generar N° de reclamo correlativo
+ * - generar fecha/hora de ingreso
+ * - guardar el reclamo
+ * - devolver numeroReclamo y fechaIngreso
  */
 export async function POST(req: Request) {
   try {
-    // Leer datos enviados desde el formulario
     const body = await req.json();
 
-    // URL del WebApp que apunta a tu Apps Script publicado como “Cualquiera con el enlace”
-    const SHEET_WEBAPP_URL = process.env.SHEET_RECLAMOS_WEBAPP_URL!;
+    const SHEET_WEBAPP_URL =
+      process.env.SHEET_RECLAMOS_WEBAPP_URL;
+
     if (!SHEET_WEBAPP_URL) {
-      throw new Error("⚠️ Falta SHEET_RECLAMOS_WEBAPP_URL en .env.local o en Vercel");
+      throw new Error(
+        "Falta SHEET_RECLAMOS_WEBAPP_URL en las variables de entorno."
+      );
     }
 
-    // Enviar los datos al Apps Script (tu endpoint de Google Sheets)
-    const res = await fetch(SHEET_WEBAPP_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    console.log(
+      "📤 Enviando nuevo reclamo a Apps Script:",
+      JSON.stringify(body, null, 2)
+    );
 
-    // Validar respuesta
-    if (!res.ok) {
-      const text = await res.text();
-      console.error("Error respuesta Sheets:", text);
-      throw new Error(`Error al guardar en Google Sheets (HTTP ${res.status})`);
+    const res = await fetch(
+      SHEET_WEBAPP_URL,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+        },
+
+        body: JSON.stringify(body),
+
+        cache: "no-store",
+      }
+    );
+
+    const text = await res.text();
+
+    let resultado: any;
+
+    try {
+      resultado = JSON.parse(text);
+    } catch {
+      console.error(
+        "❌ Respuesta no válida de Apps Script:",
+        text
+      );
+
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Apps Script devolvió una respuesta no válida.",
+          raw: text,
+        },
+        {
+          status: 502,
+        }
+      );
     }
 
-    // Confirmar éxito al frontend
-    return NextResponse.json({ success: true });
-  } catch (e: any) {
-    console.error("❌ Error guardando reclamo:", e);
+    if (
+      !res.ok ||
+      resultado.success === false
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            resultado.error ||
+            "No se pudo guardar el reclamo.",
+        },
+        {
+          status: 502,
+        }
+      );
+    }
+
+    console.log(
+      "✅ Reclamo guardado:",
+      resultado
+    );
+
+    /*
+     * Devuelve al frontend exactamente
+     * la información generada por Apps Script.
+     *
+     * Esperamos principalmente:
+     *
+     * numeroReclamo
+     * fechaIngreso
+     * estado
+     */
     return NextResponse.json(
-      { success: false, error: e.message ?? "Error desconocido" },
-      { status: 500 }
+      {
+        success: true,
+
+        numeroReclamo:
+          resultado.numeroReclamo ||
+          resultado.id ||
+          "",
+
+        fechaIngreso:
+          resultado.fechaIngreso ||
+          "",
+
+        estado:
+          resultado.estado ||
+          "Ingresado",
+
+        ...resultado,
+      },
+      {
+        status: 200,
+
+        headers: {
+          "Cache-Control":
+            "no-store, no-cache, must-revalidate",
+        },
+      }
+    );
+
+  } catch (error) {
+    console.error(
+      "❌ Error en /api/save-reclamo:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        success: false,
+
+        error:
+          error instanceof Error
+            ? error.message
+            : "Error desconocido al guardar el reclamo.",
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
