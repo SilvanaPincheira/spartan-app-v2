@@ -320,6 +320,13 @@ type Line = {
   isBloqueado: boolean;
 };
 
+type AdjuntoNV = {
+  name: string;
+  mime: string;
+  base64: string;
+  size: number;
+};
+
 /* ============================================================================
    [D] COMPONENTE PRINCIPAL
    ============================================================================ */
@@ -333,10 +340,11 @@ export default function NotaVentaPage() {
   const [direccion, setDireccion] = useState("");
   const [comuna, setComuna] = useState("");
   const [ordenCompraCliente, setOrdenCompraCliente] = useState("");
-  // Archivo OC (opcional)
-const [ocName, setOcName] = useState<string>("");
-const [ocMime, setOcMime] = useState<string>("");
-const [ocBase64, setOcBase64] = useState<string>("");
+  // Adjuntos de la NV (OC, respaldos, imágenes, etc.)
+  // Se almacenan en un arreglo para permitir varios archivos
+  // y para que nuevas selecciones se vayan sumando.
+  const [adjuntos, setAdjuntos] = useState<AdjuntoNV[]>([]);
+  const [adjuntoInputKey, setAdjuntoInputKey] = useState(0);
 // 🟢 Detectar si se abrió desde el historial
 const searchParams = useSearchParams();
 const nvToOpen = searchParams.get("nv");
@@ -477,6 +485,11 @@ useEffect(() => {
       }
 
       const cabecera = json.data[0];
+
+      // Los adjuntos del formulario actual no deben arrastrarse
+      // al abrir o duplicar otra Nota de Venta.
+      setAdjuntos([]);
+      setAdjuntoInputKey((actual) => actual + 1);
 
       // 🧾 Completar cabecera
       setClientName(cabecera.cliente || "");
@@ -1079,6 +1092,57 @@ useEffect(() => {
   /* ==========================================================================
      [I] ACCIONES (limpiar/imprimir/guardar+pdf+email)
      ========================================================================== */
+
+  async function agregarAdjuntos(files: FileList | null) {
+    const seleccionados = Array.from(files || []);
+
+    if (!seleccionados.length) return;
+
+    try {
+      const nuevosAdjuntos = await Promise.all(
+        seleccionados.map(async (file) => {
+          const { base64, mime } = await fileToBase64(file);
+
+          return {
+            name: file.name,
+            mime,
+            base64,
+            size: file.size,
+          };
+        })
+      );
+
+      setAdjuntos((actuales) => {
+        // Evita agregar dos veces exactamente el mismo archivo
+        // en selecciones sucesivas.
+        const existentes = new Set(
+          actuales.map(
+            (archivo) =>
+              `${archivo.name}|${archivo.size}|${archivo.mime}`
+          )
+        );
+
+        const nuevosSinDuplicar = nuevosAdjuntos.filter(
+          (archivo) =>
+            !existentes.has(
+              `${archivo.name}|${archivo.size}|${archivo.mime}`
+            )
+        );
+
+        return [...actuales, ...nuevosSinDuplicar];
+      });
+    } catch (error) {
+      console.error("❌ Error cargando adjuntos:", error);
+      alert("No se pudieron cargar uno o más archivos adjuntos.");
+    }
+  }
+
+  function eliminarAdjunto(index: number) {
+    setAdjuntos((actuales) =>
+      actuales.filter((_, i) => i !== index)
+    );
+  }
+
   function limpiarTodo() {
     setClientName("");
     setClientRut("");
@@ -1086,6 +1150,7 @@ useEffect(() => {
     setEjecutivo("");
     setDireccion("");
     setComuna("");
+    setOrdenCompraCliente("");
     setEmailEjecutivo("");
     setComentarios("");
     setLines([]);
@@ -1095,6 +1160,12 @@ useEffect(() => {
     setRegion("RM");
     setSaveMsg("");
     setProcesado(false);
+
+    // La nueva NV debe comenzar sin documentos de la NV anterior.
+    setAdjuntos([]);
+
+    // Fuerza a React a crear un input file nuevo y limpio.
+    setAdjuntoInputKey((actual) => actual + 1);
   }
   function imprimir() {
     window.print();
@@ -1318,11 +1389,15 @@ try {
       </ul>
     `;
 
-    // 4) Preparar adjuntos (PDF NV + OC opcional) y enviar correo
-const attachments = [
-  { filename, content: base64 },                            // PDF de la Nota de Venta
-  ...(ocBase64 ? [{ filename: ocName || "OC.pdf", content: ocBase64 }] : []), // OC (si subieron archivo)
-];
+    // 4) Preparar adjuntos:
+    //    PDF generado de la NV + todos los documentos seleccionados.
+    const attachments = [
+      { filename, content: base64 },
+      ...adjuntos.map((archivo) => ({
+        filename: archivo.name,
+        content: archivo.base64,
+      })),
+    ];
 
 
 const resMail = await fetch("/api/send-notaventa", {
@@ -1754,32 +1829,66 @@ const resMail = await fetch("/api/send-notaventa", {
                 onChange={(e) => setComentarios(e.target.value)}
               />
             </label>
-            <label className="flex flex-col gap-1">
-  <span className="font-medium">Adjuntar documento (OC del cliente, etc.)</span>
-  <input
-    type="file"
-    accept=".pdf,.jpg,.jpeg,.png"
-    className="w-full border rounded px-2 py-1"
-    onChange={async (e) => {
-      const f = e.target.files?.[0];
-      if (!f) {
-        setOcName("");
-        setOcMime("");
-        setOcBase64("");
-        return;
-      }
-      const { base64, mime } = await fileToBase64(f);
-      setOcName(f.name);
-      setOcMime(mime);
-      setOcBase64(base64);
-    }}
-  />
-  {ocName && (
-    <span className="text-xs text-zinc-500 mt-1">
-      Adjunto listo: <b>{ocName}</b>
-    </span>
-  )}
-</label>
+            <div className="flex flex-col gap-1 print:hidden">
+              <span className="font-medium">
+                Adjuntar documentos (OC del cliente, respaldos, etc.)
+              </span>
+
+              <input
+                key={adjuntoInputKey}
+                type="file"
+                multiple
+                accept=".pdf,.jpg,.jpeg,.png"
+                className="w-full border rounded px-2 py-1"
+                onChange={async (e) => {
+                  const input = e.currentTarget;
+
+                  await agregarAdjuntos(input.files);
+
+                  // Se limpia solo el selector visual.
+                  // Los archivos ya seleccionados permanecen en adjuntos[]
+                  // y así el usuario puede volver a elegir más.
+                  input.value = "";
+                }}
+              />
+
+              <span className="text-xs text-zinc-500 mt-1">
+                Puedes seleccionar varios archivos a la vez o agregarlos en distintas selecciones.
+              </span>
+
+              {adjuntos.length > 0 && (
+                <div className="mt-2 space-y-2">
+                  <div className="text-xs font-semibold text-zinc-600">
+                    Adjuntos seleccionados: {adjuntos.length}
+                  </div>
+
+                  {adjuntos.map((archivo, index) => (
+                    <div
+                      key={`${archivo.name}-${archivo.size}-${index}`}
+                      className="flex items-center justify-between gap-3 rounded border bg-zinc-50 px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-xs font-medium text-zinc-700">
+                          📎 {archivo.name}
+                        </div>
+
+                        <div className="text-[10px] text-zinc-400">
+                          {(archivo.size / 1024).toFixed(1)} KB
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => eliminarAdjunto(index)}
+                        className="shrink-0 rounded bg-red-50 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-100"
+                      >
+                        Quitar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
           </div>
         </section>
