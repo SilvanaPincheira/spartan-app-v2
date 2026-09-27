@@ -49,13 +49,7 @@ export default function VentasPage() {
       desc: "Consulta las Notas de Venta grabadas, con fecha, cliente, ejecutivo y total.",
       color: "bg-violet-50",
     },
-    {
-      href: "/ventas/clientesnuevos",
-      icon: "👤",
-      title: "Ficha de Cliente Nuevo",
-      desc: "Solicita la creación de nuevos clientes y envíalos a SAP/Cobranzas.",
-      color: "bg-amber-50",
-    },
+    
     {
       href: "/ventas/reclamos",
       icon: "🧾",
