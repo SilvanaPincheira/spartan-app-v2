@@ -1,327 +1,1415 @@
-// app/facturas-nc/page.tsx
-// -----------------------------------------------------------------------------
-// FACTURAS Y NOTAS DE CRÉDITO — con columnMap robusto y detalle por Folio
-// -----------------------------------------------------------------------------
-
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
-/* =============================== Helpers ================================== */
-function normKey(k: string) {
-  return (k || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // acentos
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_|_$/g, "");
-}
-function parseCsv(text: string): Record<string, string>[] {
-  // parser simple con soporte de comillas
-  const rows: string[][] = [];
-  let cell = "";
-  let row: string[] = [];
-  let inQuotes = false;
-  const s = (text || "").replace(/\r/g, "");
+import { createClientComponentClient } from
+  "@supabase/auth-helpers-nextjs";
 
-  const pushCell = () => { row.push(cell); cell = ""; };
-  const pushRow = () => { if (row.length) rows.push(row); row = []; };
+/* ============================================================
+   TIPOS
+============================================================ */
 
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (s[i + 1] === '"') { cell += '"'; i++; }
-        else inQuotes = false;
-      } else cell += ch;
-    } else {
-      if (ch === '"') inQuotes = true;
-      else if (ch === ",") pushCell();
-      else if (ch === "\n") { pushCell(); pushRow(); }
-      else cell += ch;
-    }
-  }
-  if (cell.length || row.length) { pushCell(); pushRow(); }
-  if (!rows.length) return [];
-  const headers = rows[0];
-  const out: Record<string, string>[] = [];
-  for (let i = 1; i < rows.length; i++) {
-    const r = rows[i];
-    if (!r || r.every((c) => c.trim() === "")) continue;
-    const o: Record<string, string> = {};
-    headers.forEach((h, j) => (o[h.trim()] = (r[j] ?? "").trim()));
-    out.push(o);
-  }
-  return out;
-}
-function money(n: any) {
-  const v = Number(String(n).replace(/\./g, "").replace(",", "."));
-  if (!Number.isFinite(v) || v === 0) return "-";
-  return v.toLocaleString("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
-}
-function num(n: any) {
-  const v = Number(String(n).replace(/\./g, "").replace(",", "."));
-  return Number.isFinite(v) ? v : 0;
-}
+type Documento = {
+  sap_origen: string;
+  sap_docentry: number;
 
-/* =========================== Column mapping =============================== */
-// nombres canónicos -> posibles variantes normalizadas
-const COLS: Record<string, string[]> = {
-  tipo_dte: ["tipo_dte", "tipo__dte", "tipo_dte_"],
-  periodo: ["periodo", "periodo_mes", "periodo_"],
-  empleado_ventas: ["empleado_ventas", "empleado_de_ventas", "mpleado_ventas", "empleado_ventas_"],
-  codigo_cliente: ["codigo_cliente", "codigocliente", "cod_cliente", "cardcode"],
-  rut_cliente: ["rut_cliente", "lictradnum", "rut"],
-  nombre_cliente: ["nombre_cliente", "cardname", "cliente", "razon_social", "nombre"],
-  direccion: ["direccion", "direccion_1", "direccion_fact", "direccion_despacho", "direccion_despacho_"],
-  comuna: ["comuna"],
-  ciudad: ["ciudad"],
-  folionum: ["folionum", "folio", "folio_num", "folionumero"],
-  global_venta: ["global_venta", "total_linea", "monto", "total", "total_doc", "total_documento"],
-  itemcode: ["itemcode", "codigo_producto", "codigo", "articulo"],
-  dscription: ["dscription", "descripcion", "dscript", "u_descripcion_det"],
-  quantity: ["quantity", "cantidad", "qty"],
-  cantidad_kilos: ["cantidad_kilos", "kilos", "cantidadkg", "cant_kilos"],
-  email_col: ["email_col", "email", "email_col_1", "email_vendedor"],
-  docnum: ["docnum"], // opcional por si quieres usarlo
+  tipo_documento: string | null;
+  fecha_contabilizacion: string | null;
+
+  folio: number | null;
+
+  vendedor: string | null;
+
+  rut: string | null;
+  codigo_cliente: string | null;
+  cliente: string | null;
+
+  region: string | null;
+
+  direccion: string | null;
+  comuna: string | null;
+  ciudad: string | null;
+
+  total_documento: number | string | null;
+
+  lineas: number | string | null;
 };
 
-function normalizeRow(raw: Record<string, string>) {
-  // indexa por clave normalizada
-  const idx: Record<string, string> = {};
-  for (const k of Object.keys(raw)) idx[normKey(k)] = raw[k];
+type DetalleLinea = {
+  id: number;
 
-  const pick = (canon: string) => {
-    for (const key of COLS[canon] || []) {
-      if (idx[key] != null && String(idx[key]).trim() !== "") return idx[key];
-    }
-    return "";
-  };
+  sap_origen: string;
+  sap_docentry: number;
+  sap_linenum: number;
 
-  return {
-    tipo_dte: pick("tipo_dte"),
-    periodo: pick("periodo"),
-    empleado_ventas: pick("empleado_ventas"),
-    codigo_cliente: pick("codigo_cliente"),
-    rut_cliente: pick("rut_cliente"),
-    nombre_cliente: pick("nombre_cliente"),
-    direccion: pick("direccion"),
-    comuna: pick("comuna"),
-    ciudad: pick("ciudad"),
-    folionum: pick("folionum"),
-    global_venta: pick("global_venta"),
-    itemcode: pick("itemcode"),
-    dscription: pick("dscription"),
-    quantity: pick("quantity"),
-    cantidad_kilos: pick("cantidad_kilos"),
-    email_col: (pick("email_col") || "").toLowerCase().trim(),
-    docnum: pick("docnum"),
-  };
+  tipo_documento: string | null;
+
+  fecha_contabilizacion: string | null;
+  folio: number | null;
+
+  vendedor: string | null;
+
+  rut: string | null;
+  codigo_cliente: string | null;
+  cliente: string | null;
+
+  division: string | null;
+
+  codigo_articulo: string | null;
+  articulo: string | null;
+
+  cantidad_kilos: number | string | null;
+  unidades: string | null;
+  cantidad: number | string | null;
+
+  precio_unitario: number | string | null;
+  costo: number | string | null;
+  descuento: number | string | null;
+  total_venta: number | string | null;
+};
+
+/* ============================================================
+   HELPERS
+============================================================ */
+
+function numero(valor: unknown) {
+  if (
+    valor === null ||
+    valor === undefined ||
+    valor === ""
+  ) {
+    return 0;
+  }
+
+  const n = Number(valor);
+
+  return Number.isFinite(n)
+    ? n
+    : 0;
 }
 
-/* ============================== Página =================================== */
+function money(valor: unknown) {
+  return numero(valor).toLocaleString(
+    "es-CL",
+    {
+      style: "currency",
+      currency: "CLP",
+      maximumFractionDigits: 0,
+    }
+  );
+}
+
+function cantidad(valor: unknown) {
+  return numero(valor).toLocaleString(
+    "es-CL",
+    {
+      maximumFractionDigits: 2,
+    }
+  );
+}
+
+function fechaCL(valor: string | null) {
+  if (!valor) return "-";
+
+  const [year, month, day] =
+    valor.slice(0, 10).split("-");
+
+  if (
+    !year ||
+    !month ||
+    !day
+  ) {
+    return valor;
+  }
+
+  return `${day}-${month}-${year}`;
+}
+
+function normalizar(valor: unknown) {
+  return String(valor ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(
+      /[\u0300-\u036f]/g,
+      ""
+    );
+}
+
+/* ============================================================
+   PÁGINA
+============================================================ */
+
 export default function FacturasNCPage() {
-  const [userEmail, setUserEmail] = useState("");
-  const [rows, setRows] = useState<any[]>([]);
-  const [search, setSearch] = useState("");
-  const [detalle, setDetalle] = useState<any[] | null>(null);
-  const [loading, setLoading] = useState(true);
+  const supabase =
+    useMemo(
+      () =>
+        createClientComponentClient(),
+      []
+    );
 
-  const SHEET_CSV =
-    "https://docs.google.com/spreadsheets/d/1MY531UHJDhxvHsw6-DwlW8m4BeHwYP48MUSV98UTc1s/export?format=csv&gid=871602912";
-  const ADMIN = "silvana.pincheira@spartan.cl";
+  const [
+    userEmail,
+    setUserEmail,
+  ] = useState("");
 
-  useEffect(() => {
-    (async () => {
+  const [
+    documentos,
+    setDocumentos,
+  ] =
+    useState<Documento[]>([]);
+
+  const [
+    detalle,
+    setDetalle,
+  ] =
+    useState<DetalleLinea[] | null>(
+      null
+    );
+
+  const [
+    documentoSeleccionado,
+    setDocumentoSeleccionado,
+  ] =
+    useState<Documento | null>(
+      null
+    );
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
+
+  const [
+    loadingDetalle,
+    setLoadingDetalle,
+  ] = useState(false);
+
+  const [
+    error,
+    setError,
+  ] = useState("");
+
+  /* ==========================================================
+     FILTROS
+  ========================================================== */
+
+  const [
+    search,
+    setSearch,
+  ] = useState("");
+
+  const [
+    tipoFiltro,
+    setTipoFiltro,
+  ] = useState("");
+
+  const [
+    fechaDesde,
+    setFechaDesde,
+  ] = useState("");
+
+  const [
+    fechaHasta,
+    setFechaHasta,
+  ] = useState("");
+
+  /* ==========================================================
+     CARGAR DOCUMENTOS
+
+     Se carga la vista resumida:
+     1 fila = 1 factura / NC
+
+     Se pagina de 1000 en 1000 para no quedar limitado
+     por Supabase.
+  ========================================================== */
+
+  const cargarDocumentos =
+    useCallback(async () => {
       try {
-        const supabase = createClientComponentClient();
-        const { data: { user } } = await supabase.auth.getUser();
-        const me = (user?.email || "").toLowerCase().trim();
-        setUserEmail(me);
+        setLoading(true);
+        setError("");
 
-        const res = await fetch(SHEET_CSV, { cache: "no-store" });
-        const txt = await res.text();
-        const raw = parseCsv(txt);
-        const norm = raw.map(normalizeRow);
+        const {
+          data: {
+            session,
+          },
+        } =
+          await supabase
+            .auth
+            .getSession();
 
-        // filtro por EMAIL_COL (si no es admin)
-        const visible = me === ADMIN || !me
-          ? norm
-          : norm.filter(r => r.email_col === me);
+        const email =
+          session
+            ?.user
+            ?.email
+            ?.trim()
+            .toLowerCase() ||
+          "";
 
-        setRows(visible);
-      } catch (e) {
-        console.error("Error cargando ventas:", e);
+        if (!email) {
+          throw new Error(
+            "No se encontró una sesión activa."
+          );
+        }
+
+        setUserEmail(email);
+
+        const todos:
+          Documento[] = [];
+
+        const limite = 1000;
+
+        let desde = 0;
+
+        while (true) {
+          const hasta =
+            desde +
+            limite -
+            1;
+
+          const {
+            data,
+            error,
+          } =
+            await supabase
+              .from(
+                "facturas_nc_documentos"
+              )
+              .select(`
+                sap_origen,
+                sap_docentry,
+                tipo_documento,
+                fecha_contabilizacion,
+                folio,
+                vendedor,
+                rut,
+                codigo_cliente,
+                cliente,
+                region,
+                direccion,
+                comuna,
+                ciudad,
+                total_documento,
+                lineas
+              `)
+              .order(
+                "fecha_contabilizacion",
+                {
+                  ascending: false,
+                }
+              )
+              .order(
+                "folio",
+                {
+                  ascending: false,
+                }
+              )
+              .range(
+                desde,
+                hasta
+              );
+
+          if (error) {
+            throw error;
+          }
+
+          const bloque =
+            (data ||
+              []) as Documento[];
+
+          todos.push(
+            ...bloque
+          );
+
+          if (
+            bloque.length <
+            limite
+          ) {
+            break;
+          }
+
+          desde += limite;
+        }
+
+        setDocumentos(
+          todos
+        );
+      } catch (
+        err: any
+      ) {
+        console.error(
+          "Error cargando Facturas/NC:",
+          err
+        );
+
+        setError(
+          err?.message ||
+            "No fue posible cargar Facturas y Notas de Crédito."
+        );
       } finally {
         setLoading(false);
       }
-    })();
-  }, []);
+    }, [supabase]);
 
-  // agrupar por FolioNum para listado principal
-  const grupos = useMemo(() => {
-    const m = new Map<string, any[]>();
-    for (const r of rows) {
-      const folio = r.folionum || "(sin folio)";
-      if (!m.has(folio)) m.set(folio, []);
-      m.get(folio)!.push(r);
+  useEffect(() => {
+    cargarDocumentos();
+  }, [cargarDocumentos]);
+
+  /* ==========================================================
+     ABRIR DETALLE
+  ========================================================== */
+
+  async function abrirDetalle(
+    documento: Documento
+  ) {
+    try {
+      setLoadingDetalle(
+        true
+      );
+
+      setDocumentoSeleccionado(
+        documento
+      );
+
+      setDetalle([]);
+
+      const {
+        data,
+        error,
+      } =
+        await supabase
+          .from("facturas_nc")
+          .select(`
+            id,
+            sap_origen,
+            sap_docentry,
+            sap_linenum,
+            tipo_documento,
+            fecha_contabilizacion,
+            folio,
+            vendedor,
+            rut,
+            codigo_cliente,
+            cliente,
+            division,
+            codigo_articulo,
+            articulo,
+            cantidad_kilos,
+            unidades,
+            cantidad,
+            precio_unitario,
+            costo,
+            descuento,
+            total_venta
+          `)
+          .eq(
+            "sap_origen",
+            documento.sap_origen
+          )
+          .eq(
+            "sap_docentry",
+            documento.sap_docentry
+          )
+          .order(
+            "sap_linenum",
+            {
+              ascending: true,
+            }
+          );
+
+      if (error) {
+        throw error;
+      }
+
+      setDetalle(
+        (data ||
+          []) as DetalleLinea[]
+      );
+    } catch (
+      err: any
+    ) {
+      console.error(
+        "Error cargando detalle:",
+        err
+      );
+
+      alert(
+        err?.message ||
+          "No fue posible cargar el detalle."
+      );
+
+      setDetalle(null);
+
+      setDocumentoSeleccionado(
+        null
+      );
+    } finally {
+      setLoadingDetalle(
+        false
+      );
     }
-    return m;
-  }, [rows]);
+  }
 
-  // convertir grupos a resumen
-  const resumen = useMemo(() => {
-    const out: any[] = [];
-    for (const [folio, items] of grupos) {
-      const first = items[0] || {};
-      const total = items.reduce((acc, it) => acc + num(it.global_venta), 0);
-      out.push({
-        tipo_dte: first.tipo_dte,
-        periodo: first.periodo,
-        empleado_ventas: first.empleado_ventas,
-        codigo_cliente: first.codigo_cliente,
-        nombre_cliente: first.nombre_cliente,
-        direccion: first.direccion,
-        comuna: first.comuna,
-        ciudad: first.ciudad,
-        folionum: folio,
-        total_doc: total,
-      });
-    }
-    // orden opcional: por folio descendente si es numérico
-    out.sort((a, b) => (Number(b.folionum) || 0) - (Number(a.folionum) || 0));
-    return out;
-  }, [grupos]);
+  function cerrarDetalle() {
+    setDetalle(null);
 
-  // filtro de búsqueda
-  const filtered = useMemo(() => {
-    if (!search) return resumen;
-    const s = (search || "").toLowerCase().trim();
-    return resumen.filter(r =>
-      String(r.folionum || "").toLowerCase().includes(s) ||
-      String(r.codigo_cliente || "").toLowerCase().includes(s) ||
-      String(r.nombre_cliente || "").toLowerCase().includes(s) ||
-      String(r.rut_cliente || "").toLowerCase().includes(s)
+    setDocumentoSeleccionado(
+      null
     );
-  }, [resumen, search]);
+  }
+
+  /* ==========================================================
+     FILTROS
+  ========================================================== */
+
+  const filtered =
+    useMemo(() => {
+      const buscar =
+        normalizar(
+          search
+        );
+
+      return documentos.filter(
+        (r) => {
+          if (
+            tipoFiltro &&
+            r.tipo_documento !==
+              tipoFiltro
+          ) {
+            return false;
+          }
+
+          if (
+            fechaDesde &&
+            r.fecha_contabilizacion
+          ) {
+            const fecha =
+              r.fecha_contabilizacion.slice(
+                0,
+                10
+              );
+
+            if (
+              fecha <
+              fechaDesde
+            ) {
+              return false;
+            }
+          }
+
+          if (
+            fechaHasta &&
+            r.fecha_contabilizacion
+          ) {
+            const fecha =
+              r.fecha_contabilizacion.slice(
+                0,
+                10
+              );
+
+            if (
+              fecha >
+              fechaHasta
+            ) {
+              return false;
+            }
+          }
+
+          if (!buscar) {
+            return true;
+          }
+
+          const texto =
+            [
+              r.folio,
+              r.rut,
+              r.codigo_cliente,
+              r.cliente,
+              r.vendedor,
+              r.region,
+              r.direccion,
+              r.comuna,
+              r.ciudad,
+            ]
+              .map(
+                normalizar
+              )
+              .join(" ");
+
+          return texto.includes(
+            buscar
+          );
+        }
+      );
+    }, [
+      documentos,
+      search,
+      tipoFiltro,
+      fechaDesde,
+      fechaHasta,
+    ]);
+
+  /* ==========================================================
+     INDICADORES
+  ========================================================== */
+
+  const indicadores =
+    useMemo(() => {
+      let facturas = 0;
+      let notasCredito = 0;
+
+      let ventaFacturas = 0;
+      let ventaNC = 0;
+
+      for (
+        const documento
+        of documentos
+      ) {
+        if (
+          documento.tipo_documento ===
+          "FE"
+        ) {
+          facturas++;
+
+          ventaFacturas +=
+            numero(
+              documento.total_documento
+            );
+        }
+
+        if (
+          documento.tipo_documento ===
+          "NC"
+        ) {
+          notasCredito++;
+
+          ventaNC +=
+            numero(
+              documento.total_documento
+            );
+        }
+      }
+
+      return {
+        facturas,
+        notasCredito,
+        ventaFacturas,
+        ventaNC,
+        neto:
+          ventaFacturas +
+          ventaNC,
+      };
+    }, [documentos]);
+
+  function limpiarFiltros() {
+    setSearch("");
+
+    setTipoFiltro("");
+
+    setFechaDesde("");
+
+    setFechaHasta("");
+  }
+
+  /* ==========================================================
+     UI
+  ========================================================== */
 
   return (
-    <div className="p-6">
-      <h1 className="text-xl font-bold mb-4 flex items-center gap-2">
-        🧾 Facturas y Notas de Crédito
-      </h1>
+    <div className="space-y-6 p-6">
 
-      {/* Filtro */}
-      <div className="mb-4 flex items-center gap-2">
-        <input
-          className="w-full max-w-xl border rounded px-3 py-2"
-          placeholder="Buscar por RUT, Cliente o Folio…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        {userEmail && (
-          <span className="text-xs text-zinc-500">
-            Sesión: {userEmail === ADMIN ? "Admin" : userEmail}
-          </span>
-        )}
-      </div>
+      {/* ======================================================
+          CABECERA
+      ====================================================== */}
 
-      {loading ? (
-        <div>Cargando…</div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="min-w-full border text-sm">
-            <thead className="bg-zinc-100">
-              <tr>
-                <th className="px-2 py-1 border">Tipo_DTE</th>
-                <th className="px-2 py-1 border">Periodo</th>
-                <th className="px-2 py-1 border">Empleado Ventas</th>
-                <th className="px-2 py-1 border">Codigo Cliente</th>
-                <th className="px-2 py-1 border">Nombre Cliente</th>
-                <th className="px-2 py-1 border">Direccion</th>
-                <th className="px-2 py-1 border">Comuna</th>
-                <th className="px-2 py-1 border">Ciudad</th>
-                <th className="px-2 py-1 border">FolioNum</th>
-                <th className="px-2 py-1 border text-right">Global Venta</th>
-                <th className="px-2 py-1 border">Acción</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={11} className="px-2 py-4 text-center text-zinc-500">
-                    Sin documentos para mostrar.
-                  </td>
-                </tr>
-              )}
-              {filtered.map((r, i) => (
-                <tr key={i} className="border-t hover:bg-zinc-50">
-                  <td className="px-2 py-1 border">{r.tipo_dte}</td>
-                  <td className="px-2 py-1 border">{r.periodo}</td>
-                  <td className="px-2 py-1 border">{r.empleado_ventas}</td>
-                  <td className="px-2 py-1 border">{r.codigo_cliente}</td>
-                  <td className="px-2 py-1 border">{r.nombre_cliente}</td>
-                  <td className="px-2 py-1 border">{r.direccion}</td>
-                  <td className="px-2 py-1 border">{r.comuna}</td>
-                  <td className="px-2 py-1 border">{r.ciudad}</td>
-                  <td className="px-2 py-1 border">{r.folionum}</td>
-                  <td className="px-2 py-1 border text-right">
-                    {money(r.total_doc)}
-                  </td>
-                  <td className="px-2 py-1 border">
-                    <button
-                      className="text-blue-600 underline"
-                      onClick={() => setDetalle(grupos.get(r.folionum) || [])}
-                    >
-                      Detalle
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
 
-          {/* Modal Detalle */}
-          {detalle && (
-            <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4">
-              <div className="bg-white rounded shadow-lg max-w-5xl w-full p-6 relative">
-                <button
-                  onClick={() => setDetalle(null)}
-                  className="absolute top-2 right-2 text-zinc-600"
-                >
-                  ✖
-                </button>
-                <h2 className="text-lg font-semibold mb-4">
-                  Detalle — Folio {detalle[0]?.folionum || ""}
-                </h2>
-                <table className="min-w-full border text-sm">
-                  <thead className="bg-zinc-100">
-                    <tr>
-                      <th className="px-2 py-1 border">ItemCode</th>
-                      <th className="px-2 py-1 border">Dscription</th>
-                      <th className="px-2 py-1 border text-right">Quantity</th>
-                      <th className="px-2 py-1 border text-right">Cantidad Kilos</th>
-                      <th className="px-2 py-1 border text-right">Global Venta</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detalle.map((d, i) => (
-                      <tr key={i} className="border-t">
-                        <td className="px-2 py-1 border">{d.itemcode}</td>
-                        <td className="px-2 py-1 border">{d.dscription}</td>
-                        <td className="px-2 py-1 border text-right">{d.quantity}</td>
-                        <td className="px-2 py-1 border text-right">{d.cantidad_kilos}</td>
-                        <td className="px-2 py-1 border text-right">{money(d.global_venta)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+        <div>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-zinc-900">
+            🧾 Facturas y Notas de Crédito
+          </h1>
+
+          <p className="mt-1 text-sm text-zinc-500">
+            Documentos sincronizados directamente desde SAP.
+          </p>
+
+          {userEmail && (
+            <p className="mt-1 text-xs text-zinc-400">
+              Sesión:{" "}
+              {userEmail}
+            </p>
           )}
         </div>
+
+        <button
+          type="button"
+          onClick={
+            cargarDocumentos
+          }
+          className="rounded-lg border border-blue-200 bg-white px-4 py-2 text-sm font-medium text-blue-700 shadow-sm hover:bg-blue-50"
+        >
+          🔄 Actualizar
+        </button>
+      </div>
+
+      {/* ======================================================
+          ERROR
+      ====================================================== */}
+
+      {error && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+          <p className="font-semibold text-red-700">
+            No fue posible cargar los documentos.
+          </p>
+
+          <p className="mt-1 text-sm text-red-600">
+            {error}
+          </p>
+        </div>
       )}
+
+      {!error && (
+        <>
+          {/* ==================================================
+              INDICADORES
+          ================================================== */}
+
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+
+            <TarjetaIndicador
+              titulo="Facturas"
+              valor={indicadores.facturas.toLocaleString(
+                "es-CL"
+              )}
+              detalle={money(
+                indicadores.ventaFacturas
+              )}
+            />
+
+            <TarjetaIndicador
+              titulo="Notas de Crédito"
+              valor={indicadores.notasCredito.toLocaleString(
+                "es-CL"
+              )}
+              detalle={money(
+                indicadores.ventaNC
+              )}
+            />
+
+            <TarjetaIndicador
+              titulo="Venta neta"
+              valor={money(
+                indicadores.neto
+              )}
+              detalle="Facturas + Notas de Crédito"
+            />
+
+            <TarjetaIndicador
+              titulo="Documentos"
+              valor={documentos.length.toLocaleString(
+                "es-CL"
+              )}
+              detalle="Documentos visibles para tu usuario"
+            />
+
+          </div>
+
+          {/* ==================================================
+              FILTROS
+          ================================================== */}
+
+          <div className="rounded-2xl border bg-white p-5 shadow-sm">
+
+            <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+
+              <div>
+                <h2 className="font-semibold text-zinc-900">
+                  Buscar documentos
+                </h2>
+
+                <p className="text-sm text-zinc-500">
+                  Busca por RUT, cliente, código cliente, folio o vendedor.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={
+                  limpiarFiltros
+                }
+                className="rounded-lg border px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50"
+              >
+                Limpiar filtros
+              </button>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+
+              <div className="xl:col-span-2">
+                <label className="mb-1 block text-xs font-semibold uppercase text-zinc-500">
+                  Buscar
+                </label>
+
+                <input
+                  className="w-full rounded-lg border px-3 py-2"
+                  placeholder="RUT, cliente, código cliente, folio..."
+                  value={
+                    search
+                  }
+                  onChange={(
+                    e
+                  ) =>
+                    setSearch(
+                      e.target.value
+                    )
+                  }
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase text-zinc-500">
+                  Tipo
+                </label>
+
+                <select
+                  value={
+                    tipoFiltro
+                  }
+                  onChange={(
+                    e
+                  ) =>
+                    setTipoFiltro(
+                      e.target.value
+                    )
+                  }
+                  className="w-full rounded-lg border px-3 py-2"
+                >
+                  <option value="">
+                    Todos
+                  </option>
+
+                  <option value="FE">
+                    Facturas
+                  </option>
+
+                  <option value="NC">
+                    Notas de Crédito
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase text-zinc-500">
+                  Desde
+                </label>
+
+                <input
+                  type="date"
+                  value={
+                    fechaDesde
+                  }
+                  onChange={(
+                    e
+                  ) =>
+                    setFechaDesde(
+                      e.target.value
+                    )
+                  }
+                  className="w-full rounded-lg border px-3 py-2"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase text-zinc-500">
+                  Hasta
+                </label>
+
+                <input
+                  type="date"
+                  value={
+                    fechaHasta
+                  }
+                  onChange={(
+                    e
+                  ) =>
+                    setFechaHasta(
+                      e.target.value
+                    )
+                  }
+                  className="w-full rounded-lg border px-3 py-2"
+                />
+              </div>
+
+            </div>
+          </div>
+
+          {/* ==================================================
+              TABLA
+          ================================================== */}
+
+          <div className="overflow-hidden rounded-2xl border bg-white shadow-sm">
+
+            <div className="flex items-center justify-between border-b px-5 py-4">
+
+              <div>
+                <h2 className="font-semibold text-zinc-900">
+                  Documentos
+                </h2>
+
+                <p className="text-sm text-zinc-500">
+                  {filtered.length.toLocaleString(
+                    "es-CL"
+                  )}{" "}
+                  documentos encontrados
+                </p>
+              </div>
+
+            </div>
+
+            {loading ? (
+              <div className="p-10 text-center text-zinc-500">
+                Cargando Facturas y Notas de Crédito...
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+
+                <table className="min-w-[1300px] w-full text-sm">
+
+                  <thead className="bg-zinc-100">
+
+                    <tr>
+                      <th className="border-b px-3 py-3 text-left">
+                        Tipo
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-left">
+                        Fecha
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-left">
+                        Folio
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-left">
+                        Vendedor
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-left">
+                        Código Cliente
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-left">
+                        RUT
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-left">
+                        Cliente
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-left">
+                        Región
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-left">
+                        Comuna
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-right">
+                        Total
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-center">
+                        Líneas
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-center">
+                        Acción
+                      </th>
+                    </tr>
+
+                  </thead>
+
+                  <tbody>
+
+                    {filtered.length ===
+                      0 && (
+                      <tr>
+                        <td
+                          colSpan={
+                            12
+                          }
+                          className="px-3 py-10 text-center text-zinc-500"
+                        >
+                          Sin documentos para mostrar.
+                        </td>
+                      </tr>
+                    )}
+
+                    {filtered.map(
+                      (
+                        r
+                      ) => {
+                        const esNC =
+                          r.tipo_documento ===
+                          "NC";
+
+                        return (
+                          <tr
+                            key={`${r.sap_origen}-${r.sap_docentry}`}
+                            className="border-t hover:bg-zinc-50"
+                          >
+
+                            <td className="px-3 py-2">
+                              <span
+                                className={
+                                  esNC
+                                    ? "inline-flex rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700"
+                                    : "inline-flex rounded-full bg-blue-100 px-2 py-1 text-xs font-semibold text-blue-700"
+                                }
+                              >
+                                {
+                                  r.tipo_documento
+                                }
+                              </span>
+                            </td>
+
+                            <td className="px-3 py-2">
+                              {fechaCL(
+                                r.fecha_contabilizacion
+                              )}
+                            </td>
+
+                            <td className="px-3 py-2 font-semibold">
+                              {
+                                r.folio ??
+                                "-"
+                              }
+                            </td>
+
+                            <td className="px-3 py-2">
+                              {
+                                r.vendedor ||
+                                "-"
+                              }
+                            </td>
+
+                            <td className="px-3 py-2 font-mono text-xs">
+                              {
+                                r.codigo_cliente ||
+                                "-"
+                              }
+                            </td>
+
+                            <td className="px-3 py-2">
+                              {
+                                r.rut ||
+                                "-"
+                              }
+                            </td>
+
+                            <td className="px-3 py-2">
+                              {
+                                r.cliente ||
+                                "-"
+                              }
+                            </td>
+
+                            <td className="px-3 py-2">
+                              {
+                                r.region ||
+                                "-"
+                              }
+                            </td>
+
+                            <td className="px-3 py-2">
+                              {
+                                r.comuna ||
+                                "-"
+                              }
+                            </td>
+
+                            <td
+                              className={
+                                esNC
+                                  ? "px-3 py-2 text-right font-semibold text-red-600"
+                                  : "px-3 py-2 text-right font-semibold"
+                              }
+                            >
+                              {money(
+                                r.total_documento
+                              )}
+                            </td>
+
+                            <td className="px-3 py-2 text-center">
+                              {numero(
+                                r.lineas
+                              )}
+                            </td>
+
+                            <td className="px-3 py-2 text-center">
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  abrirDetalle(
+                                    r
+                                  )
+                                }
+                                className="font-medium text-blue-600 underline underline-offset-4 hover:text-blue-800"
+                              >
+                                Detalle
+                              </button>
+
+                            </td>
+
+                          </tr>
+                        );
+                      }
+                    )}
+
+                  </tbody>
+
+                </table>
+
+              </div>
+            )}
+
+          </div>
+        </>
+      )}
+
+      {/* ======================================================
+          MODAL DETALLE
+      ====================================================== */}
+
+      {detalle !== null &&
+        documentoSeleccionado && (
+
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+
+          <div className="max-h-[90vh] w-full max-w-7xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+
+            {/* CABECERA MODAL */}
+
+            <div className="flex items-start justify-between border-b bg-zinc-50 p-5">
+
+              <div>
+                <h2 className="text-xl font-bold text-zinc-900">
+                  Detalle —{" "}
+                  {
+                    documentoSeleccionado.tipo_documento
+                  }{" "}
+                  {
+                    documentoSeleccionado.folio
+                  }
+                </h2>
+
+                <p className="mt-1 text-sm text-zinc-500">
+                  {
+                    documentoSeleccionado.codigo_cliente
+                  }{" "}
+                  —{" "}
+                  {
+                    documentoSeleccionado.cliente
+                  }
+                </p>
+
+                <p className="mt-1 text-xs text-zinc-400">
+                  Fecha:{" "}
+                  {fechaCL(
+                    documentoSeleccionado.fecha_contabilizacion
+                  )}
+                  {" · "}
+                  Ejecutivo:{" "}
+                  {
+                    documentoSeleccionado.vendedor
+                  }
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={
+                  cerrarDetalle
+                }
+                className="rounded-lg px-3 py-2 text-zinc-500 hover:bg-zinc-200"
+              >
+                ✕
+              </button>
+
+            </div>
+
+            {/* CUERPO */}
+
+            <div className="max-h-[70vh] overflow-auto">
+
+              {loadingDetalle ? (
+
+                <div className="p-10 text-center text-zinc-500">
+                  Cargando detalle...
+                </div>
+
+              ) : (
+
+                <table className="min-w-[1400px] w-full text-sm">
+
+                  <thead className="sticky top-0 bg-zinc-100">
+
+                    <tr>
+                      <th className="border-b px-3 py-3 text-left">
+                        Código
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-left">
+                        Artículo
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-left">
+                        División
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-right">
+                        Cantidad
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-right">
+                        Kilos
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-left">
+                        Unidad
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-right">
+                        Precio Unitario
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-right">
+                        Costo
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-right">
+                        Desc. %
+                      </th>
+
+                      <th className="border-b px-3 py-3 text-right">
+                        Total
+                      </th>
+                    </tr>
+
+                  </thead>
+
+                  <tbody>
+
+                    {detalle.length ===
+                      0 && (
+                      <tr>
+                        <td
+                          colSpan={
+                            10
+                          }
+                          className="px-3 py-10 text-center text-zinc-500"
+                        >
+                          No se encontraron líneas para este documento.
+                        </td>
+                      </tr>
+                    )}
+
+                    {detalle.map(
+                      (
+                        d
+                      ) => {
+
+                        const esNC =
+                          d.tipo_documento ===
+                          "NC";
+
+                        return (
+                          <tr
+                            key={
+                              d.id
+                            }
+                            className="border-t hover:bg-zinc-50"
+                          >
+
+                            <td className="px-3 py-2 font-mono text-xs">
+                              {
+                                d.codigo_articulo ||
+                                "-"
+                              }
+                            </td>
+
+                            <td className="px-3 py-2">
+                              {
+                                d.articulo ||
+                                "-"
+                              }
+                            </td>
+
+                            <td className="px-3 py-2">
+                              {
+                                d.division ||
+                                "-"
+                              }
+                            </td>
+
+                            <td
+                              className={
+                                esNC
+                                  ? "px-3 py-2 text-right text-red-600"
+                                  : "px-3 py-2 text-right"
+                              }
+                            >
+                              {cantidad(
+                                d.cantidad
+                              )}
+                            </td>
+
+                            <td
+                              className={
+                                esNC
+                                  ? "px-3 py-2 text-right text-red-600"
+                                  : "px-3 py-2 text-right"
+                              }
+                            >
+                              {cantidad(
+                                d.cantidad_kilos
+                              )}
+                            </td>
+
+                            <td className="px-3 py-2">
+                              {
+                                d.unidades ||
+                                "-"
+                              }
+                            </td>
+
+                            <td
+                              className={
+                                esNC
+                                  ? "px-3 py-2 text-right text-red-600"
+                                  : "px-3 py-2 text-right"
+                              }
+                            >
+                              {money(
+                                d.precio_unitario
+                              )}
+                            </td>
+
+                            <td className="px-3 py-2 text-right">
+                              {money(
+                                d.costo
+                              )}
+                            </td>
+
+                            <td className="px-3 py-2 text-right">
+                              {cantidad(
+                                d.descuento
+                              )}
+                              %
+                            </td>
+
+                            <td
+                              className={
+                                esNC
+                                  ? "px-3 py-2 text-right font-semibold text-red-600"
+                                  : "px-3 py-2 text-right font-semibold"
+                              }
+                            >
+                              {money(
+                                d.total_venta
+                              )}
+                            </td>
+
+                          </tr>
+                        );
+                      }
+                    )}
+
+                  </tbody>
+
+                </table>
+              )}
+
+            </div>
+
+            {/* PIE */}
+
+            <div className="flex flex-col gap-2 border-t bg-zinc-50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+
+              <p className="text-sm text-zinc-500">
+                {
+                  detalle.length
+                }{" "}
+                líneas
+              </p>
+
+              <div className="text-right">
+
+                <p className="text-xs uppercase text-zinc-500">
+                  Total documento
+                </p>
+
+                <p
+                  className={
+                    documentoSeleccionado.tipo_documento ===
+                    "NC"
+                      ? "text-xl font-bold text-red-600"
+                      : "text-xl font-bold text-zinc-900"
+                  }
+                >
+                  {money(
+                    documentoSeleccionado.total_documento
+                  )}
+                </p>
+
+              </div>
+
+            </div>
+
+          </div>
+
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+/* ============================================================
+   TARJETA KPI
+============================================================ */
+
+function TarjetaIndicador({
+  titulo,
+  valor,
+  detalle,
+}: {
+  titulo: string;
+  valor: string;
+  detalle: string;
+}) {
+  return (
+    <div className="rounded-2xl border bg-white p-5 shadow-sm">
+
+      <p className="text-sm font-medium text-zinc-500">
+        {titulo}
+      </p>
+
+      <p className="mt-2 text-2xl font-bold text-zinc-900">
+        {valor}
+      </p>
+
+      <p className="mt-1 text-xs text-zinc-400">
+        {detalle}
+      </p>
+
     </div>
   );
 }
