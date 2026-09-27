@@ -196,6 +196,30 @@ const JERARQUIA_ZONA: Record<string, string[]> = {
   ],
 };
 
+const GERENTES_DIVISION = [
+  { match: "INDUSTRIAL", nombre: "Alberto Damm", rol: "Gerente" },
+  { match: "FOOD", nombre: "Claudia Borquez", rol: "Gerente" },
+  { match: "HC", nombre: "Ives", rol: "Gerente" },
+];
+
+const RESPONSABLES_EQUIPO = [
+  {
+    match: "PATRICIO ROCO",
+    nombre: "Patricio Roco",
+    rol: "Subgerente",
+  },
+  {
+    match: "NELSON NORAMBUENA",
+    nombre: "Nelson Norambuena",
+    rol: "Responsable de equipo",
+  },
+  {
+    match: "HERNAN",
+    nombre: "Hernan Lopez",
+    rol: "Supervisor",
+  },
+];
+
 function normalizarJerarquia(value: unknown) {
   return String(value ?? "")
     .trim()
@@ -203,6 +227,121 @@ function normalizarJerarquia(value: unknown) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, " ");
+}
+
+function obtenerGerenteDivision(division: string | null) {
+  const valor = normalizarJerarquia(division);
+
+  return (
+    GERENTES_DIVISION.find((item) =>
+      valor.includes(normalizarJerarquia(item.match))
+    ) || null
+  );
+}
+
+function obtenerResponsableEquipo(equipo: string | null) {
+  const valor = normalizarJerarquia(equipo);
+
+  return (
+    RESPONSABLES_EQUIPO.find((item) =>
+      valor.includes(normalizarJerarquia(item.match))
+    ) || null
+  );
+}
+
+function esEquipoPatricio(equipo: string | null) {
+  return normalizarJerarquia(equipo).includes("PATRICIO ROCO");
+}
+
+function obtenerResponsableZona(
+  zona: string | null,
+  equipo: string | null
+) {
+  if (!esEquipoPatricio(equipo)) {
+    return null;
+  }
+
+  const z = normalizarJerarquia(zona);
+
+  if (z === "CENTRO") {
+    return { nombre: "Patricio Roco", rol: "Subgerente" };
+  }
+
+  if (z === "NORTE") {
+    return { nombre: "Oscar Ortiz", rol: "Responsable Zona" };
+  }
+
+  if (z === "SUR") {
+    return { nombre: "Juan Prieto", rol: "Responsable Zona" };
+  }
+
+  return null;
+}
+
+function obtenerRolJerarquico(row: ReporteRow) {
+  const vendedor = normalizarJerarquia(row.vendedor);
+
+  const gerente = obtenerGerenteDivision(row.division);
+  if (
+    gerente &&
+    vendedor === normalizarJerarquia(gerente.nombre)
+  ) {
+    return gerente.rol;
+  }
+
+  const responsableEquipo = obtenerResponsableEquipo(row.equipo);
+  if (
+    responsableEquipo &&
+    vendedor === normalizarJerarquia(responsableEquipo.nombre)
+  ) {
+    return responsableEquipo.rol;
+  }
+
+  const responsableZona = obtenerResponsableZona(
+    row.zona,
+    row.equipo
+  );
+
+  if (
+    responsableZona &&
+    vendedor === normalizarJerarquia(responsableZona.nombre)
+  ) {
+    return responsableZona.rol;
+  }
+
+  return "";
+}
+
+function ordenarVendedoresJerarquia(
+  zona: string,
+  equipo: string,
+  lista: ReporteRow[]
+) {
+  if (esEquipoPatricio(equipo)) {
+    return ordenarJerarquiaZona(zona, lista);
+  }
+
+  const responsableEquipo = obtenerResponsableEquipo(equipo);
+  const nombreResponsable = responsableEquipo
+    ? normalizarJerarquia(responsableEquipo.nombre)
+    : "";
+
+  return [...lista].sort((a, b) => {
+    const nombreA = normalizarJerarquia(a.vendedor);
+    const nombreB = normalizarJerarquia(b.vendedor);
+
+    if (nombreResponsable) {
+      if (nombreA === nombreResponsable && nombreB !== nombreResponsable) {
+        return -1;
+      }
+
+      if (nombreB === nombreResponsable && nombreA !== nombreResponsable) {
+        return 1;
+      }
+    }
+
+    return nombreA.localeCompare(nombreB, "es");
+  });
 }
 
 function esResponsableZona(zona: string, vendedor: string) {
@@ -1133,6 +1272,106 @@ export default function AvanceDiarioPage() {
 
   // =========================================================
 
+  // JERARQUÍA: DIVISIÓN → EQUIPO → ZONA → VENDEDOR
+
+  // =========================================================
+
+  const jerarquiaDetalle = useMemo(() => {
+    const divisionesMapa = new Map<
+      string,
+      Map<string, Map<string, ReporteRow[]>>
+    >();
+
+    filtrados.forEach((row) => {
+      const division = row.division || "SIN DIVISIÓN";
+      const equipo = row.equipo || "SIN EQUIPO";
+      const zona = row.zona || "SIN ZONA";
+
+      if (!divisionesMapa.has(division)) {
+        divisionesMapa.set(division, new Map());
+      }
+
+      const equiposMapa = divisionesMapa.get(division)!;
+
+      if (!equiposMapa.has(equipo)) {
+        equiposMapa.set(equipo, new Map());
+      }
+
+      const zonasMapa = equiposMapa.get(equipo)!;
+
+      if (!zonasMapa.has(zona)) {
+        zonasMapa.set(zona, []);
+      }
+
+      zonasMapa.get(zona)!.push(row);
+    });
+
+    const ordenZona: Record<string, number> = {
+      CENTRO: 1,
+      NORTE: 2,
+      SUR: 3,
+    };
+
+    const ordenDivision = (nombre: string) => {
+      const n = normalizarJerarquia(nombre);
+      if (n.includes("INDUSTRIAL")) return 1;
+      if (n.includes("FOOD")) return 2;
+      if (n.includes("HC")) return 3;
+      return 99;
+    };
+
+    return [...divisionesMapa.entries()]
+      .sort(([a], [b]) => {
+        const oa = ordenDivision(a);
+        const ob = ordenDivision(b);
+        return oa !== ob
+          ? oa - ob
+          : normalizarJerarquia(a).localeCompare(
+              normalizarJerarquia(b),
+              "es"
+            );
+      })
+      .map(([division, equiposMapa]) => ({
+        division,
+        gerente: obtenerGerenteDivision(division),
+        equipos: [...equiposMapa.entries()]
+          .sort(([a], [b]) =>
+            normalizarJerarquia(a).localeCompare(
+              normalizarJerarquia(b),
+              "es"
+            )
+          )
+          .map(([equipo, zonasMapa]) => ({
+            equipo,
+            responsable: obtenerResponsableEquipo(equipo),
+            zonas: [...zonasMapa.entries()]
+              .sort(
+                ([a], [b]) =>
+                  (ordenZona[normalizarJerarquia(a)] || 99) -
+                    (ordenZona[normalizarJerarquia(b)] || 99) ||
+                  normalizarJerarquia(a).localeCompare(
+                    normalizarJerarquia(b),
+                    "es"
+                  )
+              )
+              .map(([zona, lista]) => ({
+                zona,
+                responsableZona: obtenerResponsableZona(
+                  zona,
+                  equipo
+                ),
+                lista: ordenarVendedoresJerarquia(
+                  zona,
+                  equipo,
+                  lista
+                ),
+              })),
+          })),
+      }));
+  }, [filtrados]);
+
+  // =========================================================
+
   // ÚLTIMA SINCRONIZACIÓN
 
   // =========================================================
@@ -1486,7 +1725,7 @@ export default function AvanceDiarioPage() {
           <div>
             <h2 className="text-lg font-bold text-slate-900">Detalle por Vendedor</h2>
             <p className="mt-1 text-xs text-slate-500">
-              Vendedores agrupados por zona, con total territorial y semáforo de cumplimiento.
+              Jerarquía comercial por división, equipo y zona, con responsables y semáforo de cumplimiento.
             </p>
           </div>
 
@@ -1517,51 +1756,142 @@ export default function AvanceDiarioPage() {
             </thead>
 
             <tbody>
-              {grupos.map(([zona, lista]) => {
-                const t = totalizar(lista);
-                const tema = zonaTema(zona);
+              {jerarquiaDetalle.map((divisionItem) => {
+                const filasDivision = divisionItem.equipos.flatMap((equipo) =>
+                  equipo.zonas.flatMap((zona) => zona.lista)
+                );
+                const totalDivision = totalizar(filasDivision);
 
                 return (
-                  <React.Fragment key={zona}>
-                    <tr className={`${tema.encabezado} text-white`}>
-                      <td colSpan={14} className="px-4 py-3">
+                  <React.Fragment key={divisionItem.division}>
+                    <tr className="bg-slate-950 text-white">
+                      <td colSpan={14} className="px-4 py-3.5">
                         <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div className="flex items-center gap-3">
-                            <span className="rounded-lg bg-white/15 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider">
-                              Zona
+                          <div className="flex flex-wrap items-center gap-3">
+                            <span className="rounded-lg bg-white/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em]">
+                              División
                             </span>
-                            <span className="text-sm font-bold tracking-wide">{zona}</span>
-                            <span className="text-xs text-white/80">
-                              {lista.length} vendedor{lista.length === 1 ? "" : "es"}
+                            <span className="text-sm font-bold">
+                              {divisionItem.division}
                             </span>
+                            {divisionItem.gerente && (
+                              <span className="rounded-full bg-indigo-500/30 px-3 py-1 text-[10px] font-semibold text-indigo-100">
+                                Gerente: {divisionItem.gerente.nombre}
+                              </span>
+                            )}
                           </div>
 
-                          <div className="flex items-center gap-4 text-xs">
+                          <div className="flex items-center gap-4 text-xs text-slate-200">
                             <span>
-                              Venta Q: <strong>{money(t.facturadoQuimicos)}</strong>
+                              Venta Q: <strong className="text-white">{money(totalDivision.facturadoQuimicos)}</strong>
                             </span>
                             <span>
-                              Avance: <strong>{pct(t.avance)}</strong>
+                              Avance: <strong className="text-white">{pct(totalDivision.avance)}</strong>
                             </span>
                           </div>
                         </div>
                       </td>
                     </tr>
 
-                    <FilaTotalZona zona={zona} total={t} />
+                    {divisionItem.equipos.map((equipoItem) => {
+                      const filasEquipo = equipoItem.zonas.flatMap(
+                        (zona) => zona.lista
+                      );
+                      const totalEquipo = totalizar(filasEquipo);
 
-                    {lista.map((r, index) => (
-                      <FilaVendedor
-                        key={`${r.fecha_corte}-${r.slpcode}`}
-                        row={r}
-                        index={index}
-                        zona={zona}
-                        responsable={esResponsableZona(
-                          zona,
-                          r.vendedor
-                        )}
-                      />
-                    ))}
+                      return (
+                        <React.Fragment
+                          key={`${divisionItem.division}-${equipoItem.equipo}`}
+                        >
+                          <tr className="border-b border-slate-300 bg-slate-100">
+                            <td colSpan={14} className="px-4 py-3">
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div className="flex flex-wrap items-center gap-3">
+                                  <span className="rounded-md bg-slate-800 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white">
+                                    Equipo
+                                  </span>
+                                  <span className="font-bold text-slate-800">
+                                    {equipoItem.equipo}
+                                  </span>
+                                  {equipoItem.responsable && (
+                                    <span className="rounded-full border border-slate-300 bg-white px-3 py-1 text-[10px] font-semibold text-slate-700">
+                                      {equipoItem.responsable.rol}: {equipoItem.responsable.nombre}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center gap-4 text-[11px] text-slate-600">
+                                  <span>
+                                    Venta Q: <strong>{money(totalEquipo.facturadoQuimicos)}</strong>
+                                  </span>
+                                  <span>
+                                    Avance: <strong>{pct(totalEquipo.avance)}</strong>
+                                  </span>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+
+                          {equipoItem.zonas.map((zonaItem) => {
+                            const t = totalizar(zonaItem.lista);
+                            const tema = zonaTema(zonaItem.zona);
+
+                            return (
+                              <React.Fragment
+                                key={`${divisionItem.division}-${equipoItem.equipo}-${zonaItem.zona}`}
+                              >
+                                <tr className={`${tema.encabezado} text-white`}>
+                                  <td colSpan={14} className="px-4 py-3">
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                      <div className="flex flex-wrap items-center gap-3">
+                                        <span className="rounded-lg bg-white/15 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider">
+                                          Zona
+                                        </span>
+                                        <span className="text-sm font-bold tracking-wide">
+                                          {zonaItem.zona}
+                                        </span>
+                                        {zonaItem.responsableZona && (
+                                          <span className="rounded-full bg-white/15 px-3 py-1 text-[10px] font-semibold">
+                                            {zonaItem.responsableZona.rol}: {zonaItem.responsableZona.nombre}
+                                          </span>
+                                        )}
+                                        <span className="text-xs text-white/80">
+                                          {zonaItem.lista.length} vendedor{zonaItem.lista.length === 1 ? "" : "es"}
+                                        </span>
+                                      </div>
+
+                                      <div className="flex items-center gap-4 text-xs">
+                                        <span>
+                                          Venta Q: <strong>{money(t.facturadoQuimicos)}</strong>
+                                        </span>
+                                        <span>
+                                          Avance: <strong>{pct(t.avance)}</strong>
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+
+                                <FilaTotalZona
+                                  zona={zonaItem.zona}
+                                  total={t}
+                                />
+
+                                {zonaItem.lista.map((r, index) => (
+                                  <FilaVendedor
+                                    key={`${r.fecha_corte}-${r.slpcode}`}
+                                    row={r}
+                                    index={index}
+                                    zona={zonaItem.zona}
+                                    rolJerarquico={obtenerRolJerarquico(r)}
+                                  />
+                                ))}
+                              </React.Fragment>
+                            );
+                          })}
+                        </React.Fragment>
+                      );
+                    })}
                   </React.Fragment>
                 );
               })}
@@ -1946,12 +2276,12 @@ function FilaVendedor({
   row,
   index,
   zona,
-  responsable,
+  rolJerarquico = "",
 }: {
   row: ReporteRow;
   index: number;
   zona: string;
-  responsable: boolean;
+  rolJerarquico?: string;
 }) {
   const meta = num(row.meta_mes);
   const ventaQ = num(row.facturado_quimicos);
@@ -1960,36 +2290,37 @@ function FilaVendedor({
   const avance = meta > 0 ? (ventaQ / meta) * 100 : 0;
   const cierrePct = meta > 0 ? (cierreQ / meta) * 100 : 0;
   const tema = zonaTema(zona);
+  const esLider = Boolean(rolJerarquico);
 
   return (
     <tr
       className={`transition ${
-        responsable
+        esLider
           ? `${tema.suave} border-t-2 ${tema.borde}`
           : index % 2 === 0
           ? "bg-white hover:bg-blue-50/50"
           : "bg-slate-50/60 hover:bg-blue-50/50"
       }`}
     >
-      <Td izquierda clase={responsable ? `${tema.texto} font-bold` : "text-slate-300"}>
-        {responsable ? zona : ""}
+      <Td izquierda clase={esLider ? `${tema.texto} font-bold` : "text-slate-300"}>
+        {esLider ? zona : ""}
       </Td>
 
       <Td
         izquierda
-        fuerte={responsable}
+        fuerte={esLider}
         clase={
-          responsable
+          esLider
             ? `${tema.texto} font-bold`
             : "text-slate-800"
         }
       >
-        {responsable ? (
+        {esLider ? (
           <div className="flex items-center gap-2">
             <span
               className={`rounded-md border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${tema.borde} ${tema.suave} ${tema.texto}`}
             >
-              Responsable
+              {rolJerarquico}
             </span>
             <span>{row.vendedor}</span>
           </div>
