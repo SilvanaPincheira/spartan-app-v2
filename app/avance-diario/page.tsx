@@ -171,6 +171,97 @@ function formatSync(value: string | null) {
 
 }
 
+
+const JERARQUIA_ZONA: Record<string, string[]> = {
+  CENTRO: [
+    "PATRICIO ROCO",
+    "EDMUNDO DE LA BARRA",
+    "VENDEDOR SPARTAN",
+    "PEDRO GONZALEZ TRONCOSO",
+    "ROBERTO VENEGAS",
+  ],
+  NORTE: [
+    "OSCAR ORTIZ",
+    "MITCHEL MARTINEZ JARA",
+    "ALVARO AHUMADA",
+    "OSCAR ROJAS",
+  ],
+  SUR: [
+    "JUAN PRIETO",
+    "ARTURO HOPE",
+    "FABIAN ALE",
+    "MIGUEL OÑATE",
+    "VICTOR REYES",
+    "ROGER CHAVEZ VERA",
+  ],
+};
+
+function normalizarJerarquia(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function esResponsableZona(zona: string, vendedor: string) {
+  const zonaNormalizada = normalizarJerarquia(zona);
+  const orden = JERARQUIA_ZONA[zonaNormalizada] || [];
+
+  if (!orden.length) {
+    return false;
+  }
+
+  return (
+    normalizarJerarquia(vendedor) ===
+    normalizarJerarquia(orden[0])
+  );
+}
+
+function ordenarJerarquiaZona(
+  zona: string,
+  lista: ReporteRow[]
+): ReporteRow[] {
+  const zonaNormalizada = normalizarJerarquia(zona);
+  const orden = JERARQUIA_ZONA[zonaNormalizada] || [];
+
+  if (!orden.length) {
+    return [...lista].sort((a, b) =>
+      normalizarJerarquia(a.vendedor).localeCompare(
+        normalizarJerarquia(b.vendedor),
+        "es"
+      )
+    );
+  }
+
+  const posiciones = new Map(
+    orden.map((nombre, index) => [
+      normalizarJerarquia(nombre),
+      index,
+    ])
+  );
+
+  return [...lista].sort((a, b) => {
+    const nombreA = normalizarJerarquia(a.vendedor);
+    const nombreB = normalizarJerarquia(b.vendedor);
+
+    const posA = posiciones.has(nombreA)
+      ? posiciones.get(nombreA)!
+      : 999;
+
+    const posB = posiciones.has(nombreB)
+      ? posiciones.get(nombreB)!
+      : 999;
+
+    if (posA !== posB) {
+      return posA - posB;
+    }
+
+    return nombreA.localeCompare(nombreB, "es");
+  });
+}
+
 export default function AvanceDiarioPage() {
 
   const supabase = useMemo(
