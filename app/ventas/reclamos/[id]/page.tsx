@@ -2,6 +2,7 @@
 
 import React, {
   useEffect,
+  useMemo,
   useState,
 } from "react";
 
@@ -10,20 +11,6 @@ import { useParams } from "next/navigation";
 import {
   createClientComponentClient,
 } from "@supabase/auth-helpers-nextjs";
-
-/* =========================================================
-   CONFIG
-========================================================= */
-
-const SHEET_ID =
-  "1Te8xrWiWSvLl_YwqgK55rHw6eBGHeVeMGi0Z1G2ft4E";
-
-/*
- * Mantén aquí el GID real
- * de la hoja Reclamos.
- */
-const GID_RECLAMOS =
-  "REEMPLAZAR_GID_RECLAMOS";
 
 /* =========================================================
    TIPOS
@@ -38,91 +25,76 @@ type Tab =
 
 interface Reclamo {
   id: string;
-
   numeroReclamo: string;
 
   fechaIngreso: string;
-
   estado: string;
 
   ejecutivo: string;
-
   ejecutivoEmail: string;
 
   cliente: string;
-
   rut: string;
 
   contactoCliente: string;
-
   correoContacto: string;
 
   producto: string;
-
   presentacion: string;
 
   cantidadAfectada: string;
-
   unidadCantidad: string;
 
   lote: string;
-
   fechaElaboracion: string;
 
   clasificacion: string;
-
   motivo: string;
 
   descripcion: string;
 
   accionesInmediatas: string[];
-
   accionInmediataDetalle: string;
 
   aplicacion: string;
-
   proceso: string;
-
   dilucion: string;
-
   dosis: string;
-
   temperatura: string;
-
   tiempoAccion: string;
-
   superficie: string;
 
   equipoDosificacion: string;
-
   productoAnterior: string;
 
   cambioProcedimiento: string;
-
   cambioProcedimientoDetalle: string;
+
+  evidencias: string[];
+
+  creadoPor: string;
+  fechaCreacion: string;
+
+  actualizadoPor: string;
+  fechaActualizacion: string;
 }
 
 interface Investigacion {
   responsableInvestigacion: string;
-
   areaResponsable: string;
+  fechaAsignacion: string;
 
   investigacionRealizada: string;
 
   revisionFabricacionLote: string;
-
   revisionMateriasPrimas: string;
-
   analisisMuestra: string;
 
   revisionLogistica: string;
-
   revisionAplicacionCliente: string;
-
   comparacionEspecificacion: string;
 
   conclusionAtribucion: string;
-
   causaDeterminada: string;
 }
 
@@ -132,13 +104,10 @@ interface AccionCorrectiva {
   accionCorrectiva: string;
 
   responsable: string;
-
   areaResponsable: string;
 
   fechaAsignacion: string;
-
   fechaCompromiso: string;
-
   fechaEjecucion: string;
 
   estado: string;
@@ -174,6 +143,19 @@ interface Cierre {
   resultadoFinal: string;
 
   comentariosCierre: string;
+
+  cerradoPor: string;
+  fechaCierre: string;
+}
+
+interface HistorialItem {
+  fecha: string;
+  usuario: string;
+  etapa: string;
+  accion: string;
+  estadoAnterior: string;
+  estadoNuevo: string;
+  detalle: string;
 }
 
 /* =========================================================
@@ -203,151 +185,84 @@ const ESTADOS_ACCION = [
 ];
 
 /* =========================================================
-   CSV
+   ESTADOS INICIALES
 ========================================================= */
 
-function parseCsv(
-  texto: string
-): Record<string, string>[] {
-  const rows: string[][] = [];
+const INVESTIGACION_INICIAL: Investigacion = {
+  responsableInvestigacion: "",
+  areaResponsable: "",
+  fechaAsignacion: "",
 
-  let row: string[] = [];
-  let cell = "";
-  let quoted = false;
+  investigacionRealizada: "",
 
-  for (
-    let i = 0;
-    i < texto.length;
-    i++
-  ) {
-    const char = texto[i];
+  revisionFabricacionLote: "",
+  revisionMateriasPrimas: "",
+  analisisMuestra: "",
 
-    if (quoted) {
-      if (char === '"') {
-        if (
-          texto[i + 1] === '"'
-        ) {
-          cell += '"';
-          i++;
-        } else {
-          quoted = false;
-        }
-      } else {
-        cell += char;
-      }
+  revisionLogistica: "",
+  revisionAplicacionCliente: "",
+  comparacionEspecificacion: "",
 
-    } else {
-      if (char === '"') {
-        quoted = true;
+  conclusionAtribucion: "",
+  causaDeterminada: "",
+};
 
-      } else if (
-        char === ","
-      ) {
-        row.push(cell);
-        cell = "";
+const CIERRE_INICIAL: Cierre = {
+  resultadoEficacia: "",
+  fechaVerificacion: "",
+  responsableVerificacion: "",
+  metodoVerificacion: "",
+  resultadoObtenido: "",
+  comentarioVerificacion: "",
 
-      } else if (
-        char === "\n"
-      ) {
-        row.push(cell);
+  resultadoFinal: "",
+  comentariosCierre: "",
 
-        rows.push(row);
+  cerradoPor: "",
+  fechaCierre: "",
+};
 
-        row = [];
-        cell = "";
+/* =========================================================
+   HELPERS
+========================================================= */
 
-      } else if (
-        char !== "\r"
-      ) {
-        cell += char;
-      }
-    }
-  }
-
-  if (
-    cell.length ||
-    row.length
-  ) {
-    row.push(cell);
-    rows.push(row);
-  }
-
-  if (!rows.length) {
-    return [];
-  }
-
-  const headers =
-    rows[0].map(
-      (header) =>
-        header.trim()
-    );
-
-  return rows
-    .slice(1)
-    .filter(
-      (r) =>
-        r.some(
-          (value) =>
-            String(value).trim()
-        )
-    )
-    .map((r) => {
-      const obj:
-        Record<string, string> =
-        {};
-
-      headers.forEach(
-        (header, index) => {
-          obj[header] =
-            r[index] || "";
-        }
-      );
-
-      return obj;
-    });
-}
-
-function valorFila(
-  fila: Record<string, string>,
+function valor(
+  objeto: Record<string, any>,
   ...campos: string[]
 ) {
-  for (
-    const campo
-    of campos
-  ) {
+  for (const campo of campos) {
+    const dato = objeto?.[campo];
+
     if (
-      fila[campo] !== undefined &&
-      fila[campo] !== ""
+      dato !== undefined &&
+      dato !== null &&
+      String(dato).trim() !== ""
     ) {
-      return fila[campo];
+      return String(dato);
     }
   }
 
   return "";
 }
 
-function separarLista(
-  valor: string
-) {
-  return String(valor || "")
-    .split(/[;,]/)
-    .map(
-      (item) =>
-        item.trim()
-    )
+function separarPipe(dato: any) {
+  if (!dato) return [];
+
+  if (Array.isArray(dato)) {
+    return dato
+      .map((x) => String(x).trim())
+      .filter(Boolean);
+  }
+
+  return String(dato)
+    .split("|")
+    .map((item) => item.trim())
     .filter(Boolean);
 }
 
-/* =========================================================
-   HELPERS
-========================================================= */
-
-function nuevoId(
-  prefijo: string
-) {
+function nuevoId(prefijo: string) {
   if (
-    typeof crypto !==
-      "undefined" &&
+    typeof crypto !== "undefined" &&
     crypto.randomUUID
   ) {
     return `${prefijo}-${crypto.randomUUID()}`;
@@ -356,16 +271,92 @@ function nuevoId(
   return `${prefijo}-${Date.now()}-${Math.random()}`;
 }
 
+function fechaHoy() {
+  return new Date()
+    .toISOString()
+    .slice(0, 10);
+}
+
+/*
+ * Para inputs type=date.
+ *
+ * Apps Script / Sheets puede devolver:
+ * 2026-09-26T03:00:00.000Z
+ *
+ * El input date necesita:
+ * 2026-09-26
+ */
+function fechaInput(valorFecha: any) {
+  if (!valorFecha) return "";
+
+  const texto = String(valorFecha);
+
+  const match =
+    texto.match(
+      /^(\d{4}-\d{2}-\d{2})/
+    );
+
+  if (match) {
+    return match[1];
+  }
+
+  return texto;
+}
+
 /* =========================================================
    PAGE
 ========================================================= */
 
 export default function ReclamoDetallePage() {
-  const params =
-    useParams();
+  const params = useParams();
 
   const id =
-    String(params?.id || "");
+    String(
+      params?.id || ""
+    );
+
+  const supabase =
+    createClientComponentClient();
+
+  /* =======================================================
+     ESTADOS GENERALES
+  ======================================================= */
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
+
+  const [
+    guardando,
+    setGuardando,
+  ] = useState(false);
+
+  const [
+    error,
+    setError,
+  ] = useState("");
+
+  const [
+    mensaje,
+    setMensaje,
+  ] = useState("");
+
+  const [
+    tab,
+    setTab,
+  ] = useState<Tab>(
+    "ingreso"
+  );
+
+  const [
+    userEmail,
+    setUserEmail,
+  ] = useState("");
+
+  /* =======================================================
+     DATOS
+  ======================================================= */
 
   const [
     reclamo,
@@ -376,86 +367,12 @@ export default function ReclamoDetallePage() {
     );
 
   const [
-    loading,
-    setLoading,
-  ] =
-    useState(true);
-
-  const [
-    tab,
-    setTab,
-  ] =
-    useState<Tab>(
-      "ingreso"
-    );
-
-  const [
-    guardando,
-    setGuardando,
-  ] =
-    useState(false);
-
-  const [
-    mensaje,
-    setMensaje,
-  ] =
-    useState("");
-
-  const [
-    userEmail,
-    setUserEmail,
-  ] =
-    useState("");
-
-  const supabase =
-    createClientComponentClient();
-
-  /* =======================================================
-     INVESTIGACIÓN
-  ======================================================= */
-
-  const [
     investigacion,
     setInvestigacion,
   ] =
     useState<Investigacion>({
-      responsableInvestigacion:
-        "",
-
-      areaResponsable:
-        "",
-
-      investigacionRealizada:
-        "",
-
-      revisionFabricacionLote:
-        "",
-
-      revisionMateriasPrimas:
-        "",
-
-      analisisMuestra:
-        "",
-
-      revisionLogistica:
-        "",
-
-      revisionAplicacionCliente:
-        "",
-
-      comparacionEspecificacion:
-        "",
-
-      conclusionAtribucion:
-        "",
-
-      causaDeterminada:
-        "",
+      ...INVESTIGACION_INICIAL,
     });
-
-  /* =======================================================
-     ACCIONES
-  ======================================================= */
 
   const [
     acciones,
@@ -465,10 +382,6 @@ export default function ReclamoDetallePage() {
       AccionCorrectiva[]
     >([]);
 
-  /* =======================================================
-     SEGUIMIENTOS
-  ======================================================= */
-
   const [
     seguimientos,
     setSeguimientos,
@@ -477,368 +390,655 @@ export default function ReclamoDetallePage() {
       Seguimiento[]
     >([]);
 
-  /* =======================================================
-     CIERRE
-  ======================================================= */
-
   const [
     cierre,
     setCierre,
   ] =
     useState<Cierre>({
-      resultadoEficacia:
-        "",
-
-      fechaVerificacion:
-        "",
-
-      responsableVerificacion:
-        "",
-
-      metodoVerificacion:
-        "",
-
-      resultadoObtenido:
-        "",
-
-      comentarioVerificacion:
-        "",
-
-      resultadoFinal:
-        "",
-
-      comentariosCierre:
-        "",
+      ...CIERRE_INICIAL,
     });
 
+  const [
+    historial,
+    setHistorial,
+  ] =
+    useState<
+      HistorialItem[]
+    >([]);
+
   /* =======================================================
-     USUARIO
+     DERIVADOS
+  ======================================================= */
+
+  const cerrado =
+    reclamo?.estado ===
+    "Cerrado";
+
+  const mostrarTecnicos =
+    useMemo(
+      () =>
+        Boolean(
+          reclamo?.aplicacion ||
+          reclamo?.proceso ||
+          reclamo?.dilucion ||
+          reclamo?.dosis ||
+          reclamo?.temperatura ||
+          reclamo?.tiempoAccion ||
+          reclamo?.superficie ||
+          reclamo?.equipoDosificacion ||
+          reclamo?.productoAnterior ||
+          reclamo?.cambioProcedimiento
+        ),
+      [reclamo]
+    );
+
+  /* =======================================================
+     USUARIO LOGUEADO
   ======================================================= */
 
   useEffect(() => {
     async function cargarUsuario() {
-      const { data } =
-        await supabase.auth.getUser();
+      try {
+        const { data } =
+          await supabase.auth.getUser();
 
-      setUserEmail(
-        data?.user?.email || ""
-      );
+        setUserEmail(
+          data?.user?.email ||
+          ""
+        );
+      } catch (err) {
+        console.error(
+          "Error obteniendo usuario:",
+          err
+        );
+      }
     }
 
     cargarUsuario();
   }, []);
 
   /* =======================================================
-     CARGAR RECLAMO
+     CARGAR GESTIÓN COMPLETA
   ======================================================= */
 
-  useEffect(() => {
+  async function cargarGestion(
+    mostrarLoading = true
+  ) {
     if (!id) return;
 
-    async function cargarReclamo() {
-      try {
+    try {
+      if (mostrarLoading) {
         setLoading(true);
+      }
 
-        const url =
-          `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${GID_RECLAMOS}`;
+      setError("");
 
-        const res =
-          await fetch(
-            url,
-            {
-              cache:
-                "no-store",
-            }
-          );
-
-        if (!res.ok) {
-          throw new Error(
-            "No se pudo leer la hoja de reclamos."
-          );
-        }
-
-        const texto =
-          await res.text();
-
-        const data =
-          parseCsv(texto);
-
-        const found =
-          data.find(
-            (fila) => {
-
-              const filaId =
-                valorFila(
-                  fila,
-                  "ID",
-                  "id",
-                  "N° Reclamo",
-                  "Numero Reclamo",
-                  "numeroReclamo",
-                  "0"
-                );
-
-              return (
-                String(filaId) ===
-                id
-              );
-            }
-          );
-
-        if (!found) {
-          setReclamo(null);
-          return;
-        }
-
-        setReclamo({
-          id,
-
-          numeroReclamo:
-            valorFila(
-              found,
-              "N° Reclamo",
-              "Numero Reclamo",
-              "numeroReclamo",
-              "ID",
-              "id",
-              "0"
-            ) || id,
-
-          fechaIngreso:
-            valorFila(
-              found,
-              "Fecha ingreso",
-              "Fecha envío",
-              "fechaIngreso"
-            ),
-
-          estado:
-            valorFila(
-              found,
-              "Estado",
-              "estado"
-            ) ||
-            "Ingresado",
-
-          ejecutivo:
-            valorFila(
-              found,
-              "Ejecutivo de ventas",
-              "Ejecutivo",
-              "ejecutivo"
-            ),
-
-          ejecutivoEmail:
-            valorFila(
-              found,
-              "Correo Ejecutivo",
-              "ejecutivoEmail"
-            ),
-
-          cliente:
-            valorFila(
-              found,
-              "Cliente",
-              "cliente"
-            ),
-
-          rut:
-            valorFila(
-              found,
-              "RUT cliente",
-              "Rut empresa",
-              "rut"
-            ),
-
-          contactoCliente:
-            valorFila(
-              found,
-              "Contacto cliente",
-              "contactoCliente"
-            ),
-
-          correoContacto:
-            valorFila(
-              found,
-              "Correo de contacto",
-              "correo"
-            ),
-
-          producto:
-            valorFila(
-              found,
-              "Producto",
-              "producto"
-            ),
-
-          presentacion:
-            valorFila(
-              found,
-              "Presentación",
-              "presentacion"
-            ),
-
-          cantidadAfectada:
-            valorFila(
-              found,
-              "Cantidad afectada",
-              "cantidadAfectada"
-            ),
-
-          unidadCantidad:
-            valorFila(
-              found,
-              "Unidad",
-              "unidadCantidad"
-            ),
-
-          lote:
-            valorFila(
-              found,
-              "Lote",
-              "lote"
-            ),
-
-          fechaElaboracion:
-            valorFila(
-              found,
-              "Fecha elaboración",
-              "fechaElaboracion"
-            ),
-
-          clasificacion:
-            valorFila(
-              found,
-              "Clasificación",
-              "clasificacion"
-            ),
-
-          motivo:
-            valorFila(
-              found,
-              "Motivo",
-              "motivo"
-            ),
-
-          descripcion:
-            valorFila(
-              found,
-              "DESCRIPCIÓN DEL PROBLEMA",
-              "Descripción del reclamo",
-              "descripcion"
-            ),
-
-          accionesInmediatas:
-            separarLista(
-              valorFila(
-                found,
-                "Acciones inmediatas",
-                "accionesInmediatas"
-              )
-            ),
-
-          accionInmediataDetalle:
-            valorFila(
-              found,
-              "Detalle acción inmediata",
-              "accionInmediataDetalle"
-            ),
-
-          aplicacion:
-            valorFila(
-              found,
-              "Aplicación",
-              "aplicacion"
-            ),
-
-          proceso:
-            valorFila(
-              found,
-              "Proceso",
-              "proceso"
-            ),
-
-          dilucion:
-            valorFila(
-              found,
-              "Dilución",
-              "dilucion"
-            ),
-
-          dosis:
-            valorFila(
-              found,
-              "Dosis de uso",
-              "Dosificación",
-              "dosis"
-            ),
-
-          temperatura:
-            valorFila(
-              found,
-              "Temperatura de solución",
-              "Temperatura",
-              "temperatura"
-            ),
-
-          tiempoAccion:
-            valorFila(
-              found,
-              "Tiempo de acción",
-              "Tiempo de contacto",
-              "tiempoAccion"
-            ),
-
-          superficie:
-            valorFila(
-              found,
-              "Superficie donde se aplica",
-              "Superficie",
-              "superficie"
-            ),
-
-          equipoDosificacion:
-            valorFila(
-              found,
-              "Equipo dosificación",
-              "equipoDosificacion"
-            ),
-
-          productoAnterior:
-            valorFila(
-              found,
-              "Producto anterior",
-              "productoAnterior"
-            ),
-
-          cambioProcedimiento:
-            valorFila(
-              found,
-              "Cambio procedimiento",
-              "cambioProcedimiento"
-            ),
-
-          cambioProcedimientoDetalle:
-            valorFila(
-              found,
-              "Detalle cambio procedimiento",
-              "cambioProcedimientoDetalle"
-            ),
-        });
-
-      } catch (error) {
-        console.error(
-          "Error cargando reclamo:",
-          error
+      const response =
+        await fetch(
+          `/api/reclamo-gestion?id=${encodeURIComponent(
+            id
+          )}`,
+          {
+            method: "GET",
+            cache: "no-store",
+          }
         );
 
-      } finally {
+      const data =
+        await response.json();
+
+      console.log(
+        "📥 Gestión reclamo:",
+        data
+      );
+
+      if (
+        !response.ok ||
+        data.success === false
+      ) {
+        throw new Error(
+          data.error ||
+          "No se pudo cargar el reclamo."
+        );
+      }
+
+      const raw =
+        data.reclamo || {};
+
+      /* ===============================================
+         RECLAMO PRINCIPAL
+      =============================================== */
+
+      const numeroReclamo =
+        valor(
+          raw,
+          "N° Reclamo"
+        ) || id;
+
+      setReclamo({
+        id:
+          valor(
+            raw,
+            "ID"
+          ) || id,
+
+        numeroReclamo,
+
+        fechaIngreso:
+          valor(
+            raw,
+            "Fecha envío"
+          ),
+
+        estado:
+          valor(
+            raw,
+            "Estado"
+          ) ||
+          "Ingresado",
+
+        ejecutivo:
+          valor(
+            raw,
+            "Ejecutivo de ventas"
+          ),
+
+        ejecutivoEmail:
+          valor(
+            raw,
+            "Correo Ejecutivo"
+          ),
+
+        cliente:
+          valor(
+            raw,
+            "Cliente"
+          ),
+
+        rut:
+          valor(
+            raw,
+            "Rut empresa"
+          ),
+
+        contactoCliente:
+          valor(
+            raw,
+            "Contacto cliente"
+          ),
+
+        correoContacto:
+          valor(
+            raw,
+            "Correo de contacto"
+          ),
+
+        producto:
+          valor(
+            raw,
+            "Producto"
+          ),
+
+        presentacion:
+          valor(
+            raw,
+            "Presentación"
+          ),
+
+        cantidadAfectada:
+          valor(
+            raw,
+            "Cantidad afectada"
+          ),
+
+        unidadCantidad:
+          valor(
+            raw,
+            "Unidad"
+          ),
+
+        lote:
+          valor(
+            raw,
+            "Lote"
+          ),
+
+        fechaElaboracion:
+          valor(
+            raw,
+            "Fecha elaboración"
+          ),
+
+        clasificacion:
+          valor(
+            raw,
+            "Clasificación"
+          ),
+
+        motivo:
+          valor(
+            raw,
+            "Motivo"
+          ),
+
+        descripcion:
+          valor(
+            raw,
+            "DESCRIPCIÓN DEL PROBLEMA"
+          ),
+
+        accionesInmediatas:
+          separarPipe(
+            raw[
+              "Acciones inmediatas"
+            ]
+          ),
+
+        accionInmediataDetalle:
+          valor(
+            raw,
+            "Detalle acción inmediata"
+          ),
+
+        aplicacion:
+          valor(
+            raw,
+            "Aplicación"
+          ),
+
+        proceso:
+          valor(
+            raw,
+            "Proceso"
+          ),
+
+        dilucion:
+          valor(
+            raw,
+            "Dilución"
+          ),
+
+        dosis:
+          valor(
+            raw,
+            "Dosis de uso"
+          ),
+
+        temperatura:
+          valor(
+            raw,
+            "Temperatura de solución"
+          ),
+
+        tiempoAccion:
+          valor(
+            raw,
+            "Tiempo de acción"
+          ),
+
+        superficie:
+          valor(
+            raw,
+            "Superficie en dónde se aplica"
+          ),
+
+        equipoDosificacion:
+          valor(
+            raw,
+            "Equipo dosificación"
+          ),
+
+        productoAnterior:
+          valor(
+            raw,
+            "Producto anterior"
+          ),
+
+        cambioProcedimiento:
+          valor(
+            raw,
+            "Cambio procedimiento"
+          ),
+
+        cambioProcedimientoDetalle:
+          valor(
+            raw,
+            "Detalle cambio procedimiento"
+          ),
+
+        evidencias:
+          separarPipe(
+            raw["Evidencias"]
+          ),
+
+        creadoPor:
+          valor(
+            raw,
+            "Creado por"
+          ),
+
+        fechaCreacion:
+          valor(
+            raw,
+            "Fecha creación"
+          ),
+
+        actualizadoPor:
+          valor(
+            raw,
+            "Actualizado por"
+          ),
+
+        fechaActualizacion:
+          valor(
+            raw,
+            "Fecha actualización"
+          ),
+      });
+
+      /* ===============================================
+         INVESTIGACIÓN
+      =============================================== */
+
+      const inv =
+        data.investigacion ||
+        {};
+
+      setInvestigacion({
+        responsableInvestigacion:
+          valor(
+            inv,
+            "responsableInvestigacion"
+          ),
+
+        areaResponsable:
+          valor(
+            inv,
+            "areaResponsable"
+          ),
+
+        fechaAsignacion:
+          valor(
+            inv,
+            "fechaAsignacion"
+          ),
+
+        investigacionRealizada:
+          valor(
+            inv,
+            "investigacionRealizada"
+          ),
+
+        revisionFabricacionLote:
+          valor(
+            inv,
+            "revisionFabricacionLote"
+          ),
+
+        revisionMateriasPrimas:
+          valor(
+            inv,
+            "revisionMateriasPrimas"
+          ),
+
+        analisisMuestra:
+          valor(
+            inv,
+            "analisisMuestra"
+          ),
+
+        revisionLogistica:
+          valor(
+            inv,
+            "revisionLogistica"
+          ),
+
+        revisionAplicacionCliente:
+          valor(
+            inv,
+            "revisionAplicacionCliente"
+          ),
+
+        comparacionEspecificacion:
+          valor(
+            inv,
+            "comparacionEspecificacion"
+          ),
+
+        conclusionAtribucion:
+          valor(
+            inv,
+            "conclusionAtribucion"
+          ),
+
+        causaDeterminada:
+          valor(
+            inv,
+            "causaDeterminada"
+          ),
+      });
+
+      /* ===============================================
+         ACCIONES
+      =============================================== */
+
+      setAcciones(
+        Array.isArray(
+          data.acciones
+        )
+          ? data.acciones.map(
+              (
+                accion:
+                  any
+              ) => ({
+                id:
+                  String(
+                    accion.id ||
+                    nuevoId("ACC")
+                  ),
+
+                accionCorrectiva:
+                  String(
+                    accion.accionCorrectiva ||
+                    ""
+                  ),
+
+                responsable:
+                  String(
+                    accion.responsable ||
+                    ""
+                  ),
+
+                areaResponsable:
+                  String(
+                    accion.areaResponsable ||
+                    ""
+                  ),
+
+                fechaAsignacion:
+                  fechaInput(
+                    accion.fechaAsignacion
+                  ),
+
+                fechaCompromiso:
+                  fechaInput(
+                    accion.fechaCompromiso
+                  ),
+
+                fechaEjecucion:
+                  fechaInput(
+                    accion.fechaEjecucion
+                  ),
+
+                estado:
+                  String(
+                    accion.estado ||
+                    "Pendiente"
+                  ),
+
+                observaciones:
+                  String(
+                    accion.observaciones ||
+                    ""
+                  ),
+              })
+            )
+          : []
+      );
+
+      /* ===============================================
+         SEGUIMIENTOS
+      =============================================== */
+
+      setSeguimientos(
+        Array.isArray(
+          data.seguimientos
+        )
+          ? data.seguimientos.map(
+              (
+                seguimiento:
+                  any
+              ) => ({
+                id:
+                  String(
+                    seguimiento.id ||
+                    nuevoId("SEG")
+                  ),
+
+                fechaSeguimiento:
+                  fechaInput(
+                    seguimiento.fechaSeguimiento
+                  ),
+
+                responsable:
+                  String(
+                    seguimiento.responsable ||
+                    ""
+                  ),
+
+                resultado:
+                  String(
+                    seguimiento.resultado ||
+                    ""
+                  ),
+
+                comentarios:
+                  String(
+                    seguimiento.comentarios ||
+                    ""
+                  ),
+              })
+            )
+          : []
+      );
+
+      /* ===============================================
+         CIERRE
+      =============================================== */
+
+      const datosCierre =
+        data.cierre ||
+        {};
+
+      setCierre({
+        resultadoEficacia:
+          valor(
+            datosCierre,
+            "resultadoEficacia"
+          ),
+
+        fechaVerificacion:
+          fechaInput(
+            valor(
+              datosCierre,
+              "fechaVerificacion"
+            )
+          ),
+
+        responsableVerificacion:
+          valor(
+            datosCierre,
+            "responsableVerificacion"
+          ),
+
+        metodoVerificacion:
+          valor(
+            datosCierre,
+            "metodoVerificacion"
+          ),
+
+        resultadoObtenido:
+          valor(
+            datosCierre,
+            "resultadoObtenido"
+          ),
+
+        comentarioVerificacion:
+          valor(
+            datosCierre,
+            "comentarioVerificacion"
+          ),
+
+        resultadoFinal:
+          valor(
+            datosCierre,
+            "resultadoFinal"
+          ),
+
+        comentariosCierre:
+          valor(
+            datosCierre,
+            "comentariosCierre"
+          ),
+
+        cerradoPor:
+          valor(
+            datosCierre,
+            "cerradoPor"
+          ),
+
+        fechaCierre:
+          valor(
+            datosCierre,
+            "fechaCierre"
+          ),
+      });
+
+      /* ===============================================
+         HISTORIAL
+      =============================================== */
+
+      setHistorial(
+        Array.isArray(
+          data.historial
+        )
+          ? data.historial
+          : []
+      );
+
+    } catch (err) {
+      console.error(
+        "❌ Error cargando reclamo:",
+        err
+      );
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo cargar el reclamo."
+      );
+
+      setReclamo(null);
+
+    } finally {
+      if (mostrarLoading) {
         setLoading(false);
       }
     }
+  }
 
-    cargarReclamo();
-
+  useEffect(() => {
+    cargarGestion();
   }, [id]);
 
   /* =======================================================
@@ -850,22 +1050,31 @@ export default function ReclamoDetallePage() {
     datos: any,
     estado?: string
   ) {
-    if (!reclamo) return;
+    if (!reclamo) {
+      return false;
+    }
+
+    if (
+      reclamo.estado ===
+      "Cerrado"
+    ) {
+      alert(
+        "Este reclamo está cerrado y no puede modificarse."
+      );
+
+      return false;
+    }
 
     try {
       setGuardando(true);
       setMensaje("");
+      setError("");
 
-      /*
-       * Esta API es el próximo archivo
-       * que construiremos.
-       */
       const response =
         await fetch(
           "/api/reclamo-gestion",
           {
-            method:
-              "POST",
+            method: "POST",
 
             headers: {
               "Content-Type":
@@ -893,14 +1102,11 @@ export default function ReclamoDetallePage() {
         );
 
       const resultado =
-        await response
-          .json()
-          .catch(() => ({}));
+        await response.json();
 
       if (
         !response.ok ||
-        resultado.success ===
-          false
+        resultado.success === false
       ) {
         throw new Error(
           resultado.error ||
@@ -908,30 +1114,28 @@ export default function ReclamoDetallePage() {
         );
       }
 
-      if (estado) {
-        setReclamo(
-          (actual) =>
-            actual
-              ? {
-                  ...actual,
-                  estado,
-                }
-              : actual
-        );
-      }
-
       setMensaje(
         "Cambios guardados correctamente."
       );
 
+      /*
+       * Volver a consultar al backend
+       * para dejar la pantalla sincronizada
+       * con Sheets.
+       */
+      await cargarGestion(false);
+
       return true;
 
-    } catch (error) {
-      console.error(error);
+    } catch (err) {
+      console.error(
+        "❌ Error guardando gestión:",
+        err
+      );
 
-      setMensaje(
-        error instanceof Error
-          ? error.message
+      setError(
+        err instanceof Error
+          ? err.message
           : "No se pudo guardar."
       );
 
@@ -948,22 +1152,40 @@ export default function ReclamoDetallePage() {
 
   async function guardarInvestigacion() {
     if (
-      !investigacion.responsableInvestigacion ||
-      !investigacion.areaResponsable
+      !investigacion.responsableInvestigacion.trim()
     ) {
       alert(
-        "Indica responsable y área responsable."
+        "Indica el responsable de investigación."
       );
 
       return;
     }
 
     if (
-      !investigacion.conclusionAtribucion ||
-      !investigacion.causaDeterminada
+      !investigacion.areaResponsable.trim()
     ) {
       alert(
-        "Debes registrar la conclusión y la causa determinada."
+        "Indica el área responsable."
+      );
+
+      return;
+    }
+
+    if (
+      !investigacion.conclusionAtribucion.trim()
+    ) {
+      alert(
+        "Selecciona la conclusión / atribución del reclamo."
+      );
+
+      return;
+    }
+
+    if (
+      !investigacion.causaDeterminada.trim()
+    ) {
+      alert(
+        "Debes ingresar la causa determinada."
       );
 
       return;
@@ -1004,9 +1226,7 @@ export default function ReclamoDetallePage() {
             "",
 
           fechaAsignacion:
-            new Date()
-              .toISOString()
-              .slice(0, 10),
+            fechaHoy(),
 
           fechaCompromiso:
             "",
@@ -1028,7 +1248,7 @@ export default function ReclamoDetallePage() {
     index: number,
     campo:
       keyof AccionCorrectiva,
-    valor: string
+    dato: string
   ) {
     setAcciones(
       (actual) =>
@@ -1038,7 +1258,7 @@ export default function ReclamoDetallePage() {
               ? {
                   ...accion,
                   [campo]:
-                    valor,
+                    dato,
                 }
               : accion
         )
@@ -1048,6 +1268,13 @@ export default function ReclamoDetallePage() {
   function eliminarAccion(
     index: number
   ) {
+    const confirmar =
+      window.confirm(
+        "¿Eliminar esta acción?"
+      );
+
+    if (!confirmar) return;
+
     setAcciones(
       (actual) =>
         actual.filter(
@@ -1069,14 +1296,14 @@ export default function ReclamoDetallePage() {
     const incompleta =
       acciones.some(
         (accion) =>
-          !accion.accionCorrectiva ||
-          !accion.responsable ||
+          !accion.accionCorrectiva.trim() ||
+          !accion.responsable.trim() ||
           !accion.fechaCompromiso
       );
 
     if (incompleta) {
       alert(
-        "Completa acción, responsable y fecha compromiso."
+        "Todas las acciones deben tener acción correctiva, responsable y fecha compromiso."
       );
 
       return;
@@ -1092,7 +1319,9 @@ export default function ReclamoDetallePage() {
       );
 
     if (ok) {
-      setTab("seguimiento");
+      setTab(
+        "seguimiento"
+      );
     }
   }
 
@@ -1110,9 +1339,7 @@ export default function ReclamoDetallePage() {
             nuevoId("SEG"),
 
           fechaSeguimiento:
-            new Date()
-              .toISOString()
-              .slice(0, 10),
+            fechaHoy(),
 
           responsable:
             "",
@@ -1131,17 +1358,20 @@ export default function ReclamoDetallePage() {
     index: number,
     campo:
       keyof Seguimiento,
-    valor: string
+    dato: string
   ) {
     setSeguimientos(
       (actual) =>
         actual.map(
-          (seguimiento, i) =>
+          (
+            seguimiento,
+            i
+          ) =>
             i === index
               ? {
                   ...seguimiento,
                   [campo]:
-                    valor,
+                    dato,
                 }
               : seguimiento
         )
@@ -1151,6 +1381,13 @@ export default function ReclamoDetallePage() {
   function eliminarSeguimiento(
     index: number
   ) {
+    const confirmar =
+      window.confirm(
+        "¿Eliminar este seguimiento?"
+      );
+
+    if (!confirmar) return;
+
     setSeguimientos(
       (actual) =>
         actual.filter(
@@ -1165,7 +1402,23 @@ export default function ReclamoDetallePage() {
       !seguimientos.length
     ) {
       alert(
-        "Registra al menos un seguimiento."
+        "Debes registrar al menos un seguimiento."
+      );
+
+      return;
+    }
+
+    const incompleto =
+      seguimientos.some(
+        (seguimiento) =>
+          !seguimiento.fechaSeguimiento ||
+          !seguimiento.responsable.trim() ||
+          !seguimiento.resultado.trim()
+      );
+
+    if (incompleto) {
+      alert(
+        "Cada seguimiento debe tener fecha, responsable y resultado."
       );
 
       return;
@@ -1186,101 +1439,180 @@ export default function ReclamoDetallePage() {
   }
 
   /* =======================================================
-     CIERRE
+     CIERRE / VERIFICACIÓN
   ======================================================= */
 
   async function guardarCierre() {
     if (
-      !cierre.resultadoEficacia ||
-      !cierre.responsableVerificacion ||
-      !cierre.metodoVerificacion ||
-      !cierre.resultadoObtenido
+      !cierre.resultadoEficacia
     ) {
       alert(
-        "Completa la verificación de eficacia."
+        "Selecciona el resultado de la verificación de eficacia."
       );
 
       return;
     }
 
-    /*
-     * La regla exige mantener abierto
-     * si la acción no fue eficaz.
-     */
+    if (
+      !cierre.fechaVerificacion
+    ) {
+      alert(
+        "Ingresa la fecha de verificación."
+      );
+
+      return;
+    }
+
+    if (
+      !cierre.responsableVerificacion.trim()
+    ) {
+      alert(
+        "Ingresa el responsable de la verificación."
+      );
+
+      return;
+    }
+
+    if (
+      !cierre.metodoVerificacion.trim()
+    ) {
+      alert(
+        "Indica el método utilizado para verificar."
+      );
+
+      return;
+    }
+
+    if (
+      !cierre.resultadoObtenido.trim()
+    ) {
+      alert(
+        "Ingresa el resultado obtenido."
+      );
+
+      return;
+    }
+
+    /* ===============================================
+       PENDIENTE
+    =============================================== */
+
     if (
       cierre.resultadoEficacia ===
-      "No eficaz"
+      "Pendiente"
     ) {
       await guardarGestion(
         "Verificación de eficacia",
         cierre,
-        "En seguimiento"
+        "Pendiente de verificación de eficacia"
       );
-
-      alert(
-        "La verificación fue No eficaz. El reclamo continuará abierto y deberá generar nuevas acciones."
-      );
-
-      setTab("acciones");
 
       return;
     }
 
+    /* ===============================================
+       NO EFICAZ
+    =============================================== */
+
     if (
-      cierre.resultadoEficacia !==
+      cierre.resultadoEficacia ===
+      "No eficaz"
+    ) {
+      const ok =
+        await guardarGestion(
+          "Verificación de eficacia",
+          cierre,
+          "En seguimiento"
+        );
+
+      if (ok) {
+        alert(
+          "La verificación resultó No eficaz. El reclamo permanecerá abierto y deberán definirse nuevas acciones."
+        );
+
+        setTab(
+          "acciones"
+        );
+      }
+
+      return;
+    }
+
+    /* ===============================================
+       EFICAZ → CIERRE
+    =============================================== */
+
+    if (
+      cierre.resultadoEficacia ===
       "Eficaz"
     ) {
-      alert(
-        "La eficacia debe estar verificada antes de cerrar."
+      if (
+        !cierre.resultadoFinal.trim()
+      ) {
+        alert(
+          "Ingresa el resultado final."
+        );
+
+        return;
+      }
+
+      if (
+        !cierre.comentariosCierre.trim()
+      ) {
+        alert(
+          "Ingresa los comentarios de cierre."
+        );
+
+        return;
+      }
+
+      const confirmar =
+        window.confirm(
+          "¿Confirma el cierre definitivo de este reclamo?"
+        );
+
+      if (!confirmar) return;
+
+      await guardarGestion(
+        "Cierre",
+        {
+          ...cierre,
+
+          usuarioCierre:
+            userEmail,
+
+          fechaCierre:
+            new Date()
+              .toISOString(),
+        },
+        "Cerrado"
       );
-
-      return;
     }
-
-    if (
-      !cierre.resultadoFinal ||
-      !cierre.comentariosCierre
-    ) {
-      alert(
-        "Completa el resultado final y los comentarios de cierre."
-      );
-
-      return;
-    }
-
-    const confirmacion =
-      window.confirm(
-        "¿Confirma el cierre definitivo de este reclamo?"
-      );
-
-    if (!confirmacion) {
-      return;
-    }
-
-    await guardarGestion(
-      "Cierre",
-      {
-        ...cierre,
-
-        usuarioCierre:
-          userEmail,
-
-        fechaCierre:
-          new Date()
-            .toISOString(),
-      },
-      "Cerrado"
-    );
   }
 
   /* =======================================================
-     RENDER
+     LOADING / ERROR
   ======================================================= */
 
   if (loading) {
     return (
       <div className="p-8 text-zinc-500">
         Cargando reclamo...
+      </div>
+    );
+  }
+
+  if (
+    error &&
+    !reclamo
+  ) {
+    return (
+      <div className="p-8">
+
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
+          {error}
+        </div>
+
       </div>
     );
   }
@@ -1293,16 +1625,22 @@ export default function ReclamoDetallePage() {
     );
   }
 
+  /* =======================================================
+     UI
+  ======================================================= */
+
   return (
-    <div className="min-h-screen bg-zinc-50 p-4 md:p-6">
+    <div className="min-h-screen bg-zinc-50 p-4 text-zinc-900 md:p-6">
 
       <div className="mx-auto max-w-7xl space-y-5">
 
-        {/* HEADER */}
+        {/* =================================================
+            HEADER
+        ================================================= */}
 
-        <div className="rounded-2xl border bg-white p-6 shadow-sm">
+        <section className="rounded-2xl border bg-white p-6 shadow-sm">
 
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
 
             <div>
 
@@ -1310,37 +1648,112 @@ export default function ReclamoDetallePage() {
                 Gestión de Reclamos
               </p>
 
-              <h1 className="text-2xl font-bold text-zinc-900">
-                Reclamo {reclamo.numeroReclamo}
+              <h1 className="mt-1 text-2xl font-bold">
+                {reclamo.numeroReclamo}
               </h1>
 
-              <p className="mt-1 text-sm text-zinc-500">
-                {reclamo.cliente} · {reclamo.producto}
+              <p className="mt-2 text-sm text-zinc-500">
+                {reclamo.cliente}
+                {" · "}
+                {reclamo.producto}
               </p>
 
+              {reclamo.fechaIngreso && (
+
+                <p className="mt-1 text-xs text-zinc-400">
+                  Ingresado:{" "}
+                  {reclamo.fechaIngreso}
+                </p>
+
+              )}
+
             </div>
 
-            <div>
+            <div className="flex flex-wrap items-center gap-3">
 
-              <span className="inline-flex rounded-full bg-blue-100 px-4 py-2 text-sm font-semibold text-blue-700">
-                {reclamo.estado}
-              </span>
+              <EstadoBadge
+                estado={
+                  reclamo.estado
+                }
+              />
+
+              <button
+                type="button"
+                onClick={() =>
+                  cargarGestion()
+                }
+                className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-zinc-50"
+              >
+                Actualizar
+              </button>
 
             </div>
 
           </div>
 
-        </div>
+        </section>
 
-        {/* MENSAJE */}
+        {/* =================================================
+            CERRADO
+        ================================================= */}
 
-        {mensaje && (
-          <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">
-            {mensaje}
+        {cerrado && (
+
+          <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+
+            Este reclamo se encuentra cerrado.
+
+            {cierre.fechaCierre && (
+              <>
+                {" "}
+                Fecha de cierre:{" "}
+                <strong>
+                  {
+                    cierre.fechaCierre
+                  }
+                </strong>.
+              </>
+            )}
+
+            {cierre.cerradoPor && (
+              <>
+                {" "}
+                Cerrado por{" "}
+                <strong>
+                  {
+                    cierre.cerradoPor
+                  }
+                </strong>.
+              </>
+            )}
+
           </div>
+
         )}
 
-        {/* TABS */}
+        {/* =================================================
+            MENSAJES
+        ================================================= */}
+
+        {mensaje && (
+
+          <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-700">
+            {mensaje}
+          </div>
+
+        )}
+
+        {error && reclamo && (
+
+          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            {error}
+          </div>
+
+        )}
+
+        {/* =================================================
+            PESTAÑAS
+        ================================================= */}
 
         <div className="overflow-x-auto rounded-2xl border bg-white p-2 shadow-sm">
 
@@ -1348,7 +1761,8 @@ export default function ReclamoDetallePage() {
 
             <TabButton
               activo={
-                tab === "ingreso"
+                tab ===
+                "ingreso"
               }
               onClick={() =>
                 setTab("ingreso")
@@ -1399,7 +1813,8 @@ export default function ReclamoDetallePage() {
 
             <TabButton
               activo={
-                tab === "cierre"
+                tab ===
+                "cierre"
               }
               onClick={() =>
                 setTab("cierre")
@@ -1413,7 +1828,7 @@ export default function ReclamoDetallePage() {
         </div>
 
         {/* =================================================
-            INGRESO
+            1. INGRESO
         ================================================= */}
 
         {tab === "ingreso" && (
@@ -1421,23 +1836,27 @@ export default function ReclamoDetallePage() {
           <section className="rounded-2xl border bg-white p-6 shadow-sm">
 
             <TituloEtapa
-              titulo="Antecedentes ingresados por el ejecutivo"
-              descripcion="Información original del reclamo."
+              titulo="Antecedentes del reclamo"
+              descripcion="Información registrada originalmente por el ejecutivo comercial."
             />
 
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <Subtitulo>
+              Cliente
+            </Subtitulo>
 
-              <Dato
-                titulo="Fecha ingreso"
-                valor={
-                  reclamo.fechaIngreso
-                }
-              />
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
 
               <Dato
                 titulo="Ejecutivo"
                 valor={
                   reclamo.ejecutivo
+                }
+              />
+
+              <Dato
+                titulo="Correo ejecutivo"
+                valor={
+                  reclamo.ejecutivoEmail
                 }
               />
 
@@ -1450,7 +1869,9 @@ export default function ReclamoDetallePage() {
 
               <Dato
                 titulo="RUT"
-                valor={reclamo.rut}
+                valor={
+                  reclamo.rut
+                }
               />
 
               <Dato
@@ -1459,6 +1880,21 @@ export default function ReclamoDetallePage() {
                   reclamo.contactoCliente
                 }
               />
+
+              <Dato
+                titulo="Correo contacto"
+                valor={
+                  reclamo.correoContacto
+                }
+              />
+
+            </div>
+
+            <Subtitulo>
+              Producto afectado
+            </Subtitulo>
+
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
 
               <Dato
                 titulo="Producto"
@@ -1476,7 +1912,9 @@ export default function ReclamoDetallePage() {
 
               <Dato
                 titulo="Cantidad afectada"
-                valor={`${reclamo.cantidadAfectada} ${reclamo.unidadCantidad}`}
+                valor={
+                  `${reclamo.cantidadAfectada || ""} ${reclamo.unidadCantidad || ""}`.trim()
+                }
               />
 
               <Dato
@@ -1485,6 +1923,21 @@ export default function ReclamoDetallePage() {
                   reclamo.lote
                 }
               />
+
+              <Dato
+                titulo="Fecha elaboración"
+                valor={
+                  reclamo.fechaElaboracion
+                }
+              />
+
+            </div>
+
+            <Subtitulo>
+              Clasificación
+            </Subtitulo>
+
+            <div className="grid gap-4 md:grid-cols-2">
 
               <Dato
                 titulo="Clasificación"
@@ -1502,10 +1955,10 @@ export default function ReclamoDetallePage() {
 
             </div>
 
-            <div className="mt-5 rounded-xl border bg-zinc-50 p-4">
+            <div className="mt-4 rounded-xl border bg-zinc-50 p-4">
 
               <p className="text-xs font-medium text-zinc-500">
-                Descripción
+                Descripción del reclamo
               </p>
 
               <p className="mt-2 whitespace-pre-wrap text-sm">
@@ -1515,26 +1968,47 @@ export default function ReclamoDetallePage() {
 
             </div>
 
-            <div className="mt-5 rounded-xl border bg-zinc-50 p-4">
+            <Subtitulo>
+              Acciones inmediatas
+            </Subtitulo>
 
-              <p className="text-xs font-medium text-zinc-500">
-                Acciones inmediatas
-              </p>
+            <div className="rounded-xl border bg-zinc-50 p-4">
 
-              <p className="mt-2 text-sm">
-                {reclamo
-                  .accionesInmediatas
-                  .length
-                  ? reclamo
-                      .accionesInmediatas
-                      .join(", ")
-                  : "Sin información"}
-              </p>
+              {reclamo
+                .accionesInmediatas
+                .length ? (
+
+                <div className="flex flex-wrap gap-2">
+
+                  {reclamo
+                    .accionesInmediatas
+                    .map(
+                      (accion) => (
+
+                        <span
+                          key={accion}
+                          className="rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-700"
+                        >
+                          {accion}
+                        </span>
+
+                      )
+                    )}
+
+                </div>
+
+              ) : (
+
+                <p className="text-sm text-zinc-500">
+                  Sin acciones inmediatas registradas.
+                </p>
+
+              )}
 
               {reclamo
                 .accionInmediataDetalle && (
 
-                <p className="mt-2 text-sm text-zinc-600">
+                <p className="mt-3 whitespace-pre-wrap text-sm text-zinc-700">
                   {
                     reclamo
                       .accionInmediataDetalle
@@ -1545,12 +2019,150 @@ export default function ReclamoDetallePage() {
 
             </div>
 
+            {mostrarTecnicos && (
+              <>
+                <Subtitulo>
+                  Antecedentes técnicos
+                </Subtitulo>
+
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+
+                  <Dato
+                    titulo="Aplicación"
+                    valor={
+                      reclamo.aplicacion
+                    }
+                  />
+
+                  <Dato
+                    titulo="Proceso"
+                    valor={
+                      reclamo.proceso
+                    }
+                  />
+
+                  <Dato
+                    titulo="Dilución"
+                    valor={
+                      reclamo.dilucion
+                    }
+                  />
+
+                  <Dato
+                    titulo="Dosificación"
+                    valor={
+                      reclamo.dosis
+                    }
+                  />
+
+                  <Dato
+                    titulo="Temperatura"
+                    valor={
+                      reclamo.temperatura
+                    }
+                  />
+
+                  <Dato
+                    titulo="Tiempo de contacto"
+                    valor={
+                      reclamo.tiempoAccion
+                    }
+                  />
+
+                  <Dato
+                    titulo="Superficie"
+                    valor={
+                      reclamo.superficie
+                    }
+                  />
+
+                  <Dato
+                    titulo="Equipo dosificación"
+                    valor={
+                      reclamo.equipoDosificacion
+                    }
+                  />
+
+                  <Dato
+                    titulo="Producto anterior"
+                    valor={
+                      reclamo.productoAnterior
+                    }
+                  />
+
+                  <Dato
+                    titulo="Cambio procedimiento"
+                    valor={
+                      reclamo.cambioProcedimiento
+                    }
+                  />
+
+                </div>
+
+                {reclamo
+                  .cambioProcedimientoDetalle && (
+
+                  <div className="mt-4 rounded-xl border bg-zinc-50 p-4 text-sm">
+
+                    <strong>
+                      Detalle cambio:
+                    </strong>{" "}
+
+                    {
+                      reclamo
+                        .cambioProcedimientoDetalle
+                    }
+
+                  </div>
+
+                )}
+
+              </>
+            )}
+
+            <Subtitulo>
+              Evidencias
+            </Subtitulo>
+
+            {reclamo
+              .evidencias
+              .length ? (
+
+              <div className="rounded-xl border bg-zinc-50 p-4">
+
+                {reclamo
+                  .evidencias
+                  .map(
+                    (archivo) => (
+
+                      <p
+                        key={
+                          archivo
+                        }
+                        className="text-sm"
+                      >
+                        • {archivo}
+                      </p>
+
+                    )
+                  )}
+
+              </div>
+
+            ) : (
+
+              <p className="text-sm text-zinc-500">
+                No se registraron evidencias.
+              </p>
+
+            )}
+
           </section>
 
         )}
 
         {/* =================================================
-            INVESTIGACIÓN
+            2. INVESTIGACIÓN
         ================================================= */}
 
         {tab ===
@@ -1560,40 +2172,46 @@ export default function ReclamoDetallePage() {
 
             <TituloEtapa
               titulo="Investigación / análisis de causa"
-              descripcion="Esta sección corresponde al área responsable."
+              descripcion="Registro del análisis realizado por el área responsable."
             />
 
             <div className="grid gap-4 md:grid-cols-2">
 
               <InputGestion
-                label="Responsable de investigación"
+                label="Responsable de investigación *"
                 value={
                   investigacion.responsableInvestigacion
                 }
-                onChange={(valor) =>
+                disabled={
+                  cerrado
+                }
+                onChange={(dato) =>
                   setInvestigacion(
                     (actual) => ({
                       ...actual,
 
                       responsableInvestigacion:
-                        valor,
+                        dato,
                     })
                   )
                 }
               />
 
               <InputGestion
-                label="Área responsable"
+                label="Área responsable *"
                 value={
                   investigacion.areaResponsable
                 }
-                onChange={(valor) =>
+                disabled={
+                  cerrado
+                }
+                onChange={(dato) =>
                   setInvestigacion(
                     (actual) => ({
                       ...actual,
 
                       areaResponsable:
-                        valor,
+                        dato,
                     })
                   )
                 }
@@ -1601,18 +2219,37 @@ export default function ReclamoDetallePage() {
 
             </div>
 
+            {investigacion
+              .fechaAsignacion && (
+
+              <div className="mt-4 max-w-sm">
+
+                <Dato
+                  titulo="Fecha de asignación"
+                  valor={
+                    investigacion.fechaAsignacion
+                  }
+                />
+
+              </div>
+
+            )}
+
             <AreaGestion
               label="Investigación realizada"
               value={
                 investigacion.investigacionRealizada
               }
-              onChange={(valor) =>
+              disabled={
+                cerrado
+              }
+              onChange={(dato) =>
                 setInvestigacion(
                   (actual) => ({
                     ...actual,
 
                     investigacionRealizada:
-                      valor,
+                      dato,
                   })
                 )
               }
@@ -1623,13 +2260,16 @@ export default function ReclamoDetallePage() {
               value={
                 investigacion.revisionFabricacionLote
               }
-              onChange={(valor) =>
+              disabled={
+                cerrado
+              }
+              onChange={(dato) =>
                 setInvestigacion(
                   (actual) => ({
                     ...actual,
 
                     revisionFabricacionLote:
-                      valor,
+                      dato,
                   })
                 )
               }
@@ -1640,13 +2280,16 @@ export default function ReclamoDetallePage() {
               value={
                 investigacion.revisionMateriasPrimas
               }
-              onChange={(valor) =>
+              disabled={
+                cerrado
+              }
+              onChange={(dato) =>
                 setInvestigacion(
                   (actual) => ({
                     ...actual,
 
                     revisionMateriasPrimas:
-                      valor,
+                      dato,
                   })
                 )
               }
@@ -1657,13 +2300,16 @@ export default function ReclamoDetallePage() {
               value={
                 investigacion.analisisMuestra
               }
-              onChange={(valor) =>
+              disabled={
+                cerrado
+              }
+              onChange={(dato) =>
                 setInvestigacion(
                   (actual) => ({
                     ...actual,
 
                     analisisMuestra:
-                      valor,
+                      dato,
                   })
                 )
               }
@@ -1674,13 +2320,16 @@ export default function ReclamoDetallePage() {
               value={
                 investigacion.revisionLogistica
               }
-              onChange={(valor) =>
+              disabled={
+                cerrado
+              }
+              onChange={(dato) =>
                 setInvestigacion(
                   (actual) => ({
                     ...actual,
 
                     revisionLogistica:
-                      valor,
+                      dato,
                   })
                 )
               }
@@ -1691,13 +2340,16 @@ export default function ReclamoDetallePage() {
               value={
                 investigacion.revisionAplicacionCliente
               }
-              onChange={(valor) =>
+              disabled={
+                cerrado
+              }
+              onChange={(dato) =>
                 setInvestigacion(
                   (actual) => ({
                     ...actual,
 
                     revisionAplicacionCliente:
-                      valor,
+                      dato,
                   })
                 )
               }
@@ -1708,13 +2360,16 @@ export default function ReclamoDetallePage() {
               value={
                 investigacion.comparacionEspecificacion
               }
-              onChange={(valor) =>
+              disabled={
+                cerrado
+              }
+              onChange={(dato) =>
                 setInvestigacion(
                   (actual) => ({
                     ...actual,
 
                     comparacionEspecificacion:
-                      valor,
+                      dato,
                   })
                 )
               }
@@ -1730,6 +2385,9 @@ export default function ReclamoDetallePage() {
                 value={
                   investigacion.conclusionAtribucion
                 }
+                disabled={
+                  cerrado
+                }
                 onChange={(e) =>
                   setInvestigacion(
                     (actual) => ({
@@ -1740,7 +2398,7 @@ export default function ReclamoDetallePage() {
                     })
                   )
                 }
-                className="mt-1 w-full rounded-lg border px-3 py-2"
+                className="mt-1 w-full rounded-lg border px-3 py-2 disabled:bg-zinc-100"
               >
 
                 <option value="">
@@ -1749,12 +2407,14 @@ export default function ReclamoDetallePage() {
 
                 {CONCLUSIONES.map(
                   (item) => (
+
                     <option
                       key={item}
                       value={item}
                     >
                       {item}
                     </option>
+
                   )
                 )}
 
@@ -1767,55 +2427,68 @@ export default function ReclamoDetallePage() {
               value={
                 investigacion.causaDeterminada
               }
-              onChange={(valor) =>
+              disabled={
+                cerrado
+              }
+              onChange={(dato) =>
                 setInvestigacion(
                   (actual) => ({
                     ...actual,
 
                     causaDeterminada:
-                      valor,
+                      dato,
                   })
                 )
               }
             />
 
-            <BotonGuardar
-              guardando={
-                guardando
-              }
-              onClick={
-                guardarInvestigacion
-              }
-            >
-              Guardar investigación
-            </BotonGuardar>
+            {!cerrado && (
+
+              <BotonGuardar
+                guardando={
+                  guardando
+                }
+                onClick={
+                  guardarInvestigacion
+                }
+              >
+                Guardar investigación
+              </BotonGuardar>
+
+            )}
 
           </section>
 
         )}
 
         {/* =================================================
-            ACCIONES
+            3. ACCIONES
         ================================================= */}
 
         {tab === "acciones" && (
 
           <section className="rounded-2xl border bg-white p-6 shadow-sm">
 
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 
               <TituloEtapa
                 titulo="Acciones correctivas"
-                descripcion="Registra responsables, fechas compromiso y avance."
+                descripcion="Cada acción debe contar con responsable, fecha compromiso y estado."
               />
 
-              <button
-                type="button"
-                onClick={agregarAccion}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                + Acción
-              </button>
+              {!cerrado && (
+
+                <button
+                  type="button"
+                  onClick={
+                    agregarAccion
+                  }
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  + Nueva acción
+                </button>
+
+              )}
 
             </div>
 
@@ -1830,59 +2503,76 @@ export default function ReclamoDetallePage() {
             <div className="space-y-4">
 
               {acciones.map(
-                (accion, index) => (
+                (
+                  accion,
+                  index
+                ) => (
 
                   <div
-                    key={accion.id}
+                    key={
+                      accion.id ||
+                      index
+                    }
                     className="rounded-xl border bg-zinc-50 p-4"
                   >
 
                     <div className="mb-4 flex items-center justify-between">
 
                       <h3 className="font-semibold">
-                        Acción {index + 1}
+                        Acción{" "}
+                        {index + 1}
                       </h3>
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          eliminarAccion(
-                            index
-                          )
-                        }
-                        className="text-sm text-red-600"
-                      >
-                        Eliminar
-                      </button>
+                      {!cerrado && (
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            eliminarAccion(
+                              index
+                            )
+                          }
+                          className="text-sm font-medium text-red-600"
+                        >
+                          Eliminar
+                        </button>
+
+                      )}
 
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-2">
 
                       <InputGestion
-                        label="Acción correctiva"
+                        label="Acción correctiva *"
                         value={
                           accion.accionCorrectiva
                         }
-                        onChange={(valor) =>
+                        disabled={
+                          cerrado
+                        }
+                        onChange={(dato) =>
                           actualizarAccion(
                             index,
                             "accionCorrectiva",
-                            valor
+                            dato
                           )
                         }
                       />
 
                       <InputGestion
-                        label="Responsable"
+                        label="Responsable *"
                         value={
                           accion.responsable
                         }
-                        onChange={(valor) =>
+                        disabled={
+                          cerrado
+                        }
+                        onChange={(dato) =>
                           actualizarAccion(
                             index,
                             "responsable",
-                            valor
+                            dato
                           )
                         }
                       />
@@ -1892,41 +2582,68 @@ export default function ReclamoDetallePage() {
                         value={
                           accion.areaResponsable
                         }
-                        onChange={(valor) =>
+                        disabled={
+                          cerrado
+                        }
+                        onChange={(dato) =>
                           actualizarAccion(
                             index,
                             "areaResponsable",
-                            valor
+                            dato
                           )
                         }
                       />
 
                       <InputGestion
-                        label="Fecha compromiso"
+                        label="Fecha asignación"
+                        value={
+                          accion.fechaAsignacion
+                        }
                         type="date"
+                        disabled={
+                          cerrado
+                        }
+                        onChange={(dato) =>
+                          actualizarAccion(
+                            index,
+                            "fechaAsignacion",
+                            dato
+                          )
+                        }
+                      />
+
+                      <InputGestion
+                        label="Fecha compromiso *"
                         value={
                           accion.fechaCompromiso
                         }
-                        onChange={(valor) =>
+                        type="date"
+                        disabled={
+                          cerrado
+                        }
+                        onChange={(dato) =>
                           actualizarAccion(
                             index,
                             "fechaCompromiso",
-                            valor
+                            dato
                           )
                         }
                       />
 
                       <InputGestion
                         label="Fecha ejecución"
-                        type="date"
                         value={
                           accion.fechaEjecucion
                         }
-                        onChange={(valor) =>
+                        type="date"
+                        disabled={
+                          cerrado
+                        }
+                        onChange={(dato) =>
                           actualizarAccion(
                             index,
                             "fechaEjecucion",
-                            valor
+                            dato
                           )
                         }
                       />
@@ -1941,6 +2658,9 @@ export default function ReclamoDetallePage() {
                           value={
                             accion.estado
                           }
+                          disabled={
+                            cerrado
+                          }
                           onChange={(e) =>
                             actualizarAccion(
                               index,
@@ -1948,13 +2668,16 @@ export default function ReclamoDetallePage() {
                               e.target.value
                             )
                           }
-                          className="mt-1 w-full rounded-lg border px-3 py-2"
+                          className="mt-1 w-full rounded-lg border px-3 py-2 disabled:bg-zinc-100"
                         >
 
                           {ESTADOS_ACCION.map(
                             (estado) => (
+
                               <option
-                                key={estado}
+                                key={
+                                  estado
+                                }
                                 value={
                                   estado
                                 }
@@ -1963,6 +2686,7 @@ export default function ReclamoDetallePage() {
                                   estado
                                 }
                               </option>
+
                             )
                           )}
 
@@ -1977,11 +2701,14 @@ export default function ReclamoDetallePage() {
                       value={
                         accion.observaciones
                       }
-                      onChange={(valor) =>
+                      disabled={
+                        cerrado
+                      }
+                      onChange={(dato) =>
                         actualizarAccion(
                           index,
                           "observaciones",
-                          valor
+                          dato
                         )
                       }
                     />
@@ -1993,10 +2720,14 @@ export default function ReclamoDetallePage() {
 
             </div>
 
-            {!!acciones.length && (
+            {!cerrado &&
+              acciones.length >
+                0 && (
 
               <BotonGuardar
-                guardando={guardando}
+                guardando={
+                  guardando
+                }
                 onClick={
                   guardarAcciones
                 }
@@ -2011,7 +2742,7 @@ export default function ReclamoDetallePage() {
         )}
 
         {/* =================================================
-            SEGUIMIENTO
+            4. SEGUIMIENTO
         ================================================= */}
 
         {tab ===
@@ -2019,24 +2750,36 @@ export default function ReclamoDetallePage() {
 
           <section className="rounded-2xl border bg-white p-6 shadow-sm">
 
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 
               <TituloEtapa
                 titulo="Seguimiento"
-                descripcion="Puedes registrar múltiples seguimientos."
+                descripcion="El reclamo puede contener múltiples seguimientos."
               />
 
-              <button
-                type="button"
-                onClick={
-                  agregarSeguimiento
-                }
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                + Seguimiento
-              </button>
+              {!cerrado && (
+
+                <button
+                  type="button"
+                  onClick={
+                    agregarSeguimiento
+                  }
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  + Nuevo seguimiento
+                </button>
+
+              )}
 
             </div>
+
+            {!seguimientos.length && (
+
+              <div className="rounded-xl border border-dashed p-8 text-center text-sm text-zinc-500">
+                No hay seguimientos registrados.
+              </div>
+
+            )}
 
             <div className="space-y-4">
 
@@ -2048,7 +2791,8 @@ export default function ReclamoDetallePage() {
 
                   <div
                     key={
-                      seguimiento.id
+                      seguimiento.id ||
+                      index
                     }
                     className="rounded-xl border bg-zinc-50 p-4"
                   >
@@ -2060,47 +2804,57 @@ export default function ReclamoDetallePage() {
                         {index + 1}
                       </h3>
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          eliminarSeguimiento(
-                            index
-                          )
-                        }
-                        className="text-sm text-red-600"
-                      >
-                        Eliminar
-                      </button>
+                      {!cerrado && (
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            eliminarSeguimiento(
+                              index
+                            )
+                          }
+                          className="text-sm font-medium text-red-600"
+                        >
+                          Eliminar
+                        </button>
+
+                      )}
 
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-2">
 
                       <InputGestion
-                        label="Fecha"
+                        label="Fecha de seguimiento *"
                         type="date"
                         value={
                           seguimiento.fechaSeguimiento
                         }
-                        onChange={(valor) =>
+                        disabled={
+                          cerrado
+                        }
+                        onChange={(dato) =>
                           actualizarSeguimiento(
                             index,
                             "fechaSeguimiento",
-                            valor
+                            dato
                           )
                         }
                       />
 
                       <InputGestion
-                        label="Responsable"
+                        label="Responsable *"
                         value={
                           seguimiento.responsable
                         }
-                        onChange={(valor) =>
+                        disabled={
+                          cerrado
+                        }
+                        onChange={(dato) =>
                           actualizarSeguimiento(
                             index,
                             "responsable",
-                            valor
+                            dato
                           )
                         }
                       />
@@ -2108,15 +2862,18 @@ export default function ReclamoDetallePage() {
                     </div>
 
                     <AreaGestion
-                      label="Resultado del seguimiento"
+                      label="Resultado del seguimiento *"
                       value={
                         seguimiento.resultado
                       }
-                      onChange={(valor) =>
+                      disabled={
+                        cerrado
+                      }
+                      onChange={(dato) =>
                         actualizarSeguimiento(
                           index,
                           "resultado",
-                          valor
+                          dato
                         )
                       }
                     />
@@ -2126,11 +2883,14 @@ export default function ReclamoDetallePage() {
                       value={
                         seguimiento.comentarios
                       }
-                      onChange={(valor) =>
+                      disabled={
+                        cerrado
+                      }
+                      onChange={(dato) =>
                         actualizarSeguimiento(
                           index,
                           "comentarios",
-                          valor
+                          dato
                         )
                       }
                     />
@@ -2142,7 +2902,9 @@ export default function ReclamoDetallePage() {
 
             </div>
 
-            {!!seguimientos.length && (
+            {!cerrado &&
+              seguimientos.length >
+                0 && (
 
               <BotonGuardar
                 guardando={
@@ -2162,7 +2924,7 @@ export default function ReclamoDetallePage() {
         )}
 
         {/* =================================================
-            CIERRE
+            5. CIERRE
         ================================================= */}
 
         {tab === "cierre" && (
@@ -2171,7 +2933,7 @@ export default function ReclamoDetallePage() {
 
             <TituloEtapa
               titulo="Verificación de eficacia y cierre"
-              descripcion="El reclamo solo puede cerrarse cuando la eficacia haya sido verificada."
+              descripcion="Si la acción no es eficaz, el reclamo permanece abierto y debe permitir nuevas acciones."
             />
 
             <div className="grid gap-4 md:grid-cols-2">
@@ -2186,6 +2948,9 @@ export default function ReclamoDetallePage() {
                   value={
                     cierre.resultadoEficacia
                   }
+                  disabled={
+                    cerrado
+                  }
                   onChange={(e) =>
                     setCierre(
                       (actual) => ({
@@ -2196,11 +2961,15 @@ export default function ReclamoDetallePage() {
                       })
                     )
                   }
-                  className="mt-1 w-full rounded-lg border px-3 py-2"
+                  className="mt-1 w-full rounded-lg border px-3 py-2 disabled:bg-zinc-100"
                 >
 
                   <option value="">
                     Seleccione...
+                  </option>
+
+                  <option value="Pendiente">
+                    Pendiente
                   </option>
 
                   <option value="Eficaz">
@@ -2211,61 +2980,66 @@ export default function ReclamoDetallePage() {
                     No eficaz
                   </option>
 
-                  <option value="Pendiente">
-                    Pendiente
-                  </option>
-
                 </select>
 
               </label>
 
               <InputGestion
-                label="Fecha de verificación"
+                label="Fecha de verificación *"
                 type="date"
                 value={
                   cierre.fechaVerificacion
                 }
-                onChange={(valor) =>
+                disabled={
+                  cerrado
+                }
+                onChange={(dato) =>
                   setCierre(
                     (actual) => ({
                       ...actual,
 
                       fechaVerificacion:
-                        valor,
+                        dato,
                     })
                   )
                 }
               />
 
               <InputGestion
-                label="Responsable"
+                label="Responsable *"
                 value={
                   cierre.responsableVerificacion
                 }
-                onChange={(valor) =>
+                disabled={
+                  cerrado
+                }
+                onChange={(dato) =>
                   setCierre(
                     (actual) => ({
                       ...actual,
 
                       responsableVerificacion:
-                        valor,
+                        dato,
                     })
                   )
                 }
               />
 
               <InputGestion
-                label="Método utilizado"
+                label="Método utilizado para verificar *"
                 value={
                   cierre.metodoVerificacion
                 }
-                onChange={(valor) =>
+                disabled={
+                  cerrado
+                }
+                onChange={(dato) =>
                   setCierre(
                     (actual) => ({
                       ...actual,
 
                       metodoVerificacion:
-                        valor,
+                        dato,
                     })
                   )
                 }
@@ -2274,17 +3048,20 @@ export default function ReclamoDetallePage() {
             </div>
 
             <AreaGestion
-              label="Resultado obtenido"
+              label="Resultado obtenido *"
               value={
                 cierre.resultadoObtenido
               }
-              onChange={(valor) =>
+              disabled={
+                cerrado
+              }
+              onChange={(dato) =>
                 setCierre(
                   (actual) => ({
                     ...actual,
 
                     resultadoObtenido:
-                      valor,
+                      dato,
                   })
                 )
               }
@@ -2295,13 +3072,16 @@ export default function ReclamoDetallePage() {
               value={
                 cierre.comentarioVerificacion
               }
-              onChange={(valor) =>
+              disabled={
+                cerrado
+              }
+              onChange={(dato) =>
                 setCierre(
                   (actual) => ({
                     ...actual,
 
                     comentarioVerificacion:
-                      valor,
+                      dato,
                   })
                 )
               }
@@ -2309,61 +3089,217 @@ export default function ReclamoDetallePage() {
 
             <div className="my-6 border-t" />
 
-            <InputGestion
-              label="Resultado final"
-              value={
-                cierre.resultadoFinal
-              }
-              onChange={(valor) =>
-                setCierre(
-                  (actual) => ({
-                    ...actual,
+            <h3 className="font-semibold">
+              Cierre del reclamo
+            </h3>
 
-                    resultadoFinal:
-                      valor,
-                  })
-                )
-              }
-            />
+            <p className="mt-1 text-sm text-zinc-500">
+              Estos campos son obligatorios cuando la verificación sea Eficaz.
+            </p>
+
+            <div className="mt-4">
+
+              <InputGestion
+                label="Resultado final"
+                value={
+                  cierre.resultadoFinal
+                }
+                disabled={
+                  cerrado
+                }
+                onChange={(dato) =>
+                  setCierre(
+                    (actual) => ({
+                      ...actual,
+
+                      resultadoFinal:
+                        dato,
+                    })
+                  )
+                }
+              />
+
+            </div>
 
             <AreaGestion
               label="Comentarios de cierre"
               value={
                 cierre.comentariosCierre
               }
-              onChange={(valor) =>
+              disabled={
+                cerrado
+              }
+              onChange={(dato) =>
                 setCierre(
                   (actual) => ({
                     ...actual,
 
                     comentariosCierre:
-                      valor,
+                      dato,
                   })
                 )
               }
             />
 
-            <BotonGuardar
-              guardando={
-                guardando
-              }
-              onClick={
-                guardarCierre
-              }
-              rojo={
-                cierre.resultadoEficacia ===
+            {cerrado && (
+
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
+
+                <Dato
+                  titulo="Cerrado por"
+                  valor={
+                    cierre.cerradoPor
+                  }
+                />
+
+                <Dato
+                  titulo="Fecha cierre"
+                  valor={
+                    cierre.fechaCierre
+                  }
+                />
+
+              </div>
+
+            )}
+
+            {!cerrado && (
+
+              <BotonGuardar
+                guardando={
+                  guardando
+                }
+                onClick={
+                  guardarCierre
+                }
+                rojo={
+                  cierre.resultadoEficacia ===
+                  "Eficaz"
+                }
+              >
+
+                {cierre.resultadoEficacia ===
                 "Eficaz"
-              }
-            >
-              {cierre.resultadoEficacia ===
-              "Eficaz"
-                ? "Cerrar reclamo"
-                : "Guardar verificación"}
-            </BotonGuardar>
+                  ? "Cerrar reclamo"
+                  : "Guardar verificación"}
+
+              </BotonGuardar>
+
+            )}
 
           </section>
 
         )}
+
+        {/* =================================================
+            HISTORIAL
+        ================================================= */}
+
+        <section className="rounded-2xl border bg-white p-6 shadow-sm">
+
+          <div className="mb-4">
+
+            <h2 className="text-lg font-semibold">
+              Historial de trazabilidad
+            </h2>
+
+            <p className="mt-1 text-sm text-zinc-500">
+              Registro de los principales movimientos realizados sobre el reclamo.
+            </p>
+
+          </div>
+
+          {!historial.length ? (
+
+            <p className="text-sm text-zinc-500">
+              Aún no existen movimientos registrados.
+            </p>
+
+          ) : (
+
+            <div className="space-y-3">
+
+              {historial
+                .slice()
+                .reverse()
+                .map(
+                  (
+                    item,
+                    index
+                  ) => (
+
+                    <div
+                      key={`${item.fecha}-${index}`}
+                      className="rounded-xl border bg-zinc-50 p-4"
+                    >
+
+                      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+
+                        <div>
+
+                          <p className="text-sm font-semibold">
+                            {item.accion ||
+                              item.etapa}
+                          </p>
+
+                          <p className="mt-1 text-xs text-zinc-500">
+                            {item.usuario ||
+                              "Usuario no informado"}
+                          </p>
+
+                        </div>
+
+                        <span className="text-xs text-zinc-500">
+                          {item.fecha}
+                        </span>
+
+                      </div>
+
+                      {item.estadoNuevo && (
+
+                        <div className="mt-3 text-sm">
+
+                          <span className="text-zinc-500">
+                            Estado:
+                          </span>{" "}
+
+                          {item.estadoAnterior &&
+                          item.estadoAnterior !==
+                            item.estadoNuevo ? (
+                            <>
+                              {
+                                item.estadoAnterior
+                              }
+                              {" → "}
+
+                              <strong>
+                                {
+                                  item.estadoNuevo
+                                }
+                              </strong>
+                            </>
+                          ) : (
+                            <strong>
+                              {
+                                item.estadoNuevo
+                              }
+                            </strong>
+                          )}
+
+                        </div>
+
+                      )}
+
+                    </div>
+
+                  )
+                )}
+
+            </div>
+
+          )}
+
+        </section>
 
       </div>
 
@@ -2381,11 +3317,8 @@ function TabButton({
   children,
 }: {
   activo: boolean;
-
   onClick: () => void;
-
-  children:
-    React.ReactNode;
+  children: React.ReactNode;
 }) {
   return (
     <button
@@ -2407,7 +3340,6 @@ function TituloEtapa({
   descripcion,
 }: {
   titulo: string;
-
   descripcion: string;
 }) {
   return (
@@ -2425,13 +3357,24 @@ function TituloEtapa({
   );
 }
 
+function Subtitulo({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <h3 className="mb-3 mt-6 border-b pb-2 text-sm font-semibold text-zinc-700">
+      {children}
+    </h3>
+  );
+}
+
 function Dato({
   titulo,
   valor,
 }: {
   titulo: string;
-
-  valor: string;
+  valor?: string;
 }) {
   return (
     <div className="rounded-xl border bg-zinc-50 p-4">
@@ -2440,7 +3383,7 @@ function Dato({
         {titulo}
       </p>
 
-      <p className="mt-1 font-medium">
+      <p className="mt-1 break-words text-sm font-medium">
         {valor ||
           "Sin información"}
       </p>
@@ -2454,15 +3397,13 @@ function InputGestion({
   value,
   onChange,
   type = "text",
+  disabled = false,
 }: {
   label: string;
-
   value: string;
-
-  onChange:
-    (value: string) => void;
-
+  onChange: (value: string) => void;
   type?: string;
+  disabled?: boolean;
 }) {
   return (
     <label>
@@ -2473,13 +3414,14 @@ function InputGestion({
 
       <input
         type={type}
-        value={value}
+        value={value || ""}
+        disabled={disabled}
         onChange={(e) =>
           onChange(
             e.target.value
           )
         }
-        className="mt-1 w-full rounded-lg border px-3 py-2"
+        className="mt-1 w-full rounded-lg border px-3 py-2 disabled:bg-zinc-100"
       />
 
     </label>
@@ -2490,13 +3432,12 @@ function AreaGestion({
   label,
   value,
   onChange,
+  disabled = false,
 }: {
   label: string;
-
   value: string;
-
-  onChange:
-    (value: string) => void;
+  onChange: (value: string) => void;
+  disabled?: boolean;
 }) {
   return (
     <label className="mt-4 block">
@@ -2506,14 +3447,15 @@ function AreaGestion({
       </span>
 
       <textarea
-        value={value}
+        value={value || ""}
+        disabled={disabled}
         onChange={(e) =>
           onChange(
             e.target.value
           )
         }
         rows={3}
-        className="mt-1 w-full rounded-lg border px-3 py-2"
+        className="mt-1 w-full rounded-lg border px-3 py-2 disabled:bg-zinc-100"
       />
 
     </label>
@@ -2527,12 +3469,8 @@ function BotonGuardar({
   rojo = false,
 }: {
   guardando: boolean;
-
   onClick: () => void;
-
-  children:
-    React.ReactNode;
-
+  children: React.ReactNode;
   rojo?: boolean;
 }) {
   return (
@@ -2548,13 +3486,84 @@ function BotonGuardar({
             : "bg-blue-600 hover:bg-blue-700"
         }`}
       >
-
         {guardando
           ? "Guardando..."
           : children}
-
       </button>
 
     </div>
+  );
+}
+
+function EstadoBadge({
+  estado,
+}: {
+  estado: string;
+}) {
+  let clases =
+    "bg-zinc-100 text-zinc-700";
+
+  if (
+    estado === "Ingresado"
+  ) {
+    clases =
+      "bg-blue-100 text-blue-700";
+  }
+
+  if (
+    estado ===
+    "En investigación"
+  ) {
+    clases =
+      "bg-amber-100 text-amber-700";
+  }
+
+  if (
+    estado ===
+    "Pendiente de antecedentes"
+  ) {
+    clases =
+      "bg-yellow-100 text-yellow-700";
+  }
+
+  if (
+    estado ===
+    "Acciones en ejecución"
+  ) {
+    clases =
+      "bg-orange-100 text-orange-700";
+  }
+
+  if (
+    estado ===
+    "En seguimiento"
+  ) {
+    clases =
+      "bg-purple-100 text-purple-700";
+  }
+
+  if (
+    estado ===
+    "Pendiente de verificación de eficacia"
+  ) {
+    clases =
+      "bg-yellow-100 text-yellow-800";
+  }
+
+  if (
+    estado ===
+    "Cerrado"
+  ) {
+    clases =
+      "bg-green-100 text-green-700";
+  }
+
+  return (
+    <span
+      className={`inline-flex whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold ${clases}`}
+    >
+      {estado ||
+        "Sin estado"}
+    </span>
   );
 }
