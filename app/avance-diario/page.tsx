@@ -1020,18 +1020,23 @@ export default function AvanceDiarioPage() {
       };
 
       return [
-
         ...mapa.entries(),
-
-      ].sort(
-
-        ([a], [b]) =>
-
-          (orden[a] || 99) -
-
-          (orden[b] || 99)
-
-      );
+      ]
+        .map(
+          ([zona, lista]) =>
+            [
+              zona,
+              ordenarJerarquiaZona(
+                zona,
+                lista
+              ),
+            ] as [string, ReporteRow[]]
+        )
+        .sort(
+          ([a], [b]) =>
+            (orden[a] || 99) -
+            (orden[b] || 99)
+        );
 
     }, [filtrados]);
 
@@ -1459,6 +1464,11 @@ export default function AvanceDiarioPage() {
                         key={`${r.fecha_corte}-${r.slpcode}`}
                         row={r}
                         index={index}
+                        zona={zona}
+                        responsable={esResponsableZona(
+                          zona,
+                          r.vendedor
+                        )}
                       />
                     ))}
                   </React.Fragment>
@@ -1844,9 +1854,13 @@ function FilaTotalZona({
 function FilaVendedor({
   row,
   index,
+  zona,
+  responsable,
 }: {
   row: ReporteRow;
   index: number;
+  zona: string;
+  responsable: boolean;
 }) {
   const meta = num(row.meta_mes);
   const ventaQ = num(row.facturado_quimicos);
@@ -1854,19 +1868,48 @@ function FilaVendedor({
 
   const avance = meta > 0 ? (ventaQ / meta) * 100 : 0;
   const cierrePct = meta > 0 ? (cierreQ / meta) * 100 : 0;
+  const tema = zonaTema(zona);
 
   return (
     <tr
-      className={`transition hover:bg-blue-50/50 ${
-        index % 2 === 0 ? "bg-white" : "bg-slate-50/60"
+      className={`transition ${
+        responsable
+          ? `${tema.suave} border-t-2 ${tema.borde}`
+          : index % 2 === 0
+          ? "bg-white hover:bg-blue-50/50"
+          : "bg-slate-50/60 hover:bg-blue-50/50"
       }`}
     >
-      <Td izquierda clase="text-slate-400">
-        ·
+      <Td izquierda clase={responsable ? `${tema.texto} font-bold` : "text-slate-300"}>
+        {responsable ? zona : ""}
       </Td>
-      <Td izquierda fuerte clase="text-slate-900">
-        {row.vendedor}
+
+      <Td
+        izquierda
+        fuerte={responsable}
+        clase={
+          responsable
+            ? `${tema.texto} font-bold`
+            : "text-slate-800"
+        }
+      >
+        {responsable ? (
+          <div className="flex items-center gap-2">
+            <span
+              className={`rounded-md border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${tema.borde} ${tema.suave} ${tema.texto}`}
+            >
+              Responsable
+            </span>
+            <span>{row.vendedor}</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 pl-5">
+            <span className="text-base leading-none text-slate-300">└</span>
+            <span className="font-medium">{row.vendedor}</span>
+          </div>
+        )}
       </Td>
+
       <Td izquierda>{row.division || "—"}</Td>
       <Td izquierda>{row.equipo || "—"}</Td>
       <Td>{money(meta)}</Td>
