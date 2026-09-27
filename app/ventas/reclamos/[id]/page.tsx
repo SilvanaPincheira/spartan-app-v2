@@ -354,6 +354,11 @@ export default function ReclamoDetallePage() {
     setUserEmail,
   ] = useState("");
 
+  const [
+    puedeGestionar,
+    setPuedeGestionar,
+  ] = useState(false);
+
   /* =======================================================
      DATOS
   ======================================================= */
@@ -413,6 +418,15 @@ export default function ReclamoDetallePage() {
   const cerrado =
     reclamo?.estado ===
     "Cerrado";
+
+  /*
+   * Control de Calidad puede gestionar.
+   * Los ejecutivos pueden visualizar, pero no editar.
+   * Un reclamo cerrado siempre queda en solo lectura.
+   */
+  const soloLectura =
+    cerrado ||
+    !puedeGestionar;
 
   const mostrarTecnicos =
     useMemo(
@@ -501,6 +515,14 @@ export default function ReclamoDetallePage() {
           "No se pudo cargar el reclamo."
         );
       }
+
+      /*
+       * La autorización real la define la API.
+       * No se calcula en el navegador.
+       */
+      setPuedeGestionar(
+        data.puedeGestionar === true
+      );
 
       const raw =
         data.reclamo || {};
@@ -1029,6 +1051,7 @@ export default function ReclamoDetallePage() {
       );
 
       setReclamo(null);
+      setPuedeGestionar(false);
 
     } finally {
       if (mostrarLoading) {
@@ -1051,6 +1074,14 @@ export default function ReclamoDetallePage() {
     estado?: string
   ) {
     if (!reclamo) {
+      return false;
+    }
+
+    if (!puedeGestionar) {
+      alert(
+        "Este reclamo está disponible solo para consulta. La gestión corresponde a Control de Calidad."
+      );
+
       return false;
     }
 
@@ -1671,6 +1702,20 @@ export default function ReclamoDetallePage() {
 
             <div className="flex flex-wrap items-center gap-3">
 
+              {puedeGestionar ? (
+
+                <span className="inline-flex rounded-full bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-700">
+                  Control de Calidad · Gestión
+                </span>
+
+              ) : (
+
+                <span className="inline-flex rounded-full bg-zinc-100 px-3 py-2 text-xs font-semibold text-zinc-700">
+                  Ejecutivo · Solo lectura
+                </span>
+
+              )}
+
               <EstadoBadge
                 estado={
                   reclamo.estado
@@ -1692,6 +1737,18 @@ export default function ReclamoDetallePage() {
           </div>
 
         </section>
+
+        {/* =================================================
+            PERMISOS
+        ================================================= */}
+
+        {!puedeGestionar && !cerrado && (
+
+          <div className="rounded-xl border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
+            Este reclamo está en modo <strong>solo lectura</strong>. Puedes revisar el ingreso, la investigación, las acciones, el seguimiento y el cierre, pero la gestión corresponde a Control de Calidad.
+          </div>
+
+        )}
 
         {/* =================================================
             CERRADO
@@ -2183,7 +2240,7 @@ export default function ReclamoDetallePage() {
                   investigacion.responsableInvestigacion
                 }
                 disabled={
-                  cerrado
+                  soloLectura
                 }
                 onChange={(dato) =>
                   setInvestigacion(
@@ -2203,7 +2260,7 @@ export default function ReclamoDetallePage() {
                   investigacion.areaResponsable
                 }
                 disabled={
-                  cerrado
+                  soloLectura
                 }
                 onChange={(dato) =>
                   setInvestigacion(
@@ -2241,7 +2298,7 @@ export default function ReclamoDetallePage() {
                 investigacion.investigacionRealizada
               }
               disabled={
-                cerrado
+                soloLectura
               }
               onChange={(dato) =>
                 setInvestigacion(
@@ -2261,7 +2318,7 @@ export default function ReclamoDetallePage() {
                 investigacion.revisionFabricacionLote
               }
               disabled={
-                cerrado
+                soloLectura
               }
               onChange={(dato) =>
                 setInvestigacion(
@@ -2281,7 +2338,7 @@ export default function ReclamoDetallePage() {
                 investigacion.revisionMateriasPrimas
               }
               disabled={
-                cerrado
+                soloLectura
               }
               onChange={(dato) =>
                 setInvestigacion(
@@ -2301,7 +2358,7 @@ export default function ReclamoDetallePage() {
                 investigacion.analisisMuestra
               }
               disabled={
-                cerrado
+                soloLectura
               }
               onChange={(dato) =>
                 setInvestigacion(
@@ -2321,7 +2378,7 @@ export default function ReclamoDetallePage() {
                 investigacion.revisionLogistica
               }
               disabled={
-                cerrado
+                soloLectura
               }
               onChange={(dato) =>
                 setInvestigacion(
@@ -2341,7 +2398,7 @@ export default function ReclamoDetallePage() {
                 investigacion.revisionAplicacionCliente
               }
               disabled={
-                cerrado
+                soloLectura
               }
               onChange={(dato) =>
                 setInvestigacion(
@@ -2361,7 +2418,7 @@ export default function ReclamoDetallePage() {
                 investigacion.comparacionEspecificacion
               }
               disabled={
-                cerrado
+                soloLectura
               }
               onChange={(dato) =>
                 setInvestigacion(
@@ -2386,7 +2443,7 @@ export default function ReclamoDetallePage() {
                   investigacion.conclusionAtribucion
                 }
                 disabled={
-                  cerrado
+                  soloLectura
                 }
                 onChange={(e) =>
                   setInvestigacion(
@@ -2428,7 +2485,7 @@ export default function ReclamoDetallePage() {
                 investigacion.causaDeterminada
               }
               disabled={
-                cerrado
+                soloLectura
               }
               onChange={(dato) =>
                 setInvestigacion(
@@ -2442,7 +2499,7 @@ export default function ReclamoDetallePage() {
               }
             />
 
-            {!cerrado && (
+            {!soloLectura && (
 
               <BotonGuardar
                 guardando={
@@ -2476,7 +2533,7 @@ export default function ReclamoDetallePage() {
                 descripcion="Cada acción debe contar con responsable, fecha compromiso y estado."
               />
 
-              {!cerrado && (
+              {!soloLectura && (
 
                 <button
                   type="button"
@@ -2523,7 +2580,7 @@ export default function ReclamoDetallePage() {
                         {index + 1}
                       </h3>
 
-                      {!cerrado && (
+                      {!soloLectura && (
 
                         <button
                           type="button"
@@ -2549,7 +2606,7 @@ export default function ReclamoDetallePage() {
                           accion.accionCorrectiva
                         }
                         disabled={
-                          cerrado
+                          soloLectura
                         }
                         onChange={(dato) =>
                           actualizarAccion(
@@ -2566,7 +2623,7 @@ export default function ReclamoDetallePage() {
                           accion.responsable
                         }
                         disabled={
-                          cerrado
+                          soloLectura
                         }
                         onChange={(dato) =>
                           actualizarAccion(
@@ -2583,7 +2640,7 @@ export default function ReclamoDetallePage() {
                           accion.areaResponsable
                         }
                         disabled={
-                          cerrado
+                          soloLectura
                         }
                         onChange={(dato) =>
                           actualizarAccion(
@@ -2601,7 +2658,7 @@ export default function ReclamoDetallePage() {
                         }
                         type="date"
                         disabled={
-                          cerrado
+                          soloLectura
                         }
                         onChange={(dato) =>
                           actualizarAccion(
@@ -2619,7 +2676,7 @@ export default function ReclamoDetallePage() {
                         }
                         type="date"
                         disabled={
-                          cerrado
+                          soloLectura
                         }
                         onChange={(dato) =>
                           actualizarAccion(
@@ -2637,7 +2694,7 @@ export default function ReclamoDetallePage() {
                         }
                         type="date"
                         disabled={
-                          cerrado
+                          soloLectura
                         }
                         onChange={(dato) =>
                           actualizarAccion(
@@ -2659,7 +2716,7 @@ export default function ReclamoDetallePage() {
                             accion.estado
                           }
                           disabled={
-                            cerrado
+                            soloLectura
                           }
                           onChange={(e) =>
                             actualizarAccion(
@@ -2702,7 +2759,7 @@ export default function ReclamoDetallePage() {
                         accion.observaciones
                       }
                       disabled={
-                        cerrado
+                        soloLectura
                       }
                       onChange={(dato) =>
                         actualizarAccion(
@@ -2720,7 +2777,7 @@ export default function ReclamoDetallePage() {
 
             </div>
 
-            {!cerrado &&
+            {!soloLectura &&
               acciones.length >
                 0 && (
 
@@ -2757,7 +2814,7 @@ export default function ReclamoDetallePage() {
                 descripcion="El reclamo puede contener múltiples seguimientos."
               />
 
-              {!cerrado && (
+              {!soloLectura && (
 
                 <button
                   type="button"
@@ -2804,7 +2861,7 @@ export default function ReclamoDetallePage() {
                         {index + 1}
                       </h3>
 
-                      {!cerrado && (
+                      {!soloLectura && (
 
                         <button
                           type="button"
@@ -2831,7 +2888,7 @@ export default function ReclamoDetallePage() {
                           seguimiento.fechaSeguimiento
                         }
                         disabled={
-                          cerrado
+                          soloLectura
                         }
                         onChange={(dato) =>
                           actualizarSeguimiento(
@@ -2848,7 +2905,7 @@ export default function ReclamoDetallePage() {
                           seguimiento.responsable
                         }
                         disabled={
-                          cerrado
+                          soloLectura
                         }
                         onChange={(dato) =>
                           actualizarSeguimiento(
@@ -2867,7 +2924,7 @@ export default function ReclamoDetallePage() {
                         seguimiento.resultado
                       }
                       disabled={
-                        cerrado
+                        soloLectura
                       }
                       onChange={(dato) =>
                         actualizarSeguimiento(
@@ -2884,7 +2941,7 @@ export default function ReclamoDetallePage() {
                         seguimiento.comentarios
                       }
                       disabled={
-                        cerrado
+                        soloLectura
                       }
                       onChange={(dato) =>
                         actualizarSeguimiento(
@@ -2902,7 +2959,7 @@ export default function ReclamoDetallePage() {
 
             </div>
 
-            {!cerrado &&
+            {!soloLectura &&
               seguimientos.length >
                 0 && (
 
@@ -2949,7 +3006,7 @@ export default function ReclamoDetallePage() {
                     cierre.resultadoEficacia
                   }
                   disabled={
-                    cerrado
+                    soloLectura
                   }
                   onChange={(e) =>
                     setCierre(
@@ -2991,7 +3048,7 @@ export default function ReclamoDetallePage() {
                   cierre.fechaVerificacion
                 }
                 disabled={
-                  cerrado
+                  soloLectura
                 }
                 onChange={(dato) =>
                   setCierre(
@@ -3011,7 +3068,7 @@ export default function ReclamoDetallePage() {
                   cierre.responsableVerificacion
                 }
                 disabled={
-                  cerrado
+                  soloLectura
                 }
                 onChange={(dato) =>
                   setCierre(
@@ -3031,7 +3088,7 @@ export default function ReclamoDetallePage() {
                   cierre.metodoVerificacion
                 }
                 disabled={
-                  cerrado
+                  soloLectura
                 }
                 onChange={(dato) =>
                   setCierre(
@@ -3053,7 +3110,7 @@ export default function ReclamoDetallePage() {
                 cierre.resultadoObtenido
               }
               disabled={
-                cerrado
+                soloLectura
               }
               onChange={(dato) =>
                 setCierre(
@@ -3073,7 +3130,7 @@ export default function ReclamoDetallePage() {
                 cierre.comentarioVerificacion
               }
               disabled={
-                cerrado
+                soloLectura
               }
               onChange={(dato) =>
                 setCierre(
@@ -3105,7 +3162,7 @@ export default function ReclamoDetallePage() {
                   cierre.resultadoFinal
                 }
                 disabled={
-                  cerrado
+                  soloLectura
                 }
                 onChange={(dato) =>
                   setCierre(
@@ -3127,7 +3184,7 @@ export default function ReclamoDetallePage() {
                 cierre.comentariosCierre
               }
               disabled={
-                cerrado
+                soloLectura
               }
               onChange={(dato) =>
                 setCierre(
@@ -3163,7 +3220,7 @@ export default function ReclamoDetallePage() {
 
             )}
 
-            {!cerrado && (
+            {!soloLectura && (
 
               <BotonGuardar
                 guardando={

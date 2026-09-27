@@ -33,6 +33,11 @@ interface Reclamo {
   fechaActualizacion: string;
 }
 
+type RolReclamos =
+  | "calidad"
+  | "ejecutivo"
+  | "";
+
 /* =========================================================
    HELPERS
 ========================================================= */
@@ -57,7 +62,6 @@ function valor(
   return "";
 }
 
-
 function normalizar(
   texto: string
 ) {
@@ -72,6 +76,59 @@ function normalizar(
     );
 }
 
+/*
+ * Convierte la fecha recibida desde
+ * Sheets / Apps Script a un formato
+ * más amigable para la bandeja.
+ */
+function formatearFecha(
+  fecha: string
+) {
+  if (!fecha) {
+    return "-";
+  }
+
+  /*
+   * Si viene como:
+   * 26-09-2026 20:44:23
+   *
+   * la dejamos igual.
+   */
+  if (
+    /^\d{2}-\d{2}-\d{4}/.test(
+      fecha
+    )
+  ) {
+    return fecha;
+  }
+
+  /*
+   * Si viene como:
+   * 2026-09-26T23:44:23.000Z
+   */
+  const date =
+    new Date(fecha);
+
+  if (
+    !Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    return new Intl.DateTimeFormat(
+      "es-CL",
+      {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }
+    ).format(date);
+  }
+
+  return fecha;
+}
 
 /* =========================================================
    PAGE
@@ -108,6 +165,29 @@ export default function ReclamosPage() {
   ] =
     useState("Todos");
 
+  /*
+   * La API nos indicará si el usuario
+   * pertenece a Control de Calidad.
+   */
+  const [
+    puedeGestionar,
+    setPuedeGestionar,
+  ] =
+    useState(false);
+
+  const [
+    rol,
+    setRol,
+  ] =
+    useState<RolReclamos>(
+      ""
+    );
+
+  const [
+    usuarioActual,
+    setUsuarioActual,
+  ] =
+    useState("");
 
   /* =======================================================
      CARGAR RECLAMOS
@@ -122,6 +202,7 @@ export default function ReclamosPage() {
         await fetch(
           "/api/reclamos",
           {
+            method: "GET",
             cache:
               "no-store",
           }
@@ -140,6 +221,45 @@ export default function ReclamosPage() {
         );
       }
 
+      /*
+       * ============================================
+       * PERMISOS DEL USUARIO
+       * ============================================
+       */
+
+      setPuedeGestionar(
+        data.puedeGestionar ===
+          true
+      );
+
+      setRol(
+        data.rol ===
+          "calidad"
+          ? "calidad"
+          : "ejecutivo"
+      );
+
+      setUsuarioActual(
+        String(
+          data.usuarioActual ||
+          ""
+        )
+      );
+
+      /*
+       * IMPORTANTE:
+       *
+       * /api/reclamos ya devuelve:
+       *
+       * CALIDAD:
+       * todos los reclamos.
+       *
+       * EJECUTIVO:
+       * solamente los propios.
+       *
+       * Aquí no hacemos otro filtro
+       * de seguridad.
+       */
 
       const lista =
         Array.isArray(
@@ -147,7 +267,6 @@ export default function ReclamosPage() {
         )
           ? data.reclamos
           : [];
-
 
       const normalizados:
         Reclamo[] =
@@ -159,20 +278,17 @@ export default function ReclamosPage() {
                 any
               >
           ) => {
-
             const id =
               valor(
                 raw,
                 "ID"
               );
 
-
             const numero =
               valor(
                 raw,
                 "N° Reclamo"
               );
-
 
             return {
               id,
@@ -247,7 +363,6 @@ export default function ReclamosPage() {
           }
         );
 
-
       /*
        * Mostramos primero
        * los más nuevos.
@@ -268,16 +383,24 @@ export default function ReclamosPage() {
           : "No fue posible cargar los reclamos."
       );
 
+      setReclamos([]);
+
+      setPuedeGestionar(
+        false
+      );
+
+      setRol("");
+
+      setUsuarioActual("");
+
     } finally {
       setLoading(false);
     }
   }
 
-
   useEffect(() => {
     cargarReclamos();
   }, []);
-
 
   /* =======================================================
      ESTADOS DISPONIBLES
@@ -285,7 +408,6 @@ export default function ReclamosPage() {
 
   const estados =
     useMemo(() => {
-
       const encontrados =
         Array.from(
           new Set(
@@ -298,7 +420,6 @@ export default function ReclamosPage() {
           )
         );
 
-
       return [
         "Todos",
         ...encontrados,
@@ -306,39 +427,32 @@ export default function ReclamosPage() {
 
     }, [reclamos]);
 
-
   /* =======================================================
      FILTROS
   ======================================================= */
 
   const reclamosFiltrados =
     useMemo(() => {
-
       const texto =
         normalizar(
           busqueda
         );
 
-
       return reclamos.filter(
         (reclamo) => {
-
           const coincideEstado =
             filtroEstado ===
               "Todos" ||
             reclamo.estado ===
               filtroEstado;
 
-
           if (!coincideEstado) {
             return false;
           }
 
-
           if (!texto) {
             return true;
           }
-
 
           const contenido =
             normalizar(
@@ -355,7 +469,6 @@ export default function ReclamosPage() {
               ].join(" ")
             );
 
-
           return contenido.includes(
             texto
           );
@@ -368,14 +481,12 @@ export default function ReclamosPage() {
       filtroEstado,
     ]);
 
-
   /* =======================================================
      KPIS
   ======================================================= */
 
   const total =
     reclamos.length;
-
 
   const abiertos =
     reclamos.filter(
@@ -384,14 +495,12 @@ export default function ReclamosPage() {
         "Cerrado"
     ).length;
 
-
   const enSeguimiento =
     reclamos.filter(
       (reclamo) =>
         reclamo.estado ===
         "En seguimiento"
     ).length;
-
 
   const pendientesVerificacion =
     reclamos.filter(
@@ -400,14 +509,12 @@ export default function ReclamosPage() {
         "Pendiente de verificación de eficacia"
     ).length;
 
-
   const cerrados =
     reclamos.filter(
       (reclamo) =>
         reclamo.estado ===
         "Cerrado"
     ).length;
-
 
   /* =======================================================
      UI
@@ -438,8 +545,42 @@ export default function ReclamosPage() {
               Registro, investigación, seguimiento y cierre de reclamos.
             </p>
 
-          </div>
+            {/* ===========================================
+                INFORMACIÓN DEL ROL
+            =========================================== */}
 
+            {!loading &&
+              rol && (
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+
+                {puedeGestionar ? (
+
+                  <span className="inline-flex rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700">
+                    Control de Calidad
+                  </span>
+
+                ) : (
+
+                  <span className="inline-flex rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
+                    Ejecutivo
+                  </span>
+
+                )}
+
+                {usuarioActual && (
+
+                  <span className="text-xs text-zinc-400">
+                    {usuarioActual}
+                  </span>
+
+                )}
+
+              </div>
+
+            )}
+
+          </div>
 
           <div className="flex gap-2">
 
@@ -448,12 +589,22 @@ export default function ReclamosPage() {
               onClick={
                 cargarReclamos
               }
-              className="rounded-lg border bg-white px-4 py-2 text-sm font-medium hover:bg-zinc-50"
+              disabled={loading}
+              className="rounded-lg border bg-white px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-50"
             >
-              Actualizar
+              {loading
+                ? "Actualizando..."
+                : "Actualizar"}
             </button>
 
-
+            {/*
+             * Tanto Calidad como Ejecutivo
+             * pueden registrar nuevos reclamos.
+             *
+             * Si más adelante quieres que
+             * solamente ejecutivos puedan crearlos,
+             * lo restringimos aquí.
+             */}
             <Link
               href="/ventas/reclamos/nuevo"
               className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700"
@@ -465,6 +616,42 @@ export default function ReclamosPage() {
 
         </div>
 
+        {/* ===============================================
+            MENSAJE SEGÚN ROL
+        =============================================== */}
+
+        {!loading &&
+          !error && (
+
+          <div
+            className={`mb-5 rounded-xl border p-4 text-sm ${
+              puedeGestionar
+                ? "border-blue-200 bg-blue-50 text-blue-800"
+                : "border-zinc-200 bg-white text-zinc-600"
+            }`}
+          >
+
+            {puedeGestionar ? (
+
+              <>
+                Tienes acceso de{" "}
+                <strong>
+                  Control de Calidad
+                </strong>
+                . Puedes visualizar y gestionar los reclamos de todos los ejecutivos.
+              </>
+
+            ) : (
+
+              <>
+                Se muestran únicamente los reclamos ingresados por tu usuario. Puedes consultar su avance, pero la investigación, acciones, seguimiento y cierre son gestionados por Control de Calidad.
+              </>
+
+            )}
+
+          </div>
+
+        )}
 
         {/* ===============================================
             KPIS
@@ -484,7 +671,9 @@ export default function ReclamosPage() {
 
           <Kpi
             titulo="En seguimiento"
-            valor={enSeguimiento}
+            valor={
+              enSeguimiento
+            }
           />
 
           <Kpi
@@ -496,11 +685,12 @@ export default function ReclamosPage() {
 
           <Kpi
             titulo="Cerrados"
-            valor={cerrados}
+            valor={
+              cerrados
+            }
           />
 
         </div>
-
 
         {/* ===============================================
             ERROR
@@ -513,7 +703,6 @@ export default function ReclamosPage() {
           </div>
 
         )}
-
 
         {/* ===============================================
             FILTROS
@@ -530,7 +719,9 @@ export default function ReclamosPage() {
               </span>
 
               <input
-                value={busqueda}
+                value={
+                  busqueda
+                }
                 onChange={(e) =>
                   setBusqueda(
                     e.target.value
@@ -541,7 +732,6 @@ export default function ReclamosPage() {
               />
 
             </label>
-
 
             <label>
 
@@ -582,7 +772,6 @@ export default function ReclamosPage() {
 
         </div>
 
-
         {/* ===============================================
             TABLA
         =============================================== */}
@@ -604,7 +793,11 @@ export default function ReclamosPage() {
               </p>
 
               <p className="mt-1 text-sm text-zinc-500">
-                Cambia los filtros o crea un nuevo reclamo.
+
+                {puedeGestionar
+                  ? "No existen reclamos que coincidan con los filtros seleccionados."
+                  : "No tienes reclamos que coincidan con los filtros seleccionados."}
+
               </p>
 
             </div>
@@ -655,18 +848,16 @@ export default function ReclamosPage() {
 
                 </thead>
 
-
                 <tbody className="divide-y">
 
                   {reclamosFiltrados.map(
                     (reclamo) => {
-
                       /*
                        * Nuevos reclamos:
-                       * usamos REC-...
+                       * REC-2026-xxxxx
                        *
-                       * Reclamos históricos:
-                       * usamos ID.
+                       * Históricos:
+                       * ID numérico.
                        */
                       const identificador =
                         reclamo
@@ -677,13 +868,14 @@ export default function ReclamosPage() {
                           ? reclamo.numeroReclamo
                           : reclamo.id;
 
-
                       return (
 
                         <tr
                           key={`${reclamo.numeroReclamo}-${reclamo.id}`}
                           className="hover:bg-zinc-50"
                         >
+
+                          {/* RECLAMO */}
 
                           <td className="px-4 py-4">
 
@@ -696,19 +888,25 @@ export default function ReclamosPage() {
                             {reclamo.id && (
 
                               <div className="mt-1 text-xs text-zinc-400">
-                                ID {reclamo.id}
+                                ID{" "}
+                                {
+                                  reclamo.id
+                                }
                               </div>
 
                             )}
 
                           </td>
 
+                          {/* FECHA */}
 
                           <td className="whitespace-nowrap px-4 py-4 text-zinc-600">
-                            {reclamo.fecha ||
-                              "-"}
+                            {formatearFecha(
+                              reclamo.fecha
+                            )}
                           </td>
 
+                          {/* CLIENTE */}
 
                           <td className="px-4 py-4">
 
@@ -718,17 +916,21 @@ export default function ReclamosPage() {
                             </div>
 
                             <div className="mt-1 text-xs text-zinc-400">
-                              {reclamo.rut}
+                              {
+                                reclamo.rut
+                              }
                             </div>
 
                           </td>
 
+                          {/* PRODUCTO */}
 
                           <td className="px-4 py-4">
                             {reclamo.producto ||
                               "-"}
                           </td>
 
+                          {/* CLASIFICACIÓN */}
 
                           <td className="px-4 py-4">
 
@@ -749,12 +951,14 @@ export default function ReclamosPage() {
 
                           </td>
 
+                          {/* EJECUTIVO */}
 
                           <td className="px-4 py-4">
                             {reclamo.ejecutivo ||
                               "-"}
                           </td>
 
+                          {/* ESTADO */}
 
                           <td className="px-4 py-4">
 
@@ -766,6 +970,7 @@ export default function ReclamosPage() {
 
                           </td>
 
+                          {/* ACCIÓN */}
 
                           <td className="px-4 py-4 text-right">
 
@@ -775,9 +980,17 @@ export default function ReclamosPage() {
                                 href={`/ventas/reclamos/${encodeURIComponent(
                                   identificador
                                 )}`}
-                                className="inline-flex rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+                                className={`inline-flex rounded-lg border px-3 py-2 text-xs font-semibold ${
+                                  puedeGestionar
+                                    ? "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                                    : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                                }`}
                               >
-                                Gestionar
+
+                                {puedeGestionar
+                                  ? "Gestionar"
+                                  : "Ver"}
+
                               </Link>
 
                             ) : (
@@ -806,7 +1019,6 @@ export default function ReclamosPage() {
 
         </div>
 
-
         {/* ===============================================
             TOTAL FILTRADO
         =============================================== */}
@@ -818,7 +1030,11 @@ export default function ReclamosPage() {
             {
               reclamosFiltrados.length
             }{" "}
-            de {reclamos.length} reclamos
+            de{" "}
+            {
+              reclamos.length
+            }{" "}
+            reclamos
           </p>
 
         )}
@@ -828,7 +1044,6 @@ export default function ReclamosPage() {
     </div>
   );
 }
-
 
 /* =========================================================
    COMPONENTES
@@ -856,7 +1071,6 @@ function Kpi({
   );
 }
 
-
 function EstadoBadge({
   estado,
 }: {
@@ -864,7 +1078,6 @@ function EstadoBadge({
 }) {
   let clases =
     "bg-zinc-100 text-zinc-700";
-
 
   if (
     estado ===
@@ -874,7 +1087,6 @@ function EstadoBadge({
       "bg-blue-100 text-blue-700";
   }
 
-
   if (
     estado ===
     "En investigación"
@@ -882,7 +1094,6 @@ function EstadoBadge({
     clases =
       "bg-amber-100 text-amber-700";
   }
-
 
   if (
     estado ===
@@ -892,7 +1103,6 @@ function EstadoBadge({
       "bg-yellow-100 text-yellow-700";
   }
 
-
   if (
     estado ===
     "Acciones en ejecución"
@@ -900,7 +1110,6 @@ function EstadoBadge({
     clases =
       "bg-orange-100 text-orange-700";
   }
-
 
   if (
     estado ===
@@ -910,7 +1119,6 @@ function EstadoBadge({
       "bg-purple-100 text-purple-700";
   }
 
-
   if (
     estado ===
     "Pendiente de verificación de eficacia"
@@ -919,7 +1127,6 @@ function EstadoBadge({
       "bg-yellow-100 text-yellow-800";
   }
 
-
   if (
     estado ===
     "Cerrado"
@@ -927,7 +1134,6 @@ function EstadoBadge({
     clases =
       "bg-green-100 text-green-700";
   }
-
 
   return (
     <span
