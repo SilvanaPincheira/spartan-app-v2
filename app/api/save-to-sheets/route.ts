@@ -1,4 +1,4 @@
-// app/api/save-to-sheets/route.ts
+ // app/api/save-to-sheets/route.ts
 
 import { NextResponse } from "next/server";
 
@@ -6,13 +6,17 @@ export const dynamic = "force-dynamic";
 
 /*
  * Web App de Google Apps Script.
+ *
+ * IMPORTANTE:
+ * Esta URL debe corresponder a la implementación /exec
+ * actualmente publicada.
  */
 const APPS_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycbyezzTCryZi1tKc8Tr7cJjSQ4FVxvnC6ucC-5wcDa-enUCDhsFT0hZYbXGg03oPTX2x9A/exec";
 
-/* =========================================================
+/* ============================================================
    HELPERS
-========================================================= */
+============================================================ */
 
 function sleep(ms: number) {
   return new Promise((resolve) =>
@@ -38,10 +42,6 @@ function textoCorto(
   );
 }
 
-/*
- * Intenta interpretar una respuesta
- * como JSON.
- */
 function parseJsonSeguro(
   texto: string
 ) {
@@ -58,19 +58,32 @@ function parseJsonSeguro(
   }
 }
 
+/* ============================================================
+   VERIFICAR NV EN GOOGLE SHEETS
+============================================================ */
+
 /*
- * Consulta a Apps Script para confirmar
- * si una NV ya existe en la hoja.
+ * Después de enviar una NV a Apps Script,
+ * verificamos que realmente exista.
  *
- * Se usa solamente cuando el POST
- * guardó aparentemente la información
- * pero la respuesta no llegó como JSON.
+ * Apps Script debe tener:
+ *
+ * doGet(e)
+ *
+ * que responda a:
+ *
+ * ?action=verificarNV&numeroNV=NV-XXXX
  */
 async function verificarNV(
   numeroNV: string
-) {
+): Promise<{
+  existe: boolean;
+  detalle?: any;
+}> {
   if (!numeroNV) {
-    return false;
+    return {
+      existe: false,
+    };
   }
 
   const url =
@@ -78,78 +91,128 @@ async function verificarNV(
     `?action=verificarNV` +
     `&numeroNV=${encodeURIComponent(
       numeroNV
-    )}`;
+    )}` +
+    `&_=${Date.now()}`;
 
   /*
-   * Hacemos hasta 3 intentos porque
-   * Sheets puede tardar unos milisegundos
-   * en reflejar el dato recién escrito.
+   * Hacemos varios intentos porque Google Sheets
+   * puede demorarse brevemente en reflejar
+   * la escritura recién realizada.
    */
   for (
     let intento = 1;
-    intento <= 3;
+    intento <= 5;
     intento++
   ) {
     try {
       if (intento > 1) {
-        await sleep(600);
+        await sleep(700);
       }
 
-      const res = await fetch(
-        url,
-        {
-          method: "GET",
-          cache: "no-store",
-          redirect: "follow",
-        }
+      console.log(
+        `🔎 Verificando ${numeroNV} en Sheets. Intento ${intento}/5`
       );
+
+      const res =
+        await fetch(
+          url,
+          {
+            method: "GET",
+
+            cache:
+              "no-store",
+
+            redirect:
+              "follow",
+
+            headers: {
+              Accept:
+                "application/json",
+            },
+          }
+        );
 
       const texto =
         await res.text();
 
       const parsed =
-        parseJsonSeguro(texto);
+        parseJsonSeguro(
+          texto
+        );
+
+      console.log(
+        "RESPUESTA VERIFICAR NV:",
+        {
+          numeroNV,
+          intento,
+          status:
+            res.status,
+          okHttp:
+            res.ok,
+          respuesta:
+            textoCorto(
+              texto
+            ),
+        }
+      );
 
       if (
         res.ok &&
         parsed.ok &&
-        parsed.data?.ok === true &&
-        parsed.data?.existe === true
+        parsed.data?.ok ===
+          true &&
+        parsed.data?.existe ===
+          true
       ) {
-        return true;
+        return {
+          existe: true,
+          detalle:
+            parsed.data,
+        };
       }
-    } catch (error) {
+    } catch (
+      error
+    ) {
       console.error(
-        `Error verificando NV intento ${intento}:`,
+        `❌ Error verificando NV ${numeroNV}. Intento ${intento}:`,
         error
       );
     }
   }
 
-  return false;
+  return {
+    existe: false,
+  };
 }
 
-/* =========================================================
+/* ============================================================
    POST
-========================================================= */
+============================================================ */
 
 export async function POST(
   req: Request
 ) {
   try {
+    /* --------------------------------------------------------
+       1. LEER PAYLOAD
+    -------------------------------------------------------- */
+
     const payload =
       await req.json();
 
     /*
-     * Compatibilidad:
+     * Compatibilidad actual:
      *
-     * NV:
+     * NOTA DE VENTA:
+     *
      * [
      *   {...},
      *   {...}
      * ]
      *
-     * Cotización:
+     *
+     * COTIZACIÓN:
+     *
      * {
      *   tipo: "Cotizacion",
      *   datos: [...]
@@ -157,26 +220,40 @@ export async function POST(
      */
 
     const tipo =
-      Array.isArray(payload)
+      Array.isArray(
+        payload
+      )
         ? "NV"
         : String(
-            payload?.tipo || "NV"
-          );
+            payload?.tipo ||
+              "NV"
+          ).trim();
 
     const filas =
-      Array.isArray(payload)
+      Array.isArray(
+        payload
+      )
         ? payload
-        : Array.isArray(payload?.datos)
+        : Array.isArray(
+            payload?.datos
+          )
         ? payload.datos
         : [];
 
+    /* --------------------------------------------------------
+       2. VALIDAR FILAS
+    -------------------------------------------------------- */
+
     if (
-      !Array.isArray(filas) ||
+      !Array.isArray(
+        filas
+      ) ||
       filas.length === 0
     ) {
       return NextResponse.json(
         {
           ok: false,
+
           error:
             "No se recibieron registros para guardar",
         },
@@ -186,91 +263,138 @@ export async function POST(
       );
     }
 
-    /*
-     * Para NV exigimos numeroNV.
-     */
-    let numeroNV = "";
+    /* --------------------------------------------------------
+       3. VALIDACIONES ESPECIALES NV
+    -------------------------------------------------------- */
 
-    if (
+    const esNV =
       tipo
         .trim()
-        .toLowerCase() === "nv"
-    ) {
-      numeroNV = String(
-        filas[0]?.numeroNV || ""
-      ).trim();
+        .toLowerCase() ===
+      "nv";
+
+    let numeroNV =
+      "";
+
+    if (esNV) {
+      numeroNV =
+        String(
+          filas[0]
+            ?.numeroNV ||
+            ""
+        ).trim();
 
       if (!numeroNV) {
         return NextResponse.json(
           {
             ok: false,
+
             error:
               "La Nota de Venta no contiene numeroNV",
+
             cliente:
-              filas[0]?.cliente || "",
+              filas[0]
+                ?.cliente ||
+              "",
           },
           {
-            status: 400,
+            status:
+              400,
           }
         );
       }
 
       /*
-       * Todas las líneas deben
-       * pertenecer a la misma NV.
+       * Todas las líneas deben corresponder
+       * a la misma Nota de Venta.
        */
       const filaInconsistente =
         filas.find(
-          (fila: any) =>
+          (
+            fila: any
+          ) =>
             String(
-              fila?.numeroNV || ""
+              fila
+                ?.numeroNV ||
+                ""
             ).trim() !==
             numeroNV
         );
 
-      if (filaInconsistente) {
+      if (
+        filaInconsistente
+      ) {
         return NextResponse.json(
           {
             ok: false,
+
             error:
               "El payload contiene líneas con distintos números de Nota de Venta.",
           },
           {
-            status: 400,
+            status:
+              400,
           }
         );
       }
     }
 
-    /* =====================================================
-       ENVIAR A APPS SCRIPT
-    ===================================================== */
+    /* --------------------------------------------------------
+       4. LOG DEL ENVÍO
+    -------------------------------------------------------- */
+
+    console.log(
+      "===== ENVÍO A APPS SCRIPT ====="
+    );
+
+    console.log({
+      tipo,
+      numeroNV,
+      filas:
+        filas.length,
+    });
+
+    console.log(
+      "==============================="
+    );
+
+    /* --------------------------------------------------------
+       5. ENVIAR A APPS SCRIPT
+    -------------------------------------------------------- */
 
     const res =
       await fetch(
         APPS_SCRIPT_URL,
         {
-          method: "POST",
+          method:
+            "POST",
 
           headers: {
             "Content-Type":
               "application/json",
+
+            Accept:
+              "application/json",
           },
 
-          body: JSON.stringify(
-            payload
-          ),
+          body:
+            JSON.stringify(
+              payload
+            ),
 
-          cache: "no-store",
+          cache:
+            "no-store",
 
-          redirect: "follow",
+          redirect:
+            "follow",
         }
       );
 
     /*
-     * Siempre leemos como texto primero.
-     * Nunca usamos res.json() directamente,
-     * porque Google a veces devuelve HTML.
+     * Siempre leemos primero como texto.
+     *
+     * Google Apps Script puede devolver HTML,
+     * redirects o respuestas que no sean JSON.
      */
     const text =
       await res.text();
@@ -285,12 +409,22 @@ export async function POST(
     );
 
     console.log({
-      status: res.status,
-      ok: res.ok,
+      status:
+        res.status,
+
+      ok:
+        res.ok,
+
       contentType,
+
+      tipo,
+
       numeroNV,
+
       respuesta:
-        textoCorto(text),
+        textoCorto(
+          text
+        ),
     });
 
     console.log(
@@ -298,136 +432,280 @@ export async function POST(
     );
 
     const parsed =
-      parseJsonSeguro(text);
+      parseJsonSeguro(
+        text
+      );
 
-    /* =====================================================
-       RESPUESTA JSON NORMAL
-    ===================================================== */
+    /* ========================================================
+       6. APPS SCRIPT DEVOLVIÓ JSON
+    ======================================================== */
 
-    if (parsed.ok) {
+    if (
+      parsed.ok
+    ) {
       const json =
-        parsed.data || {};
+        parsed.data ||
+        {};
 
+      /*
+       * Apps Script informó explícitamente
+       * un error.
+       */
       if (
         !res.ok ||
-        json?.ok === false ||
-        json?.success === false ||
+        json?.ok ===
+          false ||
+        json?.success ===
+          false ||
         json?.status ===
           "error" ||
         json?.error
       ) {
+        console.error(
+          "❌ Apps Script informó error:",
+          json
+        );
+
         return NextResponse.json(
           {
             ok: false,
+
             error:
               json?.error ||
               json?.message ||
               `Apps Script respondió HTTP ${res.status}`,
-            detalle: json,
+
+            detalle:
+              json,
+
+            numeroNV:
+              numeroNV ||
+              undefined,
           },
           {
             status:
-              res.status >= 400
+              res.status >=
+              400
                 ? res.status
                 : 502,
           }
         );
       }
 
-      return NextResponse.json({
-        ...json,
+      /* ======================================================
+         7. SI ES NV, NO CONFIAMOS SOLO EN "status: ok"
 
+         Verificamos que realmente haya quedado escrita.
+      ====================================================== */
+
+      if (esNV) {
         /*
-         * Estandarizamos siempre ok=true
-         * para facilitar el frontend.
+         * Espera inicial para que Sheets
+         * termine de reflejar la escritura.
          */
-        ok: true,
-      });
+        await sleep(
+          500
+        );
+
+        const verificacion =
+          await verificarNV(
+            numeroNV
+          );
+
+        if (
+          !verificacion.existe
+        ) {
+          console.error(
+            `❌ Apps Script respondió éxito, pero ${numeroNV} NO fue encontrada en Google Sheets.`
+          );
+
+          return NextResponse.json(
+            {
+              ok: false,
+
+              status:
+                "error",
+
+              numeroNV,
+
+              error:
+                `Apps Script respondió correctamente, pero la Nota de Venta ${numeroNV} no pudo ser confirmada en Google Sheets.`,
+
+              detalleAppsScript:
+                json,
+
+              advertencia:
+                "No se continuará con PDF/correo porque no fue posible confirmar el guardado.",
+            },
+            {
+              status:
+                502,
+            }
+          );
+        }
+
+        console.log(
+          `✅ ${numeroNV} confirmada físicamente en Google Sheets.`
+        );
+
+        return NextResponse.json(
+          {
+            ...json,
+
+            ok: true,
+
+            status:
+              "ok",
+
+            numeroNV,
+
+            rows:
+              Number(
+                json?.rows ??
+                  filas.length
+              ) ||
+              filas.length,
+
+            verificado:
+              true,
+
+            verificacion:
+              verificacion.detalle,
+          }
+        );
+      }
+
+      /* ======================================================
+         8. COTIZACIÓN
+
+         Para Cotización seguimos utilizando
+         la respuesta normal de Apps Script.
+      ====================================================== */
+
+      return NextResponse.json(
+        {
+          ...json,
+
+          ok: true,
+
+          status:
+            json?.status ||
+            "ok",
+
+          rows:
+            Number(
+              json?.rows ??
+                filas.length
+            ) ||
+            filas.length,
+        }
+      );
     }
 
-    /* =====================================================
-       GOOGLE DEVOLVIÓ ALGO QUE NO ES JSON
-    ===================================================== */
+    /* ========================================================
+       9. APPS SCRIPT NO DEVOLVIÓ JSON
+    ======================================================== */
 
     console.error(
-      "Apps Script no devolvió JSON:",
-      textoCorto(text)
+      "❌ Apps Script no devolvió JSON:",
+      textoCorto(
+        text
+      )
     );
 
     /*
-     * Si es una NV, antes de declarar
-     * error comprobamos si realmente
-     * quedó guardada.
+     * Para NV todavía podemos comprobar
+     * directamente si quedó escrita.
      */
-    if (numeroNV) {
-      /*
-       * Pequeña espera antes
-       * de consultar la hoja.
-       */
-      await sleep(500);
+    if (esNV) {
+      await sleep(
+        500
+      );
 
-      const guardada =
+      const verificacion =
         await verificarNV(
           numeroNV
         );
 
-      if (guardada) {
+      /*
+       * Aunque la respuesta de Apps Script haya sido
+       * incorrecta, si la NV existe físicamente,
+       * consideramos el guardado confirmado.
+       */
+      if (
+        verificacion.existe
+      ) {
         console.warn(
-          `⚠️ ${numeroNV} fue guardada, aunque Apps Script no devolvió JSON. Se continúa el proceso.`
+          `⚠️ ${numeroNV} fue guardada aunque Apps Script no devolvió JSON válido.`
         );
 
-        /*
-         * IMPORTANTE:
-         *
-         * Respondemos éxito.
-         * Así page.tsx continúa con:
-         *
-         * PDF
-         * ↓
-         * correo
-         */
-        return NextResponse.json({
-          ok: true,
-          status: "ok",
-          numeroNV,
-          rows: filas.length,
+        return NextResponse.json(
+          {
+            ok: true,
 
-          recuperado: true,
+            status:
+              "ok",
 
-          warning:
-            "Apps Script no devolvió una respuesta JSON válida, pero la Nota de Venta fue verificada en Google Sheets.",
-        });
+            numeroNV,
+
+            rows:
+              filas.length,
+
+            verificado:
+              true,
+
+            recuperado:
+              true,
+
+            verificacion:
+              verificacion.detalle,
+
+            warning:
+              "Apps Script no devolvió una respuesta JSON válida, pero la Nota de Venta fue confirmada en Google Sheets.",
+          }
+        );
       }
     }
 
-    /* =====================================================
-       NO PUDIMOS CONFIRMAR EL GUARDADO
-    ===================================================== */
+    /* ========================================================
+       10. NO SE PUDO CONFIRMAR
+    ======================================================== */
 
     return NextResponse.json(
       {
         ok: false,
 
-        error:
-          "Apps Script no devolvió una respuesta válida y no fue posible confirmar el guardado.",
+        status:
+          "error",
 
-        numeroNV,
+        error:
+          esNV
+            ? `No fue posible confirmar que la Nota de Venta ${numeroNV} haya quedado guardada en Google Sheets.`
+            : "Apps Script no devolvió una respuesta válida.",
+
+        numeroNV:
+          numeroNV ||
+          undefined,
 
         httpStatusAppsScript:
           res.status,
 
         contentType,
 
-        raw: textoCorto(text),
+        raw:
+          textoCorto(
+            text
+          ),
       },
       {
         status: 502,
       }
     );
-
-  } catch (err: any) {
+  } catch (
+    err: any
+  ) {
     console.error(
-      "Error en save-to-sheets:",
+      "❌ Error en save-to-sheets:",
       err
     );
 
@@ -435,13 +713,19 @@ export async function POST(
       {
         ok: false,
 
+        status:
+          "error",
+
         error:
           "Excepción en save-to-sheets",
 
         message:
-          err instanceof Error
+          err instanceof
+          Error
             ? err.message
-            : String(err),
+            : String(
+                err
+              ),
       },
       {
         status: 500,
