@@ -13,6 +13,7 @@ export const dynamic = "force-dynamic";
  */
 const APPS_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycbyezzTCryZi1tKc8Tr7cJjSQ4FVxvnC6ucC-5wcDa-enUCDhsFT0hZYbXGg03oPTX2x9A/exec";
+  
 
 /* ============================================================
    HELPERS
