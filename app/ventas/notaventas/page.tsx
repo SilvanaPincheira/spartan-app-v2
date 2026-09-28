@@ -1318,9 +1318,7 @@ try {
 
   if (
     !resSave.ok ||
-    json?.ok !== true ||
-    json?.success === false ||
-    json?.status === "error" ||
+    json?.status !== "ok" ||
     json?.error
   ) {
     throw new Error(
@@ -1330,28 +1328,11 @@ try {
     );
   }
 
-  // Para una Nota de Venta no basta con recibir HTTP 200.
-  // El route debe confirmar que la NV existe realmente en Google Sheets.
-  if (json?.verificado !== true) {
-    throw new Error(
-      `La API respondió, pero no confirmó que la Nota de Venta ${numeroNV} exista realmente en Google Sheets.`
-    );
-  }
-
-  if (
-    json?.numeroNV &&
-    String(json.numeroNV).trim() !== String(numeroNV).trim()
-  ) {
-    throw new Error(
-      `La verificación devolvió una NV distinta. Esperada: ${numeroNV}. Recibida: ${json.numeroNV}.`
-    );
-  }
-
   const rows =
     Number(json?.rows ?? payload.length) || payload.length;
 
   setSaveMsg(
-    `✅ Nota de Venta ${numeroNV} verificada en Google Sheets con ${rows} ítem(s).`
+    `✅ Nota de Venta ${numeroNV} guardada en Google Sheets con ${rows} ítem(s).`
   );
 } finally {
   setSaving(false);
@@ -2020,8 +2001,7 @@ const resMail = await fetch("/api/send-notaventa", {
 
           if (
             !res.ok ||
-            json?.ok !== true ||
-            json?.status === "error" ||
+            json?.status !== "ok" ||
             json?.error
           ) {
             throw new Error(
@@ -2031,30 +2011,15 @@ const resMail = await fetch("/api/send-notaventa", {
             );
           }
 
-          if (json?.verificado !== true) {
-            throw new Error(
-              `La Nota de Venta ${numeroNV} no pudo ser confirmada en Google Sheets.`
-            );
-          }
-
-          if (
-            json?.numeroNV &&
-            String(json.numeroNV).trim() !== String(numeroNV).trim()
-          ) {
-            throw new Error(
-              `La verificación devolvió una NV distinta. Esperada: ${numeroNV}. Recibida: ${json.numeroNV}.`
-            );
-          }
-
           const rows =
             Number(json?.rows ?? payload.length) || payload.length;
 
           setSaveMsg(
-            `✅ Nota de Venta ${numeroNV} verificada en Google Sheets con ${rows} ítem(s).`
+            `✅ Nota de Venta ${numeroNV} guardada en Google Sheets con ${rows} ítem(s).`
           );
 
           alert(
-            `✅ Nota de Venta ${numeroNV} verificada correctamente en Google Sheets.`
+            `✅ Nota de Venta ${numeroNV} guardada correctamente en Google Sheets.`
           );
         } catch (e: any) {
           console.error("❌ Error al grabar documento:", e);
@@ -2094,7 +2059,7 @@ const resMail = await fetch("/api/send-notaventa", {
       setProcesado(true);
 
       alert(
-        `✅ Nota de Venta ${numeroNV} verificada en Sheets, PDF generado y correo enviado correctamente.`
+        `✅ Nota de Venta ${numeroNV} guardada en Sheets, PDF generado y correo enviado correctamente.`
       );
     } catch (err: any) {
       console.error(
