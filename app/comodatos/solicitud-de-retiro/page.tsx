@@ -314,7 +314,7 @@ export default function SolicitudRetiroPage() {
       const rows = await fetchCsv(id, gid);
 
       const hoy = new Date();
-      const hace3 = new Date(hoy.getFullYear() - 3, hoy.getMonth(), hoy.getDate());
+      const hace3 = new Date(hoy.getFullYear() - 4, hoy.getMonth(), hoy.getDate());
 
       // soportar distintas cabeceras: "Rut Cliente", "RUT", "RUT Cliente", "Codigo Cliente"
       const listRaw = rows.filter((r) => {
