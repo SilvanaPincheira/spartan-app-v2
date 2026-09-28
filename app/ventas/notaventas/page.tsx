@@ -1318,7 +1318,7 @@ try {
 
   if (
     !resSave.ok ||
-    json?.ok === false ||
+    json?.ok !== true ||
     json?.success === false ||
     json?.status === "error" ||
     json?.error
@@ -1330,11 +1330,28 @@ try {
     );
   }
 
+  // Para una Nota de Venta no basta con recibir HTTP 200.
+  // El route debe confirmar que la NV existe realmente en Google Sheets.
+  if (json?.verificado !== true) {
+    throw new Error(
+      `La API respondió, pero no confirmó que la Nota de Venta ${numeroNV} exista realmente en Google Sheets.`
+    );
+  }
+
+  if (
+    json?.numeroNV &&
+    String(json.numeroNV).trim() !== String(numeroNV).trim()
+  ) {
+    throw new Error(
+      `La verificación devolvió una NV distinta. Esperada: ${numeroNV}. Recibida: ${json.numeroNV}.`
+    );
+  }
+
   const rows =
     Number(json?.rows ?? payload.length) || payload.length;
 
   setSaveMsg(
-    `✅ Nota de venta guardada con ${rows} ítem(s) en Google Sheets.`
+    `✅ Nota de Venta ${numeroNV} verificada en Google Sheets con ${rows} ítem(s).`
   );
 } finally {
   setSaving(false);
@@ -1420,15 +1437,14 @@ const resMail = await fetch("/api/send-notaventa", {
       throw new Error(`Error al enviar correo: ${errText || resMail.status}`);
     }
 
-    alert("✅ Guardado en Sheets, PDF generado y correo enviado a SAC + CC Ejecutivo.");
   } catch (e: any) {
     console.error("❌ Error en guardarPdfYEnviar:", e);
     setErrorMsg(e?.message || "Ocurrió un error inesperado.");
-    alert(
-      `❌ No se pudo completar el proceso.\n\nDetalles: ${
-        e?.message || "Error inesperado"
-      }\n\n⚠️ Revisa si la Nota quedó guardada en Google Sheets.`
-    );
+
+    // IMPORTANTE:
+    // propagamos el error al botón para que NO marque la NV como procesada
+    // ni muestre un mensaje falso de éxito.
+    throw e;
   } finally {
     setProcesando(false);
   }
@@ -1914,11 +1930,15 @@ const resMail = await fetch("/api/send-notaventa", {
       🖨️ Imprimir / PDF
     </button>
 
-    {/* 💾 Nuevo: Botón Grabar Documento */}
+    {/* 💾 Botón Grabar Documento */}
     <button
       onClick={async () => {
         if (saving) return; // 🔒 evita doble clic
+
         setSaving(true);
+        setErrorMsg("");
+        setSaveMsg("");
+
         try {
           if (!numeroNV?.trim()) {
             throw new Error(
@@ -1926,7 +1946,20 @@ const resMail = await fetch("/api/send-notaventa", {
             );
           }
 
-          const fecha = new Date().toLocaleString("es-CL");
+          if (!clientName || !clientRut || !clientCode) {
+            throw new Error(
+              "Faltan datos del cliente (Nombre, RUT y Código Cliente)."
+            );
+          }
+
+          if (lines.length === 0) {
+            throw new Error(
+              "Agrega al menos un ítem antes de guardar."
+            );
+          }
+
+          const fecha = new Date().toLocaleDateString("es-CL");
+
           const payload = lines.map((item) => ({
             numeroNV,
             fecha,
@@ -1941,14 +1974,24 @@ const resMail = await fetch("/api/send-notaventa", {
             comuna,
             correoEjecutivo: emailEjecutivo,
             comentarios,
+            subtotal,
+            total: subtotal,
             codigo: item.code,
             descripcion: item.name,
+            kilos: item.kilos,
             cantidad: item.qty,
-            precioVenta: item.precioVenta,
-            totalItem: item.total,
+            precioBase: Number((item.priceBase || 0).toFixed(2)),
+            descuento: item.isEspecial ? 0 : item.descuento,
+            precioVenta: Number((item.precioVenta || 0).toFixed(2)),
+            precioPresentacion: Number(
+              ((item.precioVenta || 0) * (item.kilos || 1)).toFixed(2)
+            ),
+            totalItem: Number((item.total || 0).toFixed(2)),
+            especialVigente: !!item.isEspecial,
+            especialBloqueado: !!item.isBloqueado,
           }));
 
-          console.table(payload);
+          console.log("PAYLOAD GRABAR DOCUMENTO:", payload);
 
           const res = await fetch("/api/save-to-sheets", {
             method: "POST",
@@ -1956,10 +1999,76 @@ const resMail = await fetch("/api/send-notaventa", {
             body: JSON.stringify(payload),
           });
 
-          if (!res.ok) throw new Error("Error al grabar documento");
-          alert("✅ Documento grabado correctamente en Sheets.");
+          const responseText = await res.text();
+
+          let json: any = {};
+
+          try {
+            json = responseText ? JSON.parse(responseText) : {};
+          } catch {
+            throw new Error(
+              `La API no devolvió una respuesta JSON válida. HTTP ${res.status}`
+            );
+          }
+
+          console.log("RESPUESTA GRABAR DOCUMENTO:", {
+            numeroNV,
+            status: res.status,
+            okHttp: res.ok,
+            respuesta: json,
+          });
+
+          if (
+            !res.ok ||
+            json?.ok !== true ||
+            json?.status === "error" ||
+            json?.error
+          ) {
+            throw new Error(
+              json?.error ||
+                json?.message ||
+                `Error al grabar documento. HTTP ${res.status}`
+            );
+          }
+
+          if (json?.verificado !== true) {
+            throw new Error(
+              `La Nota de Venta ${numeroNV} no pudo ser confirmada en Google Sheets.`
+            );
+          }
+
+          if (
+            json?.numeroNV &&
+            String(json.numeroNV).trim() !== String(numeroNV).trim()
+          ) {
+            throw new Error(
+              `La verificación devolvió una NV distinta. Esperada: ${numeroNV}. Recibida: ${json.numeroNV}.`
+            );
+          }
+
+          const rows =
+            Number(json?.rows ?? payload.length) || payload.length;
+
+          setSaveMsg(
+            `✅ Nota de Venta ${numeroNV} verificada en Google Sheets con ${rows} ítem(s).`
+          );
+
+          alert(
+            `✅ Nota de Venta ${numeroNV} verificada correctamente en Google Sheets.`
+          );
         } catch (e: any) {
-          alert("❌ Error al grabar documento: " + e.message);
+          console.error("❌ Error al grabar documento:", e);
+
+          setErrorMsg(
+            e?.message ||
+              "Error al grabar documento."
+          );
+
+          alert(
+            `❌ Error al grabar documento:\n\n${
+              e?.message || "Error desconocido"
+            }`
+          );
         } finally {
           setSaving(false);
         }
@@ -1978,21 +2087,28 @@ const resMail = await fetch("/api/send-notaventa", {
 <button
   onClick={async () => {
     if (procesando || procesado) return; // ⛔ Evita doble envío
-    setProcesando(true);
+
     try {
-      await guardarPdfYEnviar(); // función actual
-      setProcesado(true); // ✅ marcar como procesado
-      alert("✅ Nota de Venta guardada y enviada correctamente.");
-    } catch (err: any) {
-      console.error("❌ Error al enviar la Nota de Venta:", err);
-    
+      await guardarPdfYEnviar();
+
+      setProcesado(true);
+
       alert(
-        `Error al guardar o enviar la Nota de Venta.\n\n${
+        `✅ Nota de Venta ${numeroNV} verificada en Sheets, PDF generado y correo enviado correctamente.`
+      );
+    } catch (err: any) {
+      console.error(
+        "❌ Error al guardar o enviar la Nota de Venta:",
+        err
+      );
+
+      setProcesado(false);
+
+      alert(
+        `❌ No se pudo completar la Nota de Venta.\n\n${
           err?.message || "Error desconocido"
         }`
       );
-    } finally {
-      setProcesando(false);
     }
   }}
   disabled={procesando || procesado}
