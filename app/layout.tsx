@@ -102,7 +102,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     
       {
         name: "Logística",
-        href: "/logistica/seguimiento",
+        href: "/logistica/seguimiento-pedidos",
         icon: "🚚",
         children: [
           {
