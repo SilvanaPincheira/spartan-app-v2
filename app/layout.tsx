@@ -101,15 +101,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       },
     
       {
-        name: "Logística",
-        href: "/logistica/seguimiento-pedidos",
-        icon: "🚚",
-        children: [
-          {
-            name: "Seguimiento de Pedidos",
-            href: "/ventas/seguimiento-pedidos",
-          },
-        ],
+        
+          name: "Logística",
+          icon: "🚚",
+          children: [
+            {
+              name: "Seguimiento de Pedidos",
+              href: "/ventas/seguimiento-pedidos",
+            },
+          ],
+        
       },
       { name: "Inventario", href: "/inventario", icon: "📦" },
       { name: "Promociones", href: "/promociones", icon: "🎯" },
