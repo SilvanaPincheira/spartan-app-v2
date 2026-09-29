@@ -5,6 +5,8 @@ import { cookies } from "next/headers";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+const PAGE_SIZE = 1000;
+
 export async function GET(req: Request) {
   try {
     const supabase = createRouteHandlerClient({
@@ -45,7 +47,7 @@ export async function GET(req: Request) {
     }
 
     // ============================================================
-    // 2. BUSCAR EJECUTIVO EN SUPABASE
+    // 2. IDENTIFICAR EJECUTIVO
     // ============================================================
 
     const {
@@ -72,8 +74,7 @@ export async function GET(req: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error:
-            "No se pudo identificar al ejecutivo",
+          error: "No se pudo identificar al ejecutivo",
           detalle: ejecutivoError.message,
         },
         { status: 500 }
@@ -85,15 +86,14 @@ export async function GET(req: Request) {
         {
           ok: false,
           error:
-            `El usuario ${emailUsuario} no está registrado en la tabla ejecutivos.`,
+            `El usuario ${emailUsuario} no está registrado en ejecutivos.`,
         },
         { status: 404 }
       );
     }
 
     const nombreEjecutivo =
-      String(ejecutivo.nombre || "")
-        .trim();
+      String(ejecutivo.nombre || "").trim();
 
     if (!nombreEjecutivo) {
       return NextResponse.json(
@@ -107,151 +107,175 @@ export async function GET(req: Request) {
     }
 
     // ============================================================
-    // 3. PARÁMETROS OPCIONALES
+    // 3. FILTROS
     // ============================================================
 
     const { searchParams } = new URL(req.url);
 
     const pedido =
-      String(searchParams.get("pedido") || "")
-        .trim();
+      String(searchParams.get("pedido") || "").trim();
 
     const oc =
-      String(searchParams.get("oc") || "")
-        .trim();
+      String(searchParams.get("oc") || "").trim();
 
     const cliente =
-      String(searchParams.get("cliente") || "")
-        .trim();
+      String(searchParams.get("cliente") || "").trim();
 
     const estado =
-      String(searchParams.get("estado") || "")
-        .trim();
+      String(searchParams.get("estado") || "").trim();
+
+    const columnas = `
+      pedido_docentry,
+      linea_num,
+      clave_seguimiento,
+
+      empleado_ventas,
+      numero_pedido,
+      correo,
+      fecha,
+
+      estado_sac,
+      estado_cobranza,
+      estado_bodega,
+      estado_detalle,
+
+      folio_gdd,
+      folio_fe,
+      nro_ot,
+      transporte,
+      indicador,
+
+      cardcode,
+      cardname,
+      direccion_despacho,
+      oc,
+
+      codigo_articulo,
+      descripcion,
+
+      cantidad_pedido,
+      kilos_pedido,
+
+      cantidad_entregada,
+      cantidad_pendiente_entrega,
+
+      cantidad_facturada,
+      cantidad_pendiente_facturar,
+
+      ultima_sincronizacion,
+      activo
+    `;
 
     // ============================================================
-    // 4. CONSULTAR SEGUIMIENTO
+    // 4. LEER TODAS LAS FILAS POR BLOQUES DE 1000
     // ============================================================
 
-    let query = supabase
-      .from("seguimiento_pedidos")
-      .select(`
-        pedido_docentry,
-        linea_num,
-        clave_seguimiento,
+    const todasLasFilas: any[] = [];
 
-        empleado_ventas,
-        numero_pedido,
-        correo,
-        fecha,
+    let desde = 0;
 
-        estado_sac,
-        estado_cobranza,
-        estado_bodega,
-        estado_detalle,
+    while (true) {
+      let query = supabase
+        .from("seguimiento_pedidos")
+        .select(columnas)
+        .eq("activo", true)
+        .eq(
+          "empleado_ventas",
+          nombreEjecutivo
+        )
+        .order("fecha", {
+          ascending: false,
+        })
+        .order("numero_pedido", {
+          ascending: false,
+        })
+        .order("linea_num", {
+          ascending: true,
+        });
 
-        folio_gdd,
-        folio_fe,
-        nro_ot,
-        transporte,
-        indicador,
+      // ----------------------------------------------------------
+      // Filtros opcionales
+      // ----------------------------------------------------------
 
-        cardcode,
-        cardname,
-        direccion_despacho,
-        oc,
+      if (pedido) {
+        const numeroPedido =
+          Number(pedido);
 
-        codigo_articulo,
-        descripcion,
+        if (Number.isFinite(numeroPedido)) {
+          query = query.eq(
+            "numero_pedido",
+            numeroPedido
+          );
+        }
+      }
 
-        cantidad_pedido,
-        kilos_pedido,
-
-        cantidad_entregada,
-        cantidad_pendiente_entrega,
-
-        cantidad_facturada,
-        cantidad_pendiente_facturar,
-
-        ultima_sincronizacion,
-        activo
-      `)
-      .eq("activo", true)
-
-      // AQUÍ ESTÁ EL CAMBIO IMPORTANTE
-      .eq(
-        "empleado_ventas",
-        nombreEjecutivo
-      )
-
-      .order("fecha", {
-        ascending: false,
-      })
-
-      .order("numero_pedido", {
-        ascending: false,
-      })
-
-      .order("linea_num", {
-        ascending: true,
-      });
-
-    // ============================================================
-    // 5. FILTROS
-    // ============================================================
-
-    if (pedido) {
-      const numeroPedido = Number(pedido);
-
-      if (Number.isFinite(numeroPedido)) {
-        query = query.eq(
-          "numero_pedido",
-          numeroPedido
+      if (oc) {
+        query = query.ilike(
+          "oc",
+          `%${oc}%`
         );
       }
-    }
 
-    if (oc) {
-      query = query.ilike(
-        "oc",
-        `%${oc}%`
-      );
-    }
+      if (cliente) {
+        query = query.ilike(
+          "cardname",
+          `%${cliente}%`
+        );
+      }
 
-    if (cliente) {
-      query = query.ilike(
-        "cardname",
-        `%${cliente}%`
-      );
-    }
+      if (estado) {
+        query = query.eq(
+          "estado_detalle",
+          estado
+        );
+      }
 
-    if (estado) {
-      query = query.eq(
-        "estado_detalle",
-        estado
-      );
-    }
+      const hasta =
+        desde + PAGE_SIZE - 1;
 
-    const { data, error } = await query;
-
-    if (error) {
-      console.error(
-        "Error Supabase seguimiento:",
-        error
+      const {
+        data,
+        error,
+      } = await query.range(
+        desde,
+        hasta
       );
 
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "No se pudo obtener el seguimiento de pedidos",
-          detalle: error.message,
-        },
-        { status: 500 }
+      if (error) {
+        console.error(
+          "Error Supabase seguimiento:",
+          error
+        );
+
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "No se pudo obtener el seguimiento de pedidos",
+            detalle: error.message,
+          },
+          { status: 500 }
+        );
+      }
+
+      const bloque =
+        data || [];
+
+      todasLasFilas.push(
+        ...bloque
       );
+
+      // Si llegaron menos de 1000,
+      // ya no existe otra página.
+      if (bloque.length < PAGE_SIZE) {
+        break;
+      }
+
+      desde += PAGE_SIZE;
     }
 
     // ============================================================
-    // 6. RESPUESTA
+    // 5. RESPUESTA
     // ============================================================
 
     return NextResponse.json(
@@ -266,10 +290,10 @@ export async function GET(req: Request) {
         },
 
         totalLineas:
-          data?.length || 0,
+          todasLasFilas.length,
 
         data:
-          data || [],
+          todasLasFilas,
       },
       {
         headers: {
