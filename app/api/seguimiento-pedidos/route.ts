@@ -12,7 +12,7 @@ export async function GET(req: Request) {
     });
 
     // ============================================================
-    // USUARIO AUTENTICADO
+    // 1. USUARIO AUTENTICADO
     // ============================================================
 
     const {
@@ -45,29 +45,91 @@ export async function GET(req: Request) {
     }
 
     // ============================================================
-    // PARÁMETROS
+    // 2. BUSCAR EJECUTIVO EN SUPABASE
+    // ============================================================
+
+    const {
+      data: ejecutivo,
+      error: ejecutivoError,
+    } = await supabase
+      .from("ejecutivos")
+      .select(`
+        id,
+        nombre,
+        email,
+        zona,
+        gerencia
+      `)
+      .ilike("email", emailUsuario)
+      .maybeSingle();
+
+    if (ejecutivoError) {
+      console.error(
+        "Error buscando ejecutivo:",
+        ejecutivoError
+      );
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "No se pudo identificar al ejecutivo",
+          detalle: ejecutivoError.message,
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!ejecutivo) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            `El usuario ${emailUsuario} no está registrado en la tabla ejecutivos.`,
+        },
+        { status: 404 }
+      );
+    }
+
+    const nombreEjecutivo =
+      String(ejecutivo.nombre || "")
+        .trim();
+
+    if (!nombreEjecutivo) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "El ejecutivo no tiene nombre configurado.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // ============================================================
+    // 3. PARÁMETROS OPCIONALES
     // ============================================================
 
     const { searchParams } = new URL(req.url);
 
-    const pedido = String(
-      searchParams.get("pedido") || ""
-    ).trim();
+    const pedido =
+      String(searchParams.get("pedido") || "")
+        .trim();
 
-    const oc = String(
-      searchParams.get("oc") || ""
-    ).trim();
+    const oc =
+      String(searchParams.get("oc") || "")
+        .trim();
 
-    const cardcode = String(
-      searchParams.get("cardcode") || ""
-    ).trim();
+    const cliente =
+      String(searchParams.get("cliente") || "")
+        .trim();
 
-    const estado = String(
-      searchParams.get("estado") || ""
-    ).trim();
+    const estado =
+      String(searchParams.get("estado") || "")
+        .trim();
 
     // ============================================================
-    // CONSULTA
+    // 4. CONSULTAR SEGUIMIENTO
     // ============================================================
 
     let query = supabase
@@ -115,8 +177,11 @@ export async function GET(req: Request) {
       `)
       .eq("activo", true)
 
-      // Por ahora cada ejecutivo ve sus propios pedidos
-      .eq("correo", emailUsuario)
+      // AQUÍ ESTÁ EL CAMBIO IMPORTANTE
+      .eq(
+        "empleado_ventas",
+        nombreEjecutivo
+      )
 
       .order("fecha", {
         ascending: false,
@@ -131,7 +196,7 @@ export async function GET(req: Request) {
       });
 
     // ============================================================
-    // FILTROS OPCIONALES
+    // 5. FILTROS
     // ============================================================
 
     if (pedido) {
@@ -152,10 +217,10 @@ export async function GET(req: Request) {
       );
     }
 
-    if (cardcode) {
+    if (cliente) {
       query = query.ilike(
-        "cardcode",
-        `%${cardcode}%`
+        "cardname",
+        `%${cliente}%`
       );
     }
 
@@ -185,12 +250,26 @@ export async function GET(req: Request) {
       );
     }
 
+    // ============================================================
+    // 6. RESPUESTA
+    // ============================================================
+
     return NextResponse.json(
       {
         ok: true,
-        email: emailUsuario,
-        totalLineas: data?.length || 0,
-        data: data || [],
+
+        usuario: {
+          email: emailUsuario,
+          nombre: nombreEjecutivo,
+          zona: ejecutivo.zona || "",
+          gerencia: ejecutivo.gerencia || "",
+        },
+
+        totalLineas:
+          data?.length || 0,
+
+        data:
+          data || [],
       },
       {
         headers: {
@@ -212,7 +291,9 @@ export async function GET(req: Request) {
           error?.message ||
           "Error interno obteniendo seguimiento",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
