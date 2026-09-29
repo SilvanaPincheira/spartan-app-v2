@@ -370,10 +370,15 @@ const [region, setRegion] = useState<string>("RM");
   const [procesado, setProcesado] = useState(false);
   const [numeroNV, setNumeroNV] = useState("");
 
-  // 🔒 Bloqueo síncrono compartido entre las acciones de guardado.
-  // useRef cambia inmediatamente y evita que dos clics o dos botones
-  // ejecuten un POST al mismo tiempo antes de que React actualice el estado.
+  // 🔒 Protecciones de envío.
+  // procesandoRef evita doble clic en Guardar + PDF + Email.
+  // grabandoRef evita doble clic en Grabar Documento.
+  // saveRequestRef hace que dos intentos simultáneos compartan el MISMO POST.
+  // nvGuardadaRef recuerda que esta NV ya quedó guardada correctamente en Sheets.
   const procesandoRef = useRef(false);
+  const grabandoRef = useRef(false);
+  const saveRequestRef = useRef<Promise<{ rows: number; yaGuardada: boolean }> | null>(null);
+  const nvGuardadaRef = useRef("");
 
   /* ----- Helpers internos ----- */
   function generarNumeroNV(): string {
@@ -1064,6 +1069,128 @@ useEffect(() => {
   [lines]
 );
 
+  // =========================================================================
+  // GUARDADO ÚNICO EN SHEETS
+  // Ambos botones usan esta misma función. Así garantizamos que la NV se
+  // guarde una sola vez y quede disponible para la integración con SAP.
+  // =========================================================================
+  function construirPayloadNV() {
+    const fecha = new Date().toLocaleDateString("es-CL");
+
+    return lines.map((item) => ({
+      numeroNV,
+      fecha,
+      fechaEntrega: calcularFechaEntrega(),
+      ordenCompraCliente,
+      region,
+      cliente: clientName,
+      rut: clientRut,
+      codigoCliente: clientCode,
+      ejecutivo,
+      direccionDespacho: direccion,
+      comuna,
+      correoEjecutivo: emailEjecutivo,
+      comentarios,
+      subtotal,
+      total: subtotal,
+      codigo: item.code,
+      descripcion: item.name,
+      kilos: item.kilos,
+      cantidad: item.qty,
+      precioBase: Number((item.priceBase || 0).toFixed(2)),
+      descuento: item.isEspecial ? 0 : item.descuento,
+      precioVenta: Number((item.precioVenta || 0).toFixed(2)),
+      precioPresentacion: Number(
+        ((item.precioVenta || 0) * (item.kilos || 1)).toFixed(2)
+      ),
+      totalItem: Number((item.total || 0).toFixed(2)),
+      especialVigente: !!item.isEspecial,
+      especialBloqueado: !!item.isBloqueado,
+    }));
+  }
+
+  async function guardarNvEnSheets(): Promise<{ rows: number; yaGuardada: boolean }> {
+    const claveNV = `${String(numeroNV || "").trim()}__${normalize(ejecutivo || "")}`;
+
+    if (!String(numeroNV || "").trim()) {
+      throw new Error("No se ha generado el número de Nota de Venta.");
+    }
+
+    // Si esta misma NV ya se guardó exitosamente durante esta sesión,
+    // no volvemos a crear filas. PDF/correo pueden continuar normalmente.
+    if (nvGuardadaRef.current === claveNV) {
+      console.log("✅ NV ya guardada en Sheets. Se omite un segundo POST:", claveNV);
+      return { rows: lines.length, yaGuardada: true };
+    }
+
+    // Si ya existe un POST en curso, los dos procesos esperan la MISMA petición.
+    if (saveRequestRef.current) {
+      console.log("⏳ Ya existe un guardado en curso. Esperando el mismo POST...");
+      return await saveRequestRef.current;
+    }
+
+    const payload = construirPayloadNV();
+
+    if (!payload.length) {
+      throw new Error("Agrega al menos un ítem antes de guardar.");
+    }
+
+    console.log("PAYLOAD NV A SHEETS:", payload);
+
+    const request = (async () => {
+      const res = await fetch("/api/save-to-sheets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const responseText = await res.text();
+      let json: any = {};
+
+      try {
+        json = responseText ? JSON.parse(responseText) : {};
+      } catch {
+        throw new Error(
+          `La API no devolvió una respuesta JSON válida. HTTP ${res.status}`
+        );
+      }
+
+      console.log("RESPUESTA SAVE-TO-SHEETS:", {
+        numeroNV,
+        status: res.status,
+        okHttp: res.ok,
+        respuesta: json,
+      });
+
+      if (!res.ok || json?.status !== "ok" || json?.error) {
+        throw new Error(
+          json?.error ||
+            json?.message ||
+            `Error al guardar en Google Sheets. HTTP ${res.status}`
+        );
+      }
+
+      const rows = Number(json?.rows ?? payload.length) || payload.length;
+
+      // Solo marcamos como guardada DESPUÉS de recibir confirmación exitosa.
+      nvGuardadaRef.current = claveNV;
+
+      setSaveMsg(
+        `✅ Nota de Venta ${numeroNV} guardada en Google Sheets con ${rows} ítem(s).`
+      );
+
+      return { rows, yaGuardada: false };
+    })();
+
+    saveRequestRef.current = request;
+
+    try {
+      return await request;
+    } finally {
+      saveRequestRef.current = null;
+    }
+  }
+
   /* ==========================================================================
      [H] CLIENTE: eventos
      ========================================================================== */
@@ -1165,6 +1292,10 @@ useEffect(() => {
     setRegion("RM");
     setSaveMsg("");
     setProcesado(false);
+    nvGuardadaRef.current = "";
+    saveRequestRef.current = null;
+    procesandoRef.current = false;
+    grabandoRef.current = false;
 
     // La nueva NV debe comenzar sin documentos de la NV anterior.
     setAdjuntos([]);
@@ -1265,91 +1396,18 @@ if (descuentosInvalidos.length > 0) {
 }
 
 
-    // 2) Construir payload y GUARDAR en Google Sheets
+    // 2) GUARDAR en Google Sheets.
+    // Esta es la confirmación necesaria para que la NV quede disponible
+    // para la integración con SAP.
     const fecha = new Date().toLocaleDateString("es-CL");
-    const payload = lines.map((item) => ({
-      numeroNV,
-      fecha,
-      fechaEntrega: calcularFechaEntrega(),
-      ordenCompraCliente,
-      cliente: clientName,
-      rut: clientRut,
-      codigoCliente: clientCode,
-      ejecutivo,
-      direccionDespacho: direccion,
-      comuna,
-      correoEjecutivo: emailEjecutivo,
-      comentarios,
-      subtotal,
-      total: subtotal,
-      codigo: item.code,
-      descripcion: item.name,
-      kilos: item.kilos,
-      cantidad: item.qty,
-      precioBase: Number((item.priceBase || 0).toFixed(2)),
-descuento: item.isEspecial ? 0 : item.descuento,
-precioVenta: Number((item.precioVenta || 0).toFixed(2)),
-precioPresentacion: Number(
-  ((item.precioVenta || 0) * (item.kilos || 1)).toFixed(2)
-),
-totalItem: Number((item.total || 0).toFixed(2)),
-especialVigente: !!item.isEspecial,
-especialBloqueado: !!item.isBloqueado,
-    }));
-
-    console.log("PAYLOAD NV:", payload);
 
     setSaving(true);
+    try {
+      await guardarNvEnSheets();
+    } finally {
+      setSaving(false);
+    }
 
-try {
-  const resSave = await fetch("/api/save-to-sheets", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-
-  const saveText = await resSave.text();
-
-  let json: any = {};
-
-  try {
-    json = saveText ? JSON.parse(saveText) : {};
-  } catch {
-    json = {
-      ok: false,
-      error: "La API no devolvió una respuesta JSON válida.",
-      raw: saveText,
-    };
-  }
-
-  console.log("RESPUESTA SAVE-TO-SHEETS:", {
-    numeroNV,
-    status: resSave.status,
-    okHttp: resSave.ok,
-    respuesta: json,
-  });
-
-  if (
-    !resSave.ok ||
-    json?.status !== "ok" ||
-    json?.error
-  ) {
-    throw new Error(
-      json?.error ||
-        json?.message ||
-        `Error al guardar en Google Sheets. HTTP ${resSave.status}`
-    );
-  }
-
-  const rows =
-    Number(json?.rows ?? payload.length) || payload.length;
-
-  setSaveMsg(
-    `✅ Nota de Venta ${numeroNV} guardada en Google Sheets con ${rows} ítem(s).`
-  );
-} finally {
-  setSaving(false);
-}
     // 3) Generar PDF bonito
     const { filename, base64 } = generarPdfNotaVenta({
       numeroNV,
@@ -1928,16 +1986,10 @@ const resMail = await fetch("/api/send-notaventa", {
     {/* 💾 Botón Grabar Documento */}
     <button
       onClick={async () => {
-        // 🔒 Bloqueo compartido: evita doble clic y también impide que
-        // este botón se ejecute mientras Guardar + PDF + Email está trabajando.
-        if (procesandoRef.current) {
-          console.warn(
-            "⛔ Grabar Documento bloqueado: ya hay una operación en curso."
-          );
-          return;
-        }
+        // 🔒 Evita doble clic inmediato en este botón.
+        if (grabandoRef.current) return;
 
-        procesandoRef.current = true;
+        grabandoRef.current = true;
         setSaving(true);
         setErrorMsg("");
         setSaveMsg("");
@@ -1961,87 +2013,25 @@ const resMail = await fetch("/api/send-notaventa", {
             );
           }
 
-          const fecha = new Date().toLocaleDateString("es-CL");
-
-          const payload = lines.map((item) => ({
-            numeroNV,
-            fecha,
-            fechaEntrega: calcularFechaEntrega(),
-            ordenCompraCliente,
-            region,
-            cliente: clientName,
-            rut: clientRut,
-            codigoCliente: clientCode,
-            ejecutivo,
-            direccionDespacho: direccion,
-            comuna,
-            correoEjecutivo: emailEjecutivo,
-            comentarios,
-            subtotal,
-            total: subtotal,
-            codigo: item.code,
-            descripcion: item.name,
-            kilos: item.kilos,
-            cantidad: item.qty,
-            precioBase: Number((item.priceBase || 0).toFixed(2)),
-            descuento: item.isEspecial ? 0 : item.descuento,
-            precioVenta: Number((item.precioVenta || 0).toFixed(2)),
-            precioPresentacion: Number(
-              ((item.precioVenta || 0) * (item.kilos || 1)).toFixed(2)
-            ),
-            totalItem: Number((item.total || 0).toFixed(2)),
-            especialVigente: !!item.isEspecial,
-            especialBloqueado: !!item.isBloqueado,
-          }));
-
-          console.log("PAYLOAD GRABAR DOCUMENTO:", payload);
-
-          const res = await fetch("/api/save-to-sheets", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-
-          const responseText = await res.text();
-
-          let json: any = {};
-
-          try {
-            json = responseText ? JSON.parse(responseText) : {};
-          } catch {
+          if (lines.some((l) => l.isBloqueado)) {
             throw new Error(
-              `La API no devolvió una respuesta JSON válida. HTTP ${res.status}`
+              "No puedes guardar: hay precios especiales vencidos en la tabla."
             );
           }
 
-          console.log("RESPUESTA GRABAR DOCUMENTO:", {
-            numeroNV,
-            status: res.status,
-            okHttp: res.ok,
-            respuesta: json,
-          });
-
-          if (
-            !res.ok ||
-            json?.status !== "ok" ||
-            json?.error
-          ) {
+          const descuentosInvalidos = lines.filter((l) => l.descuento > 20);
+          if (descuentosInvalidos.length > 0) {
             throw new Error(
-              json?.error ||
-                json?.message ||
-                `Error al grabar documento. HTTP ${res.status}`
+              "No se puede guardar: hay ítems con descuento superior al 20%."
             );
           }
 
-          const rows =
-            Number(json?.rows ?? payload.length) || payload.length;
-
-          setSaveMsg(
-            `✅ Nota de Venta ${numeroNV} guardada en Google Sheets con ${rows} ítem(s).`
-          );
+          const resultado = await guardarNvEnSheets();
 
           alert(
-            `✅ Nota de Venta ${numeroNV} guardada correctamente en Google Sheets.`
+            resultado.yaGuardada
+              ? `✅ La Nota de Venta ${numeroNV} ya estaba guardada en Google Sheets.`
+              : `✅ Nota de Venta ${numeroNV} guardada correctamente en Google Sheets.`
           );
         } catch (e: any) {
           console.error("❌ Error al grabar documento:", e);
@@ -2057,7 +2047,7 @@ const resMail = await fetch("/api/send-notaventa", {
             }`
           );
         } finally {
-          procesandoRef.current = false;
+          grabandoRef.current = false;
           setSaving(false);
         }
       }}
@@ -2076,7 +2066,7 @@ const resMail = await fetch("/api/send-notaventa", {
   onClick={async () => {
     // ⛔ Evita doble envío y bloquea también mientras Grabar Documento
     // está ejecutando su POST.
-    if (procesandoRef.current || procesando || procesado || saving) return;
+    if (procesandoRef.current || procesando || procesado) return;
 
     try {
       await guardarPdfYEnviar();
@@ -2101,7 +2091,7 @@ const resMail = await fetch("/api/send-notaventa", {
       );
     }
   }}
-  disabled={procesando || procesado || saving}
+  disabled={procesando || procesado}
   className={`px-3 py-1 rounded text-white font-medium flex items-center gap-2 shadow transition ${
     procesado
       ? "bg-green-700 cursor-not-allowed"
