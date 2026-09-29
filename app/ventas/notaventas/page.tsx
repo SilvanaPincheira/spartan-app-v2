@@ -20,7 +20,7 @@
 
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { guardarPdfYEnviarSinEstado } from "@/lib/utils/guardar-notaventa";
 import html2canvas from "html2canvas";
 import { generarPdfNotaVenta } from "@/lib/utils/pdf-notaventa";
@@ -368,7 +368,12 @@ const [region, setRegion] = useState<string>("RM");
   const [saving, setSaving] = useState(false);
   const [procesando, setProcesando] = useState(false);
   const [procesado, setProcesado] = useState(false);
-    const [numeroNV, setNumeroNV] = useState("");
+  const [numeroNV, setNumeroNV] = useState("");
+
+  // 🔒 Bloqueo síncrono compartido entre las acciones de guardado.
+  // useRef cambia inmediatamente y evita que dos clics o dos botones
+  // ejecuten un POST al mismo tiempo antes de que React actualice el estado.
+  const procesandoRef = useRef(false);
 
   /* ----- Helpers internos ----- */
   function generarNumeroNV(): string {
@@ -1209,7 +1214,15 @@ useEffect(() => {
 
   // 🔹 Botón único: guarda → genera PDF → envía email
 async function guardarPdfYEnviar() {
-  if (procesando) return;
+  // 🔒 Bloqueo inmediato: evita dos ejecuciones simultáneas.
+  if (procesandoRef.current) {
+    console.warn(
+      "⛔ guardarPdfYEnviar bloqueado: ya hay una operación en curso."
+    );
+    return;
+  }
+
+  procesandoRef.current = true;
   setProcesando(true);
   setErrorMsg("");
   setSaveMsg("");
@@ -1427,6 +1440,7 @@ const resMail = await fetch("/api/send-notaventa", {
     // ni muestre un mensaje falso de éxito.
     throw e;
   } finally {
+    procesandoRef.current = false;
     setProcesando(false);
   }
 }
@@ -1914,8 +1928,16 @@ const resMail = await fetch("/api/send-notaventa", {
     {/* 💾 Botón Grabar Documento */}
     <button
       onClick={async () => {
-        if (saving) return; // 🔒 evita doble clic
+        // 🔒 Bloqueo compartido: evita doble clic y también impide que
+        // este botón se ejecute mientras Guardar + PDF + Email está trabajando.
+        if (procesandoRef.current) {
+          console.warn(
+            "⛔ Grabar Documento bloqueado: ya hay una operación en curso."
+          );
+          return;
+        }
 
+        procesandoRef.current = true;
         setSaving(true);
         setErrorMsg("");
         setSaveMsg("");
@@ -2035,10 +2057,11 @@ const resMail = await fetch("/api/send-notaventa", {
             }`
           );
         } finally {
+          procesandoRef.current = false;
           setSaving(false);
         }
       }}
-      disabled={saving}
+      disabled={saving || procesando}
       className={`px-3 py-1 rounded text-white transition ${
         saving
           ? "bg-gray-400 cursor-not-allowed"
@@ -2051,7 +2074,9 @@ const resMail = await fetch("/api/send-notaventa", {
    {/* 💾 Guardar + PDF + Email */}
 <button
   onClick={async () => {
-    if (procesando || procesado) return; // ⛔ Evita doble envío
+    // ⛔ Evita doble envío y bloquea también mientras Grabar Documento
+    // está ejecutando su POST.
+    if (procesandoRef.current || procesando || procesado || saving) return;
 
     try {
       await guardarPdfYEnviar();
@@ -2076,7 +2101,7 @@ const resMail = await fetch("/api/send-notaventa", {
       );
     }
   }}
-  disabled={procesando || procesado}
+  disabled={procesando || procesado || saving}
   className={`px-3 py-1 rounded text-white font-medium flex items-center gap-2 shadow transition ${
     procesado
       ? "bg-green-700 cursor-not-allowed"
