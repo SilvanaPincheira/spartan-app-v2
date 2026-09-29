@@ -382,8 +382,8 @@ const [region, setRegion] = useState<string>("RM");
 
   /* ----- Helpers internos ----- */
 
-  // 🔢 Obtiene el siguiente correlativo desde el historial real del ejecutivo.
-  // Ya NO usa localStorage como fuente del número de NV.
+  // 🔢 Obtiene y RESERVA el siguiente correlativo directamente en Apps Script.
+  // Ya NO usa localStorage ni el CSV público del historial para generar números.
   async function obtenerSiguienteNumeroNV(correo: string): Promise<string> {
     const email = String(correo || "").toLowerCase().trim();
 
@@ -394,26 +394,52 @@ const [region, setRegion] = useState<string>("RM");
     }
 
     const url =
-      `/api/historial-notaventa?email=${encodeURIComponent(email)}` +
-      `&correlativo=1`;
+      `/api/notaventas/correlativo?email=${encodeURIComponent(email)}` +
+      `&_=${Date.now()}`;
 
-    const res = await fetch(url, { cache: "no-store" });
-    const json = await res.json();
+    const res = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      headers: {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        Pragma: "no-cache",
+      },
+    });
 
-    if (!res.ok || !json?.ok || !String(json?.numeroNV || "").trim()) {
+    const responseText = await res.text();
+
+    let json: any = {};
+
+    try {
+      json = responseText ? JSON.parse(responseText) : {};
+    } catch {
+      throw new Error(
+        `El servicio de correlativos no devolvió una respuesta JSON válida. HTTP ${res.status}`
+      );
+    }
+
+    if (
+      !res.ok ||
+      json?.ok !== true ||
+      json?.status !== "ok" ||
+      !String(json?.numeroNV || "").trim()
+    ) {
       throw new Error(
         json?.error ||
+          json?.message ||
           "No se pudo obtener el siguiente correlativo de Nota de Venta."
       );
     }
 
     const nuevoNumero = String(json.numeroNV).trim();
 
-    console.log("🔢 Correlativo NV obtenido desde historial:", {
+    console.log("🔢 Correlativo NV reservado en Apps Script:", {
       email,
-      ultimoCorrelativo: json?.ultimoCorrelativo,
+      ultimoEnSheet: json?.ultimoEnSheet,
+      ultimoReservado: json?.ultimoReservado,
       siguienteCorrelativo: json?.siguienteCorrelativo,
       numeroNV: nuevoNumero,
+      reservado: json?.reservado,
     });
 
     return nuevoNumero;
@@ -515,7 +541,7 @@ useEffect(() => {
 
       /*
        * NV nueva normal:
-       * obtiene el siguiente correlativo desde el historial del ejecutivo.
+       * reserva el siguiente correlativo directamente en Apps Script.
        *
        * Si viene ?nv= o ?duplicar=, el efecto de historial de abajo
        * se encarga de mantener o generar el número correspondiente.
@@ -1392,8 +1418,8 @@ useEffect(() => {
 
     try {
       /*
-       * Conservamos el correo de la sesión y consultamos nuevamente
-       * el historial para obtener el correlativo real siguiente.
+       * Conservamos el correo de la sesión y reservamos inmediatamente
+       * el siguiente correlativo directamente en Apps Script.
        */
       if (!correoActual) {
         const supabase = createClientComponentClient();
