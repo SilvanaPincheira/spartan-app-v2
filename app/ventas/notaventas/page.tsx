@@ -381,15 +381,58 @@ const [region, setRegion] = useState<string>("RM");
   const nvGuardadaRef = useRef("");
 
   /* ----- Helpers internos ----- */
-  function generarNumeroNV(): string {
-    if (typeof window === "undefined") return "";
-    const year = new Date().getFullYear();
-    const key = `nv.counter.${year}`;
-    const last = Number(window.localStorage.getItem(key) || "0");
-    const next = last + 1;
-    window.localStorage.setItem(key, String(next));
-    return `NV-${year}-${String(next).padStart(5, "0")}`;
+
+  // 🔢 Obtiene el siguiente correlativo desde el historial real del ejecutivo.
+  // Ya NO usa localStorage como fuente del número de NV.
+  async function obtenerSiguienteNumeroNV(correo: string): Promise<string> {
+    const email = String(correo || "").toLowerCase().trim();
+
+    if (!email) {
+      throw new Error(
+        "No se pudo obtener el correo del ejecutivo para generar el correlativo."
+      );
+    }
+
+    const url =
+      `/api/historial-notaventa?email=${encodeURIComponent(email)}` +
+      `&correlativo=1`;
+
+    const res = await fetch(url, { cache: "no-store" });
+    const json = await res.json();
+
+    if (!res.ok || !json?.ok || !String(json?.numeroNV || "").trim()) {
+      throw new Error(
+        json?.error ||
+          "No se pudo obtener el siguiente correlativo de Nota de Venta."
+      );
+    }
+
+    const nuevoNumero = String(json.numeroNV).trim();
+
+    console.log("🔢 Correlativo NV obtenido desde historial:", {
+      email,
+      ultimoCorrelativo: json?.ultimoCorrelativo,
+      siguienteCorrelativo: json?.siguienteCorrelativo,
+      numeroNV: nuevoNumero,
+    });
+
+    return nuevoNumero;
   }
+
+  async function asignarSiguienteNumeroNV(correo: string) {
+    setNumeroNV("");
+
+    const nuevoNumero = await obtenerSiguienteNumeroNV(correo);
+
+    nvGuardadaRef.current = "";
+    saveRequestRef.current = null;
+    setProcesado(false);
+
+    setNumeroNV(nuevoNumero);
+
+    return nuevoNumero;
+  }
+
   function especialVigente(pe?: PrecioEspecial | null) {
     if (!pe) return false;
     if (!pe.vencimiento) return true;
@@ -403,7 +446,8 @@ const [region, setRegion] = useState<string>("RM");
   /* ==========================================================================
      [E] EFECTOS: Inicialización y carga de datos
      ========================================================================== */
-  useEffect(() => setNumeroNV(generarNumeroNV()), []);
+  // El número de NV se obtiene después de conocer el correo del ejecutivo.
+  // Si se abre o duplica una NV desde historial, ese flujo administra el número.
   // Cargar la región utilizada anteriormente
 useEffect(() => {
   if (typeof window === "undefined") return;
@@ -450,7 +494,7 @@ useEffect(() => {
 }, []);
 
 
-  // 🧭 Autocompletar correo del ejecutivo desde Supabase
+  // 🧭 Obtener correo del ejecutivo desde Supabase y generar correlativo real
 useEffect(() => {
   (async () => {
     try {
@@ -459,15 +503,39 @@ useEffect(() => {
         data: { session },
       } = await supabase.auth.getSession();
 
-      const email = session?.user?.email || "";
-      if (email) {
-        setEmailEjecutivo(email);
+      const email = String(session?.user?.email || "")
+        .toLowerCase()
+        .trim();
+
+      if (!email) {
+        throw new Error("No se encontró el correo del usuario autenticado.");
       }
-    } catch (err) {
-      console.error("❌ Error al obtener sesión Supabase:", err);
+
+      setEmailEjecutivo(email);
+
+      /*
+       * NV nueva normal:
+       * obtiene el siguiente correlativo desde el historial del ejecutivo.
+       *
+       * Si viene ?nv= o ?duplicar=, el efecto de historial de abajo
+       * se encarga de mantener o generar el número correspondiente.
+       */
+      if (!nvToOpen && !nvToDuplicate) {
+        await asignarSiguienteNumeroNV(email);
+      }
+    } catch (err: any) {
+      console.error("❌ Error al obtener sesión/correlativo NV:", err);
+
+      if (!nvToOpen && !nvToDuplicate) {
+        setNumeroNV("");
+        setErrorMsg(
+          err?.message ||
+            "No se pudo obtener el correlativo de Nota de Venta."
+        );
+      }
     }
   })();
-}, []);
+}, [nvToOpen, nvToDuplicate]);
 
 
  // 🧩 Cargar Nota de Venta (Abrir o Duplicar) desde el historial
@@ -514,11 +582,27 @@ useEffect(() => {
       );
       setComuna("");
 
-      // 🧩 Si es duplicado, generar nuevo número; si es abrir, mantener
+      // 🧩 Si es duplicado, obtener un NUEVO correlativo real del ejecutivo.
+      // Si solo se está abriendo una NV, mantener su número original.
       if (nvToDuplicate) {
-        setNumeroNV(generarNumeroNV());
+        const correoParaCorrelativo = String(
+          cabecera.correoEjecutivo || emailFromUrl || ""
+        )
+          .toLowerCase()
+          .trim();
+
+        if (!correoParaCorrelativo) {
+          throw new Error(
+            "No se encontró el correo del ejecutivo para generar el nuevo correlativo."
+          );
+        }
+
+        setEmailEjecutivo(correoParaCorrelativo);
+        await asignarSiguienteNumeroNV(correoParaCorrelativo);
       } else {
         setNumeroNV(cabecera.numeroNV);
+        nvGuardadaRef.current = "";
+        saveRequestRef.current = null;
       }
 
       // ⚙️ Cargar líneas de productos
@@ -1275,7 +1359,11 @@ useEffect(() => {
     );
   }
 
-  function limpiarTodo() {
+  async function limpiarTodo() {
+    const correoActual = String(emailEjecutivo || "")
+      .toLowerCase()
+      .trim();
+
     setClientName("");
     setClientRut("");
     setClientCode("");
@@ -1283,11 +1371,10 @@ useEffect(() => {
     setDireccion("");
     setComuna("");
     setOrdenCompraCliente("");
-    setEmailEjecutivo("");
     setComentarios("");
     setLines([]);
     setErrorMsg("");
-    setNumeroNV(generarNumeroNV());
+    setNumeroNV("");
     setListaSeleccionada(1);
     setRegion("RM");
     setSaveMsg("");
@@ -1302,6 +1389,42 @@ useEffect(() => {
 
     // Fuerza a React a crear un input file nuevo y limpio.
     setAdjuntoInputKey((actual) => actual + 1);
+
+    try {
+      /*
+       * Conservamos el correo de la sesión y consultamos nuevamente
+       * el historial para obtener el correlativo real siguiente.
+       */
+      if (!correoActual) {
+        const supabase = createClientComponentClient();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        const emailSesion = String(session?.user?.email || "")
+          .toLowerCase()
+          .trim();
+
+        if (!emailSesion) {
+          throw new Error(
+            "No se encontró el correo del ejecutivo para crear una nueva NV."
+          );
+        }
+
+        setEmailEjecutivo(emailSesion);
+        await asignarSiguienteNumeroNV(emailSesion);
+      } else {
+        setEmailEjecutivo(correoActual);
+        await asignarSiguienteNumeroNV(correoActual);
+      }
+    } catch (err: any) {
+      console.error("❌ Error generando nueva NV:", err);
+      setNumeroNV("");
+      setErrorMsg(
+        err?.message ||
+          "No se pudo obtener el siguiente correlativo de Nota de Venta."
+      );
+    }
   }
   function imprimir() {
     window.print();
