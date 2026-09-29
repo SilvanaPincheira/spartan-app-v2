@@ -2,6 +2,10 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 
+/* ============================================================
+   TIPOS
+   ============================================================ */
+
 type LineaSeguimiento = {
   pedido_docentry: number;
   linea_num: number;
@@ -85,6 +89,10 @@ type PedidoAgrupado = {
   lineas: LineaSeguimiento[];
 };
 
+/* ============================================================
+   HELPERS
+   ============================================================ */
+
 function numero(valor: unknown) {
   const n = Number(valor);
   return Number.isFinite(n) ? n : 0;
@@ -106,6 +114,17 @@ function formatearFecha(fecha?: string) {
   }
 
   return fecha;
+}
+
+function limpiarDireccion(valor?: string) {
+  if (!valor) return "-";
+
+  return String(valor)
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\r/g, "\n")
+    .trim();
 }
 
 function obtenerEstadoGeneral(
@@ -209,86 +228,80 @@ function estiloEstado(estado: string) {
   }
 
   return {
-    background: "#e5e7eb",
-    color: "#374151",
-    border: "1px solid #d1d5db",
+    background: "#e2e8f0",
+    color: "#334155",
+    border: "1px solid #cbd5e1",
   };
 }
 
-function Badge({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const texto = String(children || "");
-
-  return (
-    <span
-      style={{
-        ...estiloEstado(texto),
-        display: "inline-flex",
-        alignItems: "center",
-        borderRadius: 999,
-        padding: "4px 9px",
-        fontSize: 12,
-        fontWeight: 700,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {children}
-    </span>
-  );
-}
+/* ============================================================
+   COMPONENTE PRINCIPAL
+   ============================================================ */
 
 export default function SeguimientoPedidosPage() {
-  const [lineas, setLineas] = useState<
-    LineaSeguimiento[]
-  >([]);
+  const [lineas, setLineas] = useState<LineaSeguimiento[]>([]);
+  const [usuario, setUsuario] = useState<Usuario | null>(null);
 
-  const [usuario, setUsuario] =
-    useState<Usuario | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [actualizando, setActualizando] = useState(false);
+  const [error, setError] = useState("");
 
-  const [loading, setLoading] =
-    useState(true);
+  const [busqueda, setBusqueda] = useState("");
+  const [estadoFiltro, setEstadoFiltro] = useState("TODOS");
+  const [soloPendientes, setSoloPendientes] = useState(false);
 
-  const [error, setError] =
-    useState("");
+  const [abiertos, setAbiertos] = useState<Set<number>>(
+    new Set()
+  );
 
-  const [busqueda, setBusqueda] =
-    useState("");
+  /* ============================================================
+     CARGAR API
+     ============================================================ */
 
-  const [estadoFiltro, setEstadoFiltro] =
-    useState("TODOS");
-
-  const [soloPendientes, setSoloPendientes] =
-    useState(false);
-
-  const [abiertos, setAbiertos] =
-    useState<Set<number>>(new Set());
-
-  async function cargarSeguimiento() {
+  async function cargarSeguimiento(manual = false) {
     try {
-      setLoading(true);
+      if (manual) {
+        setActualizando(true);
+      } else {
+        setLoading(true);
+      }
+
       setError("");
 
       const res = await fetch(
-        "/api/seguimiento-pedidos",
+        `/api/seguimiento-pedidos?_=${Date.now()}`,
         {
           cache: "no-store",
         }
       );
 
-      const json = await res.json();
+      const responseText = await res.text();
+
+      let json: any = {};
+
+      try {
+        json = responseText
+          ? JSON.parse(responseText)
+          : {};
+      } catch {
+        throw new Error(
+          `La API de seguimiento no devolvió JSON válido. HTTP ${res.status}`
+        );
+      }
 
       if (!res.ok || !json?.ok) {
         throw new Error(
           json?.error ||
-            "No se pudo cargar el seguimiento."
+            "No se pudo cargar el seguimiento de pedidos."
         );
       }
 
       setUsuario(json.usuario || null);
-      setLineas(json.data || []);
+      setLineas(
+        Array.isArray(json.data)
+          ? json.data
+          : []
+      );
     } catch (err: any) {
       console.error(
         "Error cargando seguimiento:",
@@ -301,12 +314,17 @@ export default function SeguimientoPedidosPage() {
       );
     } finally {
       setLoading(false);
+      setActualizando(false);
     }
   }
 
   useEffect(() => {
     cargarSeguimiento();
   }, []);
+
+  /* ============================================================
+     AGRUPAR POR PEDIDO
+     ============================================================ */
 
   const pedidos = useMemo<PedidoAgrupado[]>(() => {
     const mapa =
@@ -329,13 +347,19 @@ export default function SeguimientoPedidosPage() {
       numeroPedido,
       detalle,
     ] of mapa.entries()) {
+      if (!detalle.length) continue;
+
       const primera = detalle[0];
 
       const foliosGdd = Array.from(
         new Set(
           detalle
             .map((l) => Number(l.folio_gdd))
-            .filter((x) => Number.isFinite(x) && x > 0)
+            .filter(
+              (x) =>
+                Number.isFinite(x) &&
+                x > 0
+            )
         )
       );
 
@@ -343,12 +367,17 @@ export default function SeguimientoPedidosPage() {
         new Set(
           detalle
             .map((l) => Number(l.folio_fe))
-            .filter((x) => Number.isFinite(x) && x > 0)
+            .filter(
+              (x) =>
+                Number.isFinite(x) &&
+                x > 0
+            )
         )
       );
 
       resultado.push({
         numeroPedido,
+
         pedidoDocEntry:
           primera.pedido_docentry,
 
@@ -383,13 +412,22 @@ export default function SeguimientoPedidosPage() {
           obtenerEstadoGeneral(detalle),
 
         nroOt:
-          primera.nro_ot || "",
+          detalle
+            .map((x) => x.nro_ot)
+            .find((x) => String(x || "").trim()) ||
+          "",
 
         transporte:
-          primera.transporte || "",
+          detalle
+            .map((x) => x.transporte)
+            .find((x) => String(x || "").trim()) ||
+          "",
 
         indicador:
-          primera.indicador || "",
+          detalle
+            .map((x) => x.indicador)
+            .find((x) => String(x || "").trim()) ||
+          "",
 
         foliosGdd,
         foliosFe,
@@ -438,7 +476,8 @@ export default function SeguimientoPedidosPage() {
         lineas:
           [...detalle].sort(
             (a, b) =>
-              a.linea_num - b.linea_num
+              a.linea_num -
+              b.linea_num
           ),
       });
     }
@@ -460,6 +499,10 @@ export default function SeguimientoPedidosPage() {
       );
     });
   }, [lineas]);
+
+  /* ============================================================
+     FILTROS
+     ============================================================ */
 
   const pedidosFiltrados =
     useMemo(() => {
@@ -505,7 +548,9 @@ export default function SeguimientoPedidosPage() {
           ${pedido.nroOt}
           ${pedido.transporte}
           ${detalleProductos}
-        `.toLowerCase();
+        `
+          .toLowerCase()
+          .replace(/\s+/g, " ");
 
         return contenido.includes(texto);
       });
@@ -515,6 +560,10 @@ export default function SeguimientoPedidosPage() {
       estadoFiltro,
       soloPendientes,
     ]);
+
+  /* ============================================================
+     KPI
+     ============================================================ */
 
   const resumen = useMemo(() => {
     return {
@@ -553,6 +602,10 @@ export default function SeguimientoPedidosPage() {
     };
   }, [pedidos]);
 
+  /* ============================================================
+     ABRIR / CERRAR
+     ============================================================ */
+
   function togglePedido(
     numeroPedido: number
   ) {
@@ -572,32 +625,55 @@ export default function SeguimientoPedidosPage() {
     });
   }
 
+  /* ============================================================
+     LOADING
+     ============================================================ */
+
   if (loading) {
     return (
       <div
         style={{
-          padding: 24,
-          fontFamily: "Arial, sans-serif",
+          minHeight: "100vh",
+          background: "#f8fafc",
+          padding: 30,
+          fontFamily:
+            "Arial, Helvetica, sans-serif",
         }}
       >
-        Cargando seguimiento de pedidos...
+        <div
+          style={{
+            background: "white",
+            border:
+              "1px solid #e2e8f0",
+            borderRadius: 12,
+            padding: 25,
+          }}
+        >
+          Cargando seguimiento de pedidos...
+        </div>
       </div>
     );
   }
 
+  /* ============================================================
+     RENDER
+     ============================================================ */
+
   return (
     <div
       style={{
-        padding: 24,
+        padding:
+          "28px clamp(18px, 3vw, 46px)",
         background: "#f8fafc",
         minHeight: "100vh",
-        fontFamily: "Arial, sans-serif",
+        fontFamily:
+          "Arial, Helvetica, sans-serif",
         color: "#0f172a",
       }}
     >
-      {/* =========================================================
+      {/* ======================================================
           ENCABEZADO
-          ========================================================= */}
+          ====================================================== */}
 
       <div
         style={{
@@ -607,7 +683,9 @@ export default function SeguimientoPedidosPage() {
         <h1
           style={{
             margin: 0,
-            fontSize: 26,
+            fontSize: 27,
+            fontWeight: 700,
+            letterSpacing: "-0.4px",
           }}
         >
           Seguimiento de Pedidos
@@ -615,42 +693,53 @@ export default function SeguimientoPedidosPage() {
 
         <div
           style={{
-            marginTop: 6,
+            marginTop: 7,
             color: "#64748b",
             fontSize: 14,
           }}
         >
           {usuario?.nombre || ""}
+
           {usuario?.zona
             ? ` · ${usuario.zona}`
             : ""}
+
+          {usuario?.gerencia
+            ? ` · ${usuario.gerencia}`
+            : ""}
         </div>
       </div>
+
+      {/* ======================================================
+          ERROR
+          ====================================================== */}
 
       {error && (
         <div
           style={{
             background: "#fee2e2",
             color: "#991b1b",
-            border: "1px solid #fecaca",
-            borderRadius: 8,
-            padding: 12,
+            border:
+              "1px solid #fecaca",
+            borderRadius: 10,
+            padding: "12px 15px",
             marginBottom: 20,
+            fontSize: 14,
           }}
         >
           {error}
         </div>
       )}
 
-      {/* =========================================================
+      {/* ======================================================
           KPI
-          ========================================================= */}
+          ====================================================== */}
 
       <div
         style={{
           display: "grid",
           gridTemplateColumns:
-            "repeat(auto-fit, minmax(160px, 1fr))",
+            "repeat(5, minmax(135px, 1fr))",
           gap: 12,
           marginBottom: 20,
         }}
@@ -658,16 +747,19 @@ export default function SeguimientoPedidosPage() {
         <Kpi
           titulo="Pedidos"
           valor={resumen.total}
+          tipo="neutral"
         />
 
         <Kpi
           titulo="Pend. despacho"
           valor={resumen.pendientes}
+          tipo="rojo"
         />
 
         <Kpi
           titulo="Parciales"
           valor={resumen.parciales}
+          tipo="amarillo"
         />
 
         <Kpi
@@ -675,44 +767,62 @@ export default function SeguimientoPedidosPage() {
           valor={
             resumen.pendientesFactura
           }
+          tipo="azul"
         />
 
         <Kpi
           titulo="Completos"
           valor={resumen.completos}
+          tipo="verde"
         />
       </div>
 
-      {/* =========================================================
+      {/* ======================================================
           FILTROS
-          ========================================================= */}
+          ====================================================== */}
 
       <div
         style={{
           background: "white",
           padding: 16,
-          borderRadius: 10,
-          border: "1px solid #e2e8f0",
+          borderRadius: 12,
+          border:
+            "1px solid #e2e8f0",
           marginBottom: 18,
+
           display: "flex",
           gap: 12,
           flexWrap: "wrap",
           alignItems: "center",
+
+          boxShadow:
+            "0 1px 2px rgba(15,23,42,0.03)",
         }}
       >
         <input
           value={busqueda}
           onChange={(e) =>
-            setBusqueda(e.target.value)
+            setBusqueda(
+              e.target.value
+            )
           }
           placeholder="Buscar pedido, OC, cliente, código o producto..."
           style={{
-            flex: "1 1 350px",
-            minWidth: 260,
-            padding: "10px 12px",
+            flex: "1 1 420px",
+            minWidth: 250,
+
+            height: 44,
+            padding:
+              "0 13px",
+
             border:
               "1px solid #cbd5e1",
-            borderRadius: 7,
+
+            borderRadius: 8,
+
+            fontSize: 14,
+
+            outline: "none",
           }}
         />
 
@@ -724,11 +834,20 @@ export default function SeguimientoPedidosPage() {
             )
           }
           style={{
-            padding: "10px 12px",
+            minWidth: 200,
+            height: 44,
+
+            padding:
+              "0 12px",
+
             border:
               "1px solid #cbd5e1",
-            borderRadius: 7,
+
+            borderRadius: 8,
+
             background: "white",
+
+            fontSize: 14,
           }}
         >
           <option value="TODOS">
@@ -758,15 +877,22 @@ export default function SeguimientoPedidosPage() {
 
         <label
           style={{
+            height: 44,
+
             display: "flex",
             gap: 7,
             alignItems: "center",
-            fontSize: 14,
+
+            whiteSpace: "nowrap",
+
+            fontSize: 13,
           }}
         >
           <input
             type="checkbox"
-            checked={soloPendientes}
+            checked={
+              soloPendientes
+            }
             onChange={(e) =>
               setSoloPendientes(
                 e.target.checked
@@ -778,35 +904,70 @@ export default function SeguimientoPedidosPage() {
         </label>
 
         <button
-          onClick={cargarSeguimiento}
+          onClick={() =>
+            cargarSeguimiento(true)
+          }
+          disabled={actualizando}
           style={{
-            padding: "10px 14px",
+            height: 44,
+
+            padding:
+              "0 18px",
+
             border: 0,
-            borderRadius: 7,
-            background: "#2563eb",
+            borderRadius: 8,
+
+            background:
+              actualizando
+                ? "#94a3b8"
+                : "#2563eb",
+
             color: "white",
-            cursor: "pointer",
+
+            cursor:
+              actualizando
+                ? "default"
+                : "pointer",
+
             fontWeight: 700,
+
+            fontSize: 14,
           }}
         >
-          Actualizar
+          {actualizando
+            ? "Actualizando..."
+            : "Actualizar"}
         </button>
       </div>
 
+      {/* ======================================================
+          CONTADOR
+          ====================================================== */}
+
       <div
         style={{
-          marginBottom: 10,
+          marginBottom: 11,
           color: "#64748b",
           fontSize: 13,
         }}
       >
-        {pedidosFiltrados.length} pedidos ·{" "}
-        {lineas.length} líneas de productos
+        <strong>
+          {pedidosFiltrados.length.toLocaleString(
+            "es-CL"
+          )}
+        </strong>{" "}
+        pedidos ·{" "}
+        <strong>
+          {lineas.length.toLocaleString(
+            "es-CL"
+          )}
+        </strong>{" "}
+        líneas de productos
       </div>
 
-      {/* =========================================================
-          PEDIDOS
-          ========================================================= */}
+      {/* ======================================================
+          LISTADO
+          ====================================================== */}
 
       <div
         style={{
@@ -829,12 +990,22 @@ export default function SeguimientoPedidosPage() {
                 }
                 style={{
                   background: "white",
+
                   border:
-                    "1px solid #e2e8f0",
-                  borderRadius: 10,
+                    "1px solid #dbe3ed",
+
+                  borderRadius: 12,
+
                   overflow: "hidden",
+
+                  boxShadow:
+                    "0 1px 2px rgba(15,23,42,0.03)",
                 }}
               >
+                {/* ==============================================
+                    CABECERA DEL PEDIDO
+                    ============================================== */}
+
                 <button
                   onClick={() =>
                     togglePedido(
@@ -843,47 +1014,67 @@ export default function SeguimientoPedidosPage() {
                   }
                   style={{
                     width: "100%",
+
                     border: 0,
-                    background: "white",
-                    padding: 16,
+
+                    background:
+                      abierto
+                        ? "#fcfdff"
+                        : "white",
+
+                    padding:
+                      "17px 18px",
+
                     cursor: "pointer",
+
                     textAlign: "left",
                   }}
                 >
                   <div
                     style={{
                       display: "grid",
+
                       gridTemplateColumns:
-                        "150px minmax(220px, 1fr) 140px 160px 40px",
-                      gap: 14,
-                      alignItems: "center",
+                        "145px minmax(260px, 1fr) minmax(170px, 215px) 135px 30px",
+
+                      gap: 18,
+
+                      alignItems:
+                        "center",
+
+                      width: "100%",
                     }}
                   >
+                    {/* PEDIDO */}
+
                     <div>
                       <div
                         style={{
-                          fontSize: 12,
+                          fontSize: 11,
                           color: "#64748b",
+                          marginBottom: 3,
                         }}
                       >
                         Pedido
                       </div>
 
-                      <strong
+                      <div
                         style={{
                           fontSize: 17,
+                          fontWeight: 800,
+                          color: "#0f172a",
                         }}
                       >
                         {
                           pedido.numeroPedido
                         }
-                      </strong>
+                      </div>
 
                       <div
                         style={{
                           fontSize: 12,
                           color: "#64748b",
-                          marginTop: 3,
+                          marginTop: 5,
                         }}
                       >
                         {formatearFecha(
@@ -892,19 +1083,57 @@ export default function SeguimientoPedidosPage() {
                       </div>
                     </div>
 
-                    <div>
-                      <strong>
-                        {pedido.cardname}
-                      </strong>
+                    {/* CLIENTE */}
+
+                    <div
+                      style={{
+                        minWidth: 0,
+                      }}
+                    >
+                      <div
+                        title={
+                          pedido.cardname
+                        }
+                        style={{
+                          fontSize: 15,
+                          fontWeight: 700,
+
+                          color: "#0f172a",
+
+                          overflow:
+                            "hidden",
+
+                          textOverflow:
+                            "ellipsis",
+
+                          whiteSpace:
+                            "nowrap",
+                        }}
+                      >
+                        {
+                          pedido.cardname
+                        }
+                      </div>
 
                       <div
                         style={{
+                          fontSize: 12,
                           color: "#64748b",
-                          fontSize: 13,
-                          marginTop: 3,
+                          marginTop: 5,
+
+                          overflow:
+                            "hidden",
+
+                          textOverflow:
+                            "ellipsis",
+
+                          whiteSpace:
+                            "nowrap",
                         }}
                       >
-                        {pedido.cardcode}
+                        {
+                          pedido.cardcode
+                        }
 
                         {pedido.oc
                           ? ` · OC ${pedido.oc}`
@@ -912,7 +1141,18 @@ export default function SeguimientoPedidosPage() {
                       </div>
                     </div>
 
-                    <div>
+                    {/* ESTADO */}
+
+                    <div
+                      style={{
+                        display: "flex",
+
+                        justifyContent:
+                          "flex-end",
+
+                        minWidth: 0,
+                      }}
+                    >
                       <Badge>
                         {
                           pedido.estadoGeneral
@@ -920,33 +1160,72 @@ export default function SeguimientoPedidosPage() {
                       </Badge>
                     </div>
 
+                    {/* CANTIDADES */}
+
                     <div
                       style={{
-                        fontSize: 13,
+                        borderLeft:
+                          "1px solid #e2e8f0",
+
+                        paddingLeft: 16,
+
+                        fontSize: 12,
+
+                        lineHeight: 1.75,
                       }}
                     >
-                      <div>
-                        Pedido:{" "}
-                        <strong>
-                          {formatearNumero(
-                            pedido.cantidadPedido
-                          )}
-                        </strong>
-                      </div>
+                      <FilaCantidad
+                        titulo="Pedido"
+                        valor={
+                          pedido.cantidadPedido
+                        }
+                      />
 
-                      <div>
-                        Pendiente:{" "}
-                        <strong>
-                          {formatearNumero(
-                            pedido.cantidadPendiente
-                          )}
-                        </strong>
-                      </div>
+                      <FilaCantidad
+                        titulo="Entregado"
+                        valor={
+                          pedido.cantidadEntregada
+                        }
+                      />
+
+                      <FilaCantidad
+                        titulo="Pendiente"
+                        valor={
+                          pedido.cantidadPendiente
+                        }
+                        destacado={
+                          pedido.cantidadPendiente >
+                          0
+                        }
+                      />
                     </div>
+
+                    {/* ABRIR */}
 
                     <div
                       style={{
+                        display: "flex",
+
+                        justifyContent:
+                          "center",
+
+                        alignItems:
+                          "center",
+
+                        width: 30,
+                        height: 30,
+
+                        borderRadius:
+                          "50%",
+
+                        background:
+                          abierto
+                            ? "#e2e8f0"
+                            : "#f1f5f9",
+
                         fontSize: 20,
+
+                        color: "#334155",
                       }}
                     >
                       {abierto
@@ -956,274 +1235,485 @@ export default function SeguimientoPedidosPage() {
                   </div>
                 </button>
 
+                {/* ==============================================
+                    DETALLE DESPLEGADO
+                    ============================================== */}
+
                 {abierto && (
                   <div
                     style={{
                       borderTop:
                         "1px solid #e2e8f0",
-                      padding: 16,
+
+                      padding:
+                        "18px",
                     }}
                   >
-                    {/* ESTADOS */}
+                    {/* ==========================================
+                        ESTADOS
+                        ========================================== */}
 
                     <div
                       style={{
-                        display: "flex",
-                        gap: 10,
-                        flexWrap: "wrap",
-                        marginBottom: 16,
+                        marginBottom: 18,
                       }}
                     >
-                      <div>
-                        <small>SAC</small>
-                        <br />
-                        <Badge>
-                          {
-                            pedido.estadoSac
-                          }
-                        </Badge>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 700,
+
+                          color: "#475569",
+
+                          marginBottom: 9,
+
+                          textTransform:
+                            "uppercase",
+
+                          letterSpacing:
+                            "0.4px",
+                        }}
+                      >
+                        Estado del pedido
                       </div>
-
-                      <div>
-                        <small>
-                          Cobranza
-                        </small>
-                        <br />
-                        <Badge>
-                          {
-                            pedido.estadoCobranza
-                          }
-                        </Badge>
-                      </div>
-
-                      <div>
-                        <small>
-                          Bodega
-                        </small>
-                        <br />
-                        <Badge>
-                          {
-                            pedido.estadoBodega
-                          }
-                        </Badge>
-                      </div>
-                    </div>
-
-                    {/* DATOS DOCUMENTO */}
-
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns:
-                          "repeat(auto-fit, minmax(180px, 1fr))",
-                        gap: 10,
-                        marginBottom: 16,
-                        fontSize: 13,
-                      }}
-                    >
-                      <Dato
-                        titulo="OC"
-                        valor={
-                          pedido.oc || "-"
-                        }
-                      />
-
-                      <Dato
-                        titulo="GDD"
-                        valor={
-                          pedido.foliosGdd
-                            .length
-                            ? pedido.foliosGdd.join(
-                                ", "
-                              )
-                            : "-"
-                        }
-                      />
-
-                      <Dato
-                        titulo="Factura"
-                        valor={
-                          pedido.foliosFe
-                            .length
-                            ? pedido.foliosFe.join(
-                                ", "
-                              )
-                            : "-"
-                        }
-                      />
-
-                      <Dato
-                        titulo="N° OT"
-                        valor={
-                          pedido.nroOt || "-"
-                        }
-                      />
-
-                      <Dato
-                        titulo="Transporte"
-                        valor={
-                          pedido.transporte ||
-                          "-"
-                        }
-                      />
-
-                      <Dato
-                        titulo="Indicador"
-                        valor={
-                          pedido.indicador ||
-                          "-"
-                        }
-                      />
-                    </div>
-
-                    <div
-                      style={{
-                        marginBottom: 16,
-                        fontSize: 13,
-                      }}
-                    >
-                      <strong>
-                        Dirección de despacho:
-                      </strong>
 
                       <div
                         style={{
-                          marginTop: 4,
-                          whiteSpace:
-                            "pre-line",
-                          color: "#475569",
+                          display: "grid",
+
+                          gridTemplateColumns:
+                            "repeat(3, minmax(140px, 200px))",
+
+                          gap: 10,
                         }}
                       >
-                        {(
-                          pedido.direccionDespacho ||
-                          "-"
-                        ).replace(
-                          /\r/g,
-                          "\n"
+                        <EstadoBox
+                          titulo="SAC"
+                          estado={
+                            pedido.estadoSac
+                          }
+                        />
+
+                        <EstadoBox
+                          titulo="Cobranza"
+                          estado={
+                            pedido.estadoCobranza
+                          }
+                        />
+
+                        <EstadoBox
+                          titulo="Bodega"
+                          estado={
+                            pedido.estadoBodega
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    {/* ==========================================
+                        DOCUMENTOS
+                        ========================================== */}
+
+                    <div
+                      style={{
+                        marginBottom: 18,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 700,
+
+                          color: "#475569",
+
+                          marginBottom: 9,
+
+                          textTransform:
+                            "uppercase",
+
+                          letterSpacing:
+                            "0.4px",
+                        }}
+                      >
+                        Documentos y despacho
+                      </div>
+
+                      <div
+                        style={{
+                          display: "grid",
+
+                          gridTemplateColumns:
+                            "repeat(auto-fit, minmax(155px, 1fr))",
+
+                          gap: 9,
+                        }}
+                      >
+                        <Dato
+                          titulo="OC Cliente"
+                          valor={
+                            pedido.oc ||
+                            "-"
+                          }
+                        />
+
+                        <Dato
+                          titulo="GDD"
+                          valor={
+                            pedido
+                              .foliosGdd
+                              .length
+                              ? pedido.foliosGdd.join(
+                                  ", "
+                                )
+                              : "-"
+                          }
+                        />
+
+                        <Dato
+                          titulo="Factura"
+                          valor={
+                            pedido
+                              .foliosFe
+                              .length
+                              ? pedido.foliosFe.join(
+                                  ", "
+                                )
+                              : "-"
+                          }
+                        />
+
+                        <Dato
+                          titulo="N° OT"
+                          valor={
+                            pedido.nroOt ||
+                            "-"
+                          }
+                        />
+
+                        <Dato
+                          titulo="Transporte"
+                          valor={
+                            pedido.transporte ||
+                            "-"
+                          }
+                        />
+
+                        <Dato
+                          titulo="Indicador"
+                          valor={
+                            pedido.indicador ||
+                            "-"
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    {/* ==========================================
+                        DIRECCIÓN
+                        ========================================== */}
+
+                    <div
+                      style={{
+                        marginBottom: 20,
+
+                        background:
+                          "#f8fafc",
+
+                        borderRadius: 9,
+
+                        padding:
+                          "12px 13px",
+
+                        border:
+                          "1px solid #eef2f7",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#64748b",
+                          marginBottom: 5,
+                        }}
+                      >
+                        Dirección de despacho
+                      </div>
+
+                      <div
+                        style={{
+                          fontSize: 13,
+
+                          whiteSpace:
+                            "pre-line",
+
+                          color: "#334155",
+
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        {limpiarDireccion(
+                          pedido.direccionDespacho
                         )}
                       </div>
                     </div>
 
-                    {/* DETALLE */}
+                    {/* ==========================================
+                        RESUMEN CANTIDADES
+                        ========================================== */}
 
                     <div
                       style={{
-                        overflowX: "auto",
+                        display: "grid",
+
+                        gridTemplateColumns:
+                          "repeat(5, minmax(120px, 1fr))",
+
+                        gap: 9,
+
+                        marginBottom: 20,
                       }}
                     >
-                      <table
+                      <MiniKpi
+                        titulo="Pedido"
+                        valor={
+                          pedido.cantidadPedido
+                        }
+                      />
+
+                      <MiniKpi
+                        titulo="Entregado"
+                        valor={
+                          pedido.cantidadEntregada
+                        }
+                      />
+
+                      <MiniKpi
+                        titulo="Pend. despacho"
+                        valor={
+                          pedido.cantidadPendiente
+                        }
+                        alerta={
+                          pedido.cantidadPendiente >
+                          0
+                        }
+                      />
+
+                      <MiniKpi
+                        titulo="Facturado"
+                        valor={
+                          pedido.cantidadFacturada
+                        }
+                      />
+
+                      <MiniKpi
+                        titulo="Pend. factura"
+                        valor={
+                          pedido.cantidadPendienteFacturar
+                        }
+                        alerta={
+                          pedido.cantidadPendienteFacturar >
+                          0
+                        }
+                      />
+                    </div>
+
+                    {/* ==========================================
+                        TABLA PRODUCTOS
+                        ========================================== */}
+
+                    <div>
+                      <div
                         style={{
-                          width: "100%",
-                          borderCollapse:
-                            "collapse",
-                          fontSize: 13,
+                          fontSize: 12,
+                          fontWeight: 700,
+
+                          color: "#475569",
+
+                          marginBottom: 9,
+
+                          textTransform:
+                            "uppercase",
+
+                          letterSpacing:
+                            "0.4px",
                         }}
                       >
-                        <thead>
-                          <tr
-                            style={{
-                              background:
-                                "#f8fafc",
-                            }}
-                          >
-                            <Th>
-                              Código
-                            </Th>
+                        Detalle de productos
+                      </div>
 
-                            <Th>
-                              Producto
-                            </Th>
+                      <div
+                        style={{
+                          overflowX:
+                            "auto",
 
-                            <Th align="right">
-                              Pedido
-                            </Th>
+                          border:
+                            "1px solid #e2e8f0",
 
-                            <Th align="right">
-                              Entregado
-                            </Th>
+                          borderRadius: 9,
+                        }}
+                      >
+                        <table
+                          style={{
+                            width: "100%",
 
-                            <Th align="right">
-                              Pendiente
-                            </Th>
+                            minWidth:
+                              980,
 
-                            <Th align="right">
-                              Facturado
-                            </Th>
+                            borderCollapse:
+                              "collapse",
 
-                            <Th align="right">
-                              Pend. factura
-                            </Th>
+                            fontSize: 12,
+                          }}
+                        >
+                          <thead>
+                            <tr
+                              style={{
+                                background:
+                                  "#f8fafc",
+                              }}
+                            >
+                              <Th>
+                                Línea
+                              </Th>
 
-                            <Th>
-                              Estado
-                            </Th>
-                          </tr>
-                        </thead>
+                              <Th>
+                                Código
+                              </Th>
 
-                        <tbody>
-                          {pedido.lineas.map(
-                            (linea) => (
-                              <tr
-                                key={
-                                  linea.clave_seguimiento
-                                }
-                              >
-                                <Td>
-                                  {
-                                    linea.codigo_articulo
+                              <Th>
+                                Producto
+                              </Th>
+
+                              <Th align="right">
+                                Pedido
+                              </Th>
+
+                              <Th align="right">
+                                Entregado
+                              </Th>
+
+                              <Th align="right">
+                                Pendiente
+                              </Th>
+
+                              <Th align="right">
+                                Facturado
+                              </Th>
+
+                              <Th align="right">
+                                Pend. factura
+                              </Th>
+
+                              <Th>
+                                Estado
+                              </Th>
+                            </tr>
+                          </thead>
+
+                          <tbody>
+                            {pedido.lineas.map(
+                              (
+                                linea
+                              ) => (
+                                <tr
+                                  key={
+                                    linea.clave_seguimiento
                                   }
-                                </Td>
-
-                                <Td>
-                                  {
-                                    linea.descripcion
-                                  }
-                                </Td>
-
-                                <Td align="right">
-                                  {formatearNumero(
-                                    linea.cantidad_pedido
-                                  )}
-                                </Td>
-
-                                <Td align="right">
-                                  {formatearNumero(
-                                    linea.cantidad_entregada
-                                  )}
-                                </Td>
-
-                                <Td align="right">
-                                  <strong>
-                                    {formatearNumero(
-                                      linea.cantidad_pendiente_entrega
-                                    )}
-                                  </strong>
-                                </Td>
-
-                                <Td align="right">
-                                  {formatearNumero(
-                                    linea.cantidad_facturada
-                                  )}
-                                </Td>
-
-                                <Td align="right">
-                                  {formatearNumero(
-                                    linea.cantidad_pendiente_facturar
-                                  )}
-                                </Td>
-
-                                <Td>
-                                  <Badge>
+                                >
+                                  <Td>
                                     {
-                                      linea.estado_detalle
+                                      linea.linea_num
                                     }
-                                  </Badge>
-                                </Td>
-                              </tr>
-                            )
-                          )}
-                        </tbody>
-                      </table>
+                                  </Td>
+
+                                  <Td>
+                                    <strong>
+                                      {
+                                        linea.codigo_articulo
+                                      }
+                                    </strong>
+                                  </Td>
+
+                                  <Td>
+                                    {
+                                      linea.descripcion
+                                    }
+                                  </Td>
+
+                                  <Td align="right">
+                                    {formatearNumero(
+                                      linea.cantidad_pedido
+                                    )}
+                                  </Td>
+
+                                  <Td align="right">
+                                    {formatearNumero(
+                                      linea.cantidad_entregada
+                                    )}
+                                  </Td>
+
+                                  <Td align="right">
+                                    <span
+                                      style={{
+                                        fontWeight:
+                                          linea.cantidad_pendiente_entrega >
+                                          0
+                                            ? 800
+                                            : 500,
+
+                                        color:
+                                          linea.cantidad_pendiente_entrega >
+                                          0
+                                            ? "#b91c1c"
+                                            : "#334155",
+                                      }}
+                                    >
+                                      {formatearNumero(
+                                        linea.cantidad_pendiente_entrega
+                                      )}
+                                    </span>
+                                  </Td>
+
+                                  <Td align="right">
+                                    {formatearNumero(
+                                      linea.cantidad_facturada
+                                    )}
+                                  </Td>
+
+                                  <Td align="right">
+                                    <span
+                                      style={{
+                                        fontWeight:
+                                          linea.cantidad_pendiente_facturar >
+                                          0
+                                            ? 800
+                                            : 500,
+
+                                        color:
+                                          linea.cantidad_pendiente_facturar >
+                                          0
+                                            ? "#92400e"
+                                            : "#334155",
+                                      }}
+                                    >
+                                      {formatearNumero(
+                                        linea.cantidad_pendiente_facturar
+                                      )}
+                                    </span>
+                                  </Td>
+
+                                  <Td>
+                                    <Badge>
+                                      {
+                                        linea.estado_detalle
+                                      }
+                                    </Badge>
+                                  </Td>
+                                </tr>
+                              )
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1236,16 +1726,23 @@ export default function SeguimientoPedidosPage() {
           <div
             style={{
               background: "white",
+
               border:
                 "1px solid #e2e8f0",
-              borderRadius: 10,
-              padding: 30,
-              textAlign: "center",
+
+              borderRadius: 12,
+
+              padding: 35,
+
+              textAlign:
+                "center",
+
               color: "#64748b",
+
+              fontSize: 14,
             }}
           >
-            No se encontraron pedidos con
-            los filtros seleccionados.
+            No se encontraron pedidos con los filtros seleccionados.
           </div>
         )}
       </div>
@@ -1253,26 +1750,122 @@ export default function SeguimientoPedidosPage() {
   );
 }
 
+/* ============================================================
+   COMPONENTES
+   ============================================================ */
+
+function Badge({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const texto =
+    String(children || "");
+
+  return (
+    <span
+      style={{
+        ...estiloEstado(texto),
+
+        display:
+          "inline-flex",
+
+        alignItems:
+          "center",
+
+        justifyContent:
+          "center",
+
+        borderRadius: 999,
+
+        padding:
+          "5px 10px",
+
+        fontSize: 11,
+
+        fontWeight: 700,
+
+        lineHeight: 1.2,
+
+        textAlign: "center",
+
+        whiteSpace:
+          "normal",
+
+        maxWidth: 190,
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
 function Kpi({
   titulo,
   valor,
+  tipo = "neutral",
 }: {
   titulo: string;
   valor: number;
+  tipo?:
+    | "neutral"
+    | "rojo"
+    | "amarillo"
+    | "azul"
+    | "verde";
 }) {
+  const configuracion = {
+    neutral: {
+      fondo: "#ffffff",
+      borde: "#dbe3ed",
+      texto: "#0f172a",
+    },
+
+    rojo: {
+      fondo: "#fffafa",
+      borde: "#fecaca",
+      texto: "#991b1b",
+    },
+
+    amarillo: {
+      fondo: "#fffdf5",
+      borde: "#fde68a",
+      texto: "#92400e",
+    },
+
+    azul: {
+      fondo: "#f8fbff",
+      borde: "#bfdbfe",
+      texto: "#1d4ed8",
+    },
+
+    verde: {
+      fondo: "#f7fef9",
+      borde: "#bbf7d0",
+      texto: "#166534",
+    },
+  }[tipo];
+
   return (
     <div
       style={{
-        background: "white",
-        border: "1px solid #e2e8f0",
-        borderRadius: 10,
-        padding: 16,
+        background:
+          configuracion.fondo,
+
+        border: `1px solid ${configuracion.borde}`,
+
+        borderRadius: 11,
+
+        padding:
+          "14px 16px",
+
+        minHeight: 72,
       }}
     >
       <div
         style={{
           color: "#64748b",
-          fontSize: 13,
+          fontSize: 12,
         }}
       >
         {titulo}
@@ -1281,14 +1874,55 @@ function Kpi({
       <div
         style={{
           fontWeight: 800,
-          fontSize: 25,
-          marginTop: 4,
+          fontSize: 23,
+          marginTop: 5,
+          color:
+            configuracion.texto,
         }}
       >
         {valor.toLocaleString(
           "es-CL"
         )}
       </div>
+    </div>
+  );
+}
+
+function EstadoBox({
+  titulo,
+  estado,
+}: {
+  titulo: string;
+  estado: string;
+}) {
+  return (
+    <div
+      style={{
+        background:
+          "#f8fafc",
+
+        border:
+          "1px solid #eef2f7",
+
+        borderRadius: 9,
+
+        padding:
+          "10px 11px",
+      }}
+    >
+      <div
+        style={{
+          color: "#64748b",
+          fontSize: 11,
+          marginBottom: 6,
+        }}
+      >
+        {titulo}
+      </div>
+
+      <Badge>
+        {estado || "-"}
+      </Badge>
     </div>
   );
 }
@@ -1303,22 +1937,145 @@ function Dato({
   return (
     <div
       style={{
-        background: "#f8fafc",
-        borderRadius: 7,
-        padding: 10,
+        background:
+          "#f8fafc",
+
+        borderRadius: 8,
+
+        padding:
+          "10px 11px",
+
+        border:
+          "1px solid #eef2f7",
+
+        minHeight: 53,
       }}
     >
       <div
         style={{
           color: "#64748b",
-          fontSize: 11,
-          marginBottom: 3,
+          fontSize: 10,
+          marginBottom: 5,
         }}
       >
         {titulo}
       </div>
 
-      <strong>{valor}</strong>
+      <div
+        style={{
+          fontSize: 12,
+          fontWeight: 700,
+
+          color: "#0f172a",
+
+          overflowWrap:
+            "anywhere",
+        }}
+      >
+        {valor}
+      </div>
+    </div>
+  );
+}
+
+function MiniKpi({
+  titulo,
+  valor,
+  alerta = false,
+}: {
+  titulo: string;
+  valor: number;
+  alerta?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        border:
+          alerta
+            ? "1px solid #fecaca"
+            : "1px solid #e2e8f0",
+
+        background:
+          alerta
+            ? "#fffafa"
+            : "#ffffff",
+
+        borderRadius: 8,
+
+        padding:
+          "9px 11px",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          color: "#64748b",
+        }}
+      >
+        {titulo}
+      </div>
+
+      <div
+        style={{
+          marginTop: 3,
+
+          fontSize: 15,
+          fontWeight: 800,
+
+          color:
+            alerta
+              ? "#b91c1c"
+              : "#0f172a",
+        }}
+      >
+        {formatearNumero(
+          valor
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FilaCantidad({
+  titulo,
+  valor,
+  destacado = false,
+}: {
+  titulo: string;
+  valor: number;
+  destacado?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+
+        justifyContent:
+          "space-between",
+
+        gap: 9,
+      }}
+    >
+      <span
+        style={{
+          color: "#64748b",
+        }}
+      >
+        {titulo}
+      </span>
+
+      <strong
+        style={{
+          color:
+            destacado
+              ? "#b91c1c"
+              : "#0f172a",
+        }}
+      >
+        {formatearNumero(
+          valor
+        )}
+      </strong>
     </div>
   );
 }
@@ -1333,11 +2090,22 @@ function Th({
   return (
     <th
       style={{
-        padding: "9px 8px",
+        padding:
+          "10px 9px",
+
         borderBottom:
           "1px solid #e2e8f0",
-        textAlign: align,
-        whiteSpace: "nowrap",
+
+        textAlign:
+          align,
+
+        whiteSpace:
+          "nowrap",
+
+        color: "#475569",
+
+        fontSize: 11,
+        fontWeight: 700,
       }}
     >
       {children}
@@ -1355,11 +2123,19 @@ function Td({
   return (
     <td
       style={{
-        padding: "9px 8px",
+        padding:
+          "10px 9px",
+
         borderBottom:
           "1px solid #f1f5f9",
-        textAlign: align,
-        verticalAlign: "top",
+
+        textAlign:
+          align,
+
+        verticalAlign:
+          "middle",
+
+        color: "#334155",
       }}
     >
       {children}
