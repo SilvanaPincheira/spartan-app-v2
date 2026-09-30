@@ -9,6 +9,7 @@ type InventarioItem = {
   stock: number;
   venta: number;
   disponible: number;
+  stock_por_componentes: boolean;
   actualizado_en: string;
 };
 
@@ -62,11 +63,19 @@ export default function InventarioPage() {
     const total = inventario.length;
 
     const conStock = inventario.filter(
-      (item) => Number(item.disponible) > 0
+      (item) =>
+        !item.stock_por_componentes &&
+        Number(item.disponible) > 0
     ).length;
 
     const sinStock = inventario.filter(
-      (item) => Number(item.disponible) <= 0
+      (item) =>
+        !item.stock_por_componentes &&
+        Number(item.disponible) <= 0
+    ).length;
+
+    const porComponentes = inventario.filter(
+      (item) => item.stock_por_componentes
     ).length;
 
     const comprometido = inventario.reduce(
@@ -78,6 +87,7 @@ export default function InventarioPage() {
       total,
       conStock,
       sinStock,
+      porComponentes,
       comprometido,
     };
   }, [inventario]);
@@ -101,7 +111,17 @@ export default function InventarioPage() {
     });
   }
 
-  function estadoDisponible(disponible: number) {
+  function estadoDisponible(
+    disponible: number,
+    stockPorComponentes: boolean
+  ) {
+    if (stockPorComponentes) {
+      return {
+        texto: "Stock por componentes",
+        clase: "bg-blue-50 text-blue-700 border-blue-200",
+      };
+    }
+
     const valor = Number(disponible);
 
     if (valor <= 0) {
@@ -213,7 +233,7 @@ export default function InventarioPage() {
           </p>
 
           <p className="mt-1 text-xs text-slate-400">
-            Productos disponibles
+            Productos con stock propio
           </p>
         </div>
 
@@ -233,7 +253,7 @@ export default function InventarioPage() {
           </p>
 
           <p className="mt-1 text-xs text-slate-400">
-            Disponible igual o menor a 0
+            No incluye productos por componentes
           </p>
         </div>
 
@@ -257,6 +277,28 @@ export default function InventarioPage() {
           </p>
         </div>
       </div>
+
+      {/* AVISO COMPONENTES */}
+      {resumen.porComponentes > 0 && (
+        <div className="mb-5 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 text-blue-600">ℹ</div>
+
+            <div>
+              <p className="text-sm font-semibold text-blue-800">
+                {resumen.porComponentes.toLocaleString("es-CL")} productos
+                utilizan stock por componentes
+              </p>
+
+              <p className="mt-0.5 text-xs text-blue-700">
+                Estas presentaciones no mantienen stock propio. Su
+                disponibilidad depende del stock de los componentes de su
+                receta o conjunto.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* BUSCADOR */}
       <div className="mb-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -370,7 +412,10 @@ export default function InventarioPage() {
                 </tr>
               ) : (
                 inventarioFiltrado.map((item) => {
-                  const estado = estadoDisponible(item.disponible);
+                  const estado = estadoDisponible(
+                    item.disponible,
+                    item.stock_por_componentes
+                  );
 
                   return (
                     <tr
@@ -394,7 +439,9 @@ export default function InventarioPage() {
                       </td>
 
                       <td className="px-5 py-3.5 text-right font-medium text-slate-700">
-                        {formatearNumero(item.stock)}
+                        {item.stock_por_componentes
+                          ? "—"
+                          : formatearNumero(item.stock)}
                       </td>
 
                       <td className="px-5 py-3.5 text-right text-slate-600">
@@ -402,7 +449,9 @@ export default function InventarioPage() {
                       </td>
 
                       <td className="px-5 py-3.5 text-right text-base font-bold text-slate-900">
-                        {formatearNumero(item.disponible)}
+                        {item.stock_por_componentes
+                          ? "—"
+                          : formatearNumero(item.disponible)}
                       </td>
 
                       <td className="px-5 py-3.5 text-center">
