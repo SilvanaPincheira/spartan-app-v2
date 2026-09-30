@@ -22,6 +22,7 @@ export async function GET() {
           stock,
           venta,
           disponible,
+          stock_por_componentes,
           actualizado_en
         `)
         .order("codigo", { ascending: true })
