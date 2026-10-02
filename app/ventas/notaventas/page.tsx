@@ -349,6 +349,7 @@ const [region, setRegion] = useState<string>("RM");
   const [procesando, setProcesando] = useState(false);
   const [procesado, setProcesado] = useState(false);
   const [numeroNV, setNumeroNV] = useState("");
+  const [cargandoCorrelativo, setCargandoCorrelativo] = useState(true);
 
   // 🔒 Protecciones de envío.
   // procesandoRef evita doble clic en Guardar + PDF + Email.
@@ -426,17 +427,23 @@ const [region, setRegion] = useState<string>("RM");
   }
 
   async function asignarSiguienteNumeroNV(correo: string) {
+    setCargandoCorrelativo(true);
     setNumeroNV("");
 
-    const nuevoNumero = await obtenerSiguienteNumeroNV(correo);
+    try {
+      const nuevoNumero = await obtenerSiguienteNumeroNV(correo);
 
-    nvGuardadaRef.current = "";
-    saveRequestRef.current = null;
-    setProcesado(false);
+      nvGuardadaRef.current = "";
+      saveRequestRef.current = null;
+      setProcesado(false);
+      setNumeroNV(nuevoNumero);
 
-    setNumeroNV(nuevoNumero);
-
-    return nuevoNumero;
+      return nuevoNumero;
+    } finally {
+      // Aunque la solicitud falle, dejamos de mostrar “Generando...”.
+      // El error real lo maneja el flujo que llamó a esta función.
+      setCargandoCorrelativo(false);
+    }
   }
 
   function especialVigente(pe?: PrecioEspecial | null) {
@@ -534,6 +541,7 @@ useEffect(() => {
 
       if (!nvToOpen && !nvToDuplicate) {
         setNumeroNV("");
+        setCargandoCorrelativo(false);
         setErrorMsg(
           err?.message ||
             "No se pudo obtener el correlativo de Nota de Venta."
@@ -607,6 +615,7 @@ useEffect(() => {
         await asignarSiguienteNumeroNV(correoParaCorrelativo);
       } else {
         setNumeroNV(cabecera.numeroNV);
+        setCargandoCorrelativo(false);
         nvGuardadaRef.current = "";
         saveRequestRef.current = null;
       }
@@ -643,6 +652,7 @@ useEffect(() => {
       }
     } catch (err) {
       console.error("❌ Error cargando Nota de Venta:", err);
+      setCargandoCorrelativo(false);
       alert("No se pudo cargar la Nota de Venta solicitada.");
     }
   })();
@@ -1381,6 +1391,7 @@ useEffect(() => {
     setLines([]);
     setErrorMsg("");
     setNumeroNV("");
+    setCargandoCorrelativo(true);
     setListaSeleccionada(1);
     setRegion("RM");
     setSaveMsg("");
@@ -1426,6 +1437,7 @@ useEffect(() => {
     } catch (err: any) {
       console.error("❌ Error generando nueva NV:", err);
       setNumeroNV("");
+      setCargandoCorrelativo(false);
       setErrorMsg(
         err?.message ||
           "No se pudo obtener el siguiente correlativo de Nota de Venta."
@@ -1652,7 +1664,7 @@ const resMail = await fetch("/api/send-notaventa", {
           </div>
           <div className="text-[11px] bg-zinc-100 px-3 py-2 rounded text-right">
             <div>
-              <b>N°</b> {numeroNV || "—"}
+              <b>N°</b> {cargandoCorrelativo ? "Generando..." : numeroNV || "—"}
             </div>
             <div>{new Date().toLocaleDateString("es-CL")}</div>
           </div>
@@ -2180,14 +2192,18 @@ const resMail = await fetch("/api/send-notaventa", {
           setSaving(false);
         }
       }}
-      disabled={saving || procesando}
+      disabled={saving || procesando || cargandoCorrelativo || !numeroNV.trim()}
       className={`px-3 py-1 rounded text-white transition ${
-        saving
+        saving || procesando || cargandoCorrelativo || !numeroNV.trim()
           ? "bg-gray-400 cursor-not-allowed"
           : "bg-blue-600 hover:bg-blue-700"
       }`}
     >
-      {saving ? "Grabando..." : "💾 Grabar Documento"}
+      {cargandoCorrelativo
+        ? "⏳ Generando N°..."
+        : saving
+        ? "Grabando..."
+        : "💾 Grabar Documento"}
     </button>
 
    {/* 💾 Guardar + PDF + Email */}
@@ -2220,11 +2236,11 @@ const resMail = await fetch("/api/send-notaventa", {
       );
     }
   }}
-  disabled={procesando || procesado}
+  disabled={procesando || procesado || cargandoCorrelativo || !numeroNV.trim()}
   className={`px-3 py-1 rounded text-white font-medium flex items-center gap-2 shadow transition ${
     procesado
       ? "bg-green-700 cursor-not-allowed"
-      : procesando
+      : procesando || cargandoCorrelativo || !numeroNV.trim()
       ? "bg-zinc-400 cursor-not-allowed"
       : "bg-emerald-600 hover:bg-emerald-700"
   }`}
@@ -2232,6 +2248,10 @@ const resMail = await fetch("/api/send-notaventa", {
   {procesado ? (
     <>
       ✅ Procesado
+    </>
+  ) : cargandoCorrelativo ? (
+    <>
+      <span className="animate-spin">⏳</span> Generando N°...
     </>
   ) : procesando ? (
     <>
