@@ -664,15 +664,9 @@ export default function GerenciaKpiClientesPage() {
 
 
 
-  const [
-
-    vendedorFiltro,
-
-    setVendedorFiltro,
-
-  ] =
-
-    useState("TODOS");
+  // Vacío = todos los ejecutivos; con elementos = selección múltiple.
+  const [vendedoresSeleccionados, setVendedoresSeleccionados] = useState<string[]>([]);
+  const [exportando, setExportando] = useState(false);
 
 
 
@@ -1748,54 +1742,16 @@ export default function GerenciaKpiClientesPage() {
 
   // ==========================================================
 
-  // RESETEAR EJECUTIVO SI CAMBIA DIVISIÓN
+  // CONSERVAR SOLO LOS EJECUTIVOS DISPONIBLES AL CAMBIAR DIVISIÓN
+  // ==========================================================
+  useEffect(() => {
+    setVendedoresSeleccionados((anteriores) => {
+      const disponibles = anteriores.filter((v) => vendedores.includes(v));
+      return disponibles.length === anteriores.length ? anteriores : disponibles;
+    });
+  }, [vendedores]);
 
   // ==========================================================
-
-
-
-  useEffect(
-
-    () => {
-
-      if (
-
-        vendedorFiltro !==
-
-          "TODOS" &&
-
-        !vendedores.includes(
-
-          vendedorFiltro
-
-        )
-
-      ) {
-
-        setVendedorFiltro(
-
-          "TODOS"
-
-        );
-
-      }
-
-    },
-
-    [
-
-      vendedores,
-
-      vendedorFiltro,
-
-    ]
-
-  );
-
-
-
-  // ==========================================================
-
   // ALCANCE BASE
 
   //
@@ -1850,22 +1806,12 @@ export default function GerenciaKpiClientesPage() {
 
 
 
-            // Ejecutivo
-
+            // Ejecutivo(s) seleccionados. Ninguno = todos.
             if (
-
-              vendedorFiltro !==
-
-                "TODOS" &&
-
-              r.vendedor !==
-
-                vendedorFiltro
-
+              vendedoresSeleccionados.length > 0 &&
+              !vendedoresSeleccionados.includes(r.vendedor)
             ) {
-
               return false;
-
             }
 
 
@@ -1934,7 +1880,7 @@ export default function GerenciaKpiClientesPage() {
 
         divisionFiltro,
 
-        vendedorFiltro,
+        vendedoresSeleccionados,
 
       ]
 
@@ -2122,6 +2068,89 @@ export default function GerenciaKpiClientesPage() {
 
 
 
+  // EXPORTACIÓN XLSX: exactamente las filas que muestra la tabla filtrada.
+  const exportarExcel = useCallback(async () => {
+    if (filtrados.length === 0 || exportando) return;
+    setExportando(true);
+    try {
+      const ExcelJS = (await import("exceljs")).default;
+      const libro = new ExcelJS.Workbook();
+      libro.creator = "SpartanOne";
+      const hoja = libro.addWorksheet("Clientes y Comodatos", {
+        views: [{ state: "frozen", ySplit: 1 }],
+      });
+
+      hoja.columns = [
+        { header: "Estado", key: "estado", width: 24 },
+        { header: "División", key: "division", width: 25 },
+        { header: "Cliente", key: "cliente", width: 44 },
+        { header: "RUT", key: "rut", width: 17 },
+        { header: "Código SAP", key: "codigo", width: 19 },
+        { header: "Ejecutivo", key: "vendedor", width: 29 },
+        { header: "Venta cuenta 12m", key: "ventaCuenta", width: 22 },
+        { header: "Venta empresa 12m", key: "ventaEmpresa", width: 23 },
+        { header: "Comodato cuenta", key: "comodatoCuenta", width: 23 },
+        { header: "Comodato empresa", key: "comodatoEmpresa", width: 23 },
+        { header: "Última compra cuenta", key: "ultimaCuenta", width: 23 },
+        { header: "Última compra empresa", key: "ultimaEmpresa", width: 24 },
+        { header: "Días sin compra cuenta", key: "diasCuenta", width: 23 },
+        { header: "Días sin compra empresa", key: "diasEmpresa", width: 24 },
+        { header: "Eficiencia cuenta", key: "eficienciaCuenta", width: 20 },
+        { header: "Eficiencia empresa", key: "eficienciaEmpresa", width: 21 },
+      ];
+
+      filtrados.forEach((r) => hoja.addRow({
+        estado: estadoDe(r),
+        division: r.division,
+        cliente: r.cliente,
+        rut: r.rut,
+        codigo: r.codigo_cliente,
+        vendedor: r.vendedor,
+        ventaCuenta: r.venta_codigo_12m,
+        ventaEmpresa: r.venta_rut_12m,
+        comodatoCuenta: r.valor_comodato_codigo,
+        comodatoEmpresa: r.valor_comodato_rut,
+        ultimaCuenta: r.ultima_compra_codigo ? dateCL(r.ultima_compra_codigo) : "Sin compra",
+        ultimaEmpresa: r.ultima_compra_rut ? dateCL(r.ultima_compra_rut) : "Sin compra",
+        diasCuenta: r.dias_sin_compra_codigo,
+        diasEmpresa: r.dias_sin_compra_rut,
+        eficienciaCuenta: r.eficiencia_codigo,
+        eficienciaEmpresa: r.eficiencia_rut,
+      }));
+
+      hoja.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+      hoja.getRow(1).fill = {
+        type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A5F" },
+      };
+      hoja.getRow(1).height = 25;
+      hoja.autoFilter = { from: "A1", to: "P1" };
+      [7, 8, 9, 10].forEach((col) => {
+        hoja.getColumn(col).numFmt = '"$"#,##0;[Red]("$"#,##0)';
+      });
+      [15, 16].forEach((col) => {
+        hoja.getColumn(col).numFmt = '0.0"x"';
+      });
+      const buffer = await libro.xlsx.writeBuffer();
+      const blob = new Blob([new Uint8Array(buffer)], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const enlace = document.createElement("a");
+      enlace.href = url;
+      enlace.download = `KPI_Clientes_Comodatos_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(enlace);
+      enlace.click();
+      enlace.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err: any) {
+      console.error("Error exportando Excel:", err);
+      setError(err?.message || "No fue posible generar el archivo Excel.");
+    } finally {
+      setExportando(false);
+    }
+  }, [filtrados, exportando]);
+
+  // ==========================================================
   // ==========================================================
 
   // DATASET PARA KPI SUPERIORES
@@ -2836,6 +2865,7 @@ export default function GerenciaKpiClientesPage() {
 
 
 
+          <div className="flex flex-wrap gap-2">
           <button
 
             type="button"
@@ -2863,6 +2893,15 @@ export default function GerenciaKpiClientesPage() {
               : "Actualizar"}
 
           </button>
+            <button
+              type="button"
+              onClick={exportarExcel}
+              disabled={loading || exportando || filtrados.length === 0}
+              className="h-10 rounded-xl bg-emerald-700 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {exportando ? "Generando Excel..." : `Descargar Excel (${number(filtrados.length)})`}
+            </button>
+          </div>
 
         </div>
 
@@ -2902,9 +2941,7 @@ export default function GerenciaKpiClientesPage() {
 
             "TODAS" ||
 
-          vendedorFiltro !==
-
-            "TODOS" ||
+          vendedoresSeleccionados.length > 0 ||
 
           estadoFiltro !==
 
@@ -2942,21 +2979,11 @@ export default function GerenciaKpiClientesPage() {
 
 
 
-            {vendedorFiltro !==
-
-              "TODOS" && (
-
-              <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 font-medium text-blue-700">
-
-                {
-
-                  vendedorFiltro
-
-                }
-
+            {vendedoresSeleccionados.map((vendedor) => (
+              <span key={vendedor} className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 font-medium text-blue-700">
+                {vendedor}
               </span>
-
-            )}
+            ))}
 
 
 
@@ -3346,95 +3373,46 @@ export default function GerenciaKpiClientesPage() {
 
 
 
-            {/* EJECUTIVO */}
-
-
-
-            <div>
-
-              <FilterLabel>
-
-                Ejecutivo
-
-              </FilterLabel>
-
-
-
-              <select
-
-                value={
-
-                  vendedorFiltro
-
-                }
-
-                onChange={(
-
-                  e
-
-                ) =>
-
-                  setVendedorFiltro(
-
-                    e.target.value
-
-                  )
-
-                }
-
-                className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm outline-none focus:border-blue-400"
-
-              >
-
-                <option value="TODOS">
-
-                  Todos
-
-                </option>
-
-
-
-                {vendedores.map(
-
-                  (
-
-                    vendedor
-
-                  ) => (
-
-                    <option
-
-                      key={
-
-                        vendedor
-
-                      }
-
-                      value={
-
-                        vendedor
-
-                      }
-
-                    >
-
-                      {
-
-                        vendedor
-
-                      }
-
-                    </option>
-
-                  )
-
-                )}
-
-              </select>
-
+            {/* EJECUTIVOS: selector múltiple sin teclas especiales */}
+            <div className="relative">
+              <FilterLabel>Ejecutivos</FilterLabel>
+              <details className="group relative">
+                <summary className="flex h-10 cursor-pointer list-none items-center justify-between rounded-xl border border-zinc-200 bg-white px-3 text-sm [&::-webkit-details-marker]:hidden">
+                  <span className="truncate">
+                    {vendedoresSeleccionados.length === 0
+                      ? "Todos los ejecutivos"
+                      : `${vendedoresSeleccionados.length} seleccionado(s)`}
+                  </span>
+                  <span className="ml-2 text-zinc-500">▾</span>
+                </summary>
+                <div className="absolute right-0 z-30 mt-1 w-full min-w-[270px] rounded-xl border border-zinc-200 bg-white p-3 shadow-xl">
+                  <div className="mb-2 flex items-center justify-between border-b border-zinc-100 pb-2">
+                    <span className="text-xs font-semibold text-zinc-600">Seleccionar ejecutivos</span>
+                    <button type="button" className="text-xs font-medium text-blue-600 hover:underline"
+                      onClick={() => setVendedoresSeleccionados([])}>
+                      Todos
+                    </button>
+                  </div>
+                  <div className="max-h-64 space-y-1 overflow-y-auto">
+                    {vendedores.map((vendedor) => (
+                      <label key={vendedor} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-zinc-50">
+                        <input type="checkbox" className="h-4 w-4 accent-blue-600"
+                          checked={vendedoresSeleccionados.includes(vendedor)}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setVendedoresSeleccionados((prev) => checked
+                              ? [...prev, vendedor]
+                              : prev.filter((v) => v !== vendedor));
+                          }}
+                        />
+                        <span>{vendedor}</span>
+                      </label>
+                    ))}
+                    {vendedores.length === 0 && <p className="text-xs text-zinc-500">Sin ejecutivos disponibles.</p>}
+                  </div>
+                </div>
+              </details>
             </div>
-
-
 
             {/* LIMPIAR */}
 
@@ -3472,11 +3450,7 @@ export default function GerenciaKpiClientesPage() {
 
 
 
-                  setVendedorFiltro(
-
-                    "TODOS"
-
-                  );
+                  setVendedoresSeleccionados([]);
 
                 }}
 
