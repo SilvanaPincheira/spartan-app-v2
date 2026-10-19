@@ -40,6 +40,31 @@ type ControlRow = {
   dias_a_vencimiento: number | null;
   fuente_plazo: string | null;
   accion_vencimiento: string | null;
+  tiene_contrato: boolean | null;
+  fecha_contrato: string | null;
+  plazo_meses: number | null;
+  renovacion_meses: number | null;
+  fuente_condiciones: string | null;
+  inicio_vigencia: string | null;
+  primera_guia: string | null;
+  contrato_archivo: string | null;
+  contrato_pdf: string | null;
+};
+
+type ContratoRow = {
+  archivo: string;
+  tipo: string | null;
+  cliente: string | null;
+  rut: string | null;
+  rut_key: string | null;
+  fecha_contrato: string | null;
+  plazo_meses: number | null;
+  renovacion_meses: number | null;
+  compromiso_compra: string | null;
+  equipos: string | null;
+  usar: boolean | null;
+  observaciones: string | null;
+  pdf: string | null;
 };
 
 type KpiMensual = {
@@ -64,9 +89,26 @@ type KpiMensual = {
   archivo_dashboard: string | null;
 };
 
+type CompromisoManual = {
+  rut_key: string;
+  rut: string;
+  cliente: string | null;
+  compromiso_mensual: number;
+  nota: string | null;
+  editado_por: string | null;
+  editado_en: string | null;
+};
+
+type AccionesCompromiso = {
+  puedeEditar: boolean;
+  manuales: Map<string, CompromisoManual>;
+  guardar: (r: ControlRow, monto: number, nota: string) => Promise<boolean>;
+  quitar: (r: ControlRow) => Promise<boolean>;
+};
+
 type Perfil = { role?: string | null; department?: string | null; email?: string | null };
 
-type Pestana = "CRITICO" | "ALERTA" | "CUMPLE" | "PLAZO" | "TODOS";
+type Pestana = "CRITICO" | "ALERTA" | "CUMPLE" | "PLAZO" | "CONTRATO" | "TODOS";
 
 const BUCKET_REPORTES = "reportes-comodatos";
 
@@ -75,6 +117,7 @@ const PESTANAS: { id: Pestana; label: string }[] = [
   { id: "ALERTA", label: "En alerta" },
   { id: "CUMPLE", label: "Cumplen" },
   { id: "PLAZO", label: "Plazos vencidos / por vencer" },
+  { id: "CONTRATO", label: "Con contrato firmado" },
   { id: "TODOS", label: "Todos los clientes" },
 ];
 
@@ -173,6 +216,19 @@ function recuperacionTexto(estado: string | null) {
   return estado === "PAGADO" ? "Recuperada" : estado.toLowerCase();
 }
 
+function fuenteTexto(r: ControlRow) {
+  if (r.tiene_contrato) return "Contrato firmado";
+  const f = String(r.fuente_condiciones || r.fuente_plazo || "").toUpperCase();
+  if (f.startsWith("EVALUA")) return "Evaluación de negocio";
+  if (f.startsWith("PLAZO")) return "Plazo estándar";
+  return f ? f.charAt(0) + f.slice(1).toLowerCase() : "Sin plazo";
+}
+
+function mesesTexto(m: number | null | undefined) {
+  if (!m) return "—";
+  return m % 12 === 0 ? `${m / 12} año${m / 12 === 1 ? "" : "s"}` : `${m} meses`;
+}
+
 function enPlazo(r: ControlRow) {
   return r.dias_a_vencimiento !== null && r.dias_a_vencimiento <= 90;
 }
@@ -192,6 +248,10 @@ export default function ControlComodatosPage() {
   const [historial, setHistorial] = useState<KpiMensual[]>([]);
   const [periodo, setPeriodo] = useState<string>("");
   const [filas, setFilas] = useState<ControlRow[]>([]);
+  const [contratos, setContratos] = useState<ContratoRow[]>([]);
+  const [manuales, setManuales] = useState<Map<string, CompromisoManual>>(new Map());
+  const [puedeEditar, setPuedeEditar] = useState(false);
+  const [emailUsuario, setEmailUsuario] = useState("");
 
   const [pestana, setPestana] = useState<Pestana>("CRITICO");
   const [busqueda, setBusqueda] = useState("");
@@ -239,6 +299,8 @@ export default function ControlComodatosPage() {
       }
 
       setAutorizado(true);
+      setPuedeEditar(accesoEspecial); // la base de datos también lo valida (RLS)
+      setEmailUsuario(email);
 
       const { data, error: kpiError } = await supabase
         .from("comodatos_kpis_mensual")
@@ -246,6 +308,21 @@ export default function ControlComodatosPage() {
         .order("periodo", { ascending: true });
 
       if (kpiError) throw kpiError;
+
+      // Registro de contratos firmados (si la tabla aún no existe, se omite)
+      const { data: ctData, error: ctError } = await supabase
+        .from("comodatos_contratos")
+        .select("*")
+        .order("fecha_contrato", { ascending: false });
+      if (ctError) console.warn("Contratos no disponibles:", ctError);
+      setContratos(((ctData || []) as ContratoRow[]));
+
+      // Compromisos fijados a mano (si la tabla aún no existe, se omite)
+      const { data: cmData, error: cmError } = await supabase
+        .from("comodatos_compromisos")
+        .select("*");
+      if (cmError) console.warn("Compromisos manuales no disponibles:", cmError);
+      setManuales(new Map(((cmData || []) as CompromisoManual[]).map((c) => [c.rut_key, c])));
 
       const lista = (data || []) as KpiMensual[];
       setHistorial(lista);
@@ -340,9 +417,64 @@ export default function ControlComodatosPage() {
       ALERTA: alcance.filter((r) => r.estado_control === "ALERTA").length,
       CUMPLE: alcance.filter((r) => r.estado_control === "CUMPLE").length,
       PLAZO: alcance.filter(enPlazo).length,
+      CONTRATO: alcance.filter((r) => r.tiene_contrato).length,
       TODOS: alcance.length,
     }),
     [alcance]
+  );
+
+  const compEfectivo = useCallback(
+    (r: ControlRow) => manuales.get(r.rut_key)?.compromiso_mensual ?? r.compromiso_mensual,
+    [manuales]
+  );
+
+  const guardarCompromiso = useCallback(
+    async (r: ControlRow, monto: number, nota: string) => {
+      const fila = {
+        rut_key: r.rut_key,
+        rut: r.rut,
+        cliente: r.cliente,
+        compromiso_mensual: Math.round(monto),
+        nota: nota.trim() || null,
+        editado_por: emailUsuario,
+        editado_en: new Date().toISOString(),
+      };
+      const { error: e } = await supabase
+        .from("comodatos_compromisos")
+        .upsert(fila, { onConflict: "rut_key" });
+      if (e) {
+        setError(`No se pudo guardar el compromiso: ${e.message}`);
+        return false;
+      }
+      setManuales((prev) => new Map(prev).set(r.rut_key, fila as CompromisoManual));
+      return true;
+    },
+    [supabase, emailUsuario]
+  );
+
+  const quitarCompromiso = useCallback(
+    async (r: ControlRow) => {
+      const { error: e } = await supabase
+        .from("comodatos_compromisos")
+        .delete()
+        .eq("rut_key", r.rut_key);
+      if (e) {
+        setError(`No se pudo quitar el compromiso: ${e.message}`);
+        return false;
+      }
+      setManuales((prev) => {
+        const m = new Map(prev);
+        m.delete(r.rut_key);
+        return m;
+      });
+      return true;
+    },
+    [supabase]
+  );
+
+  const accionesCompromiso: AccionesCompromiso = useMemo(
+    () => ({ puedeEditar, manuales, guardar: guardarCompromiso, quitar: quitarCompromiso }),
+    [puedeEditar, manuales, guardarCompromiso, quitarCompromiso]
   );
 
   const visibles = useMemo(() => {
@@ -351,10 +483,12 @@ export default function ControlComodatosPage() {
         ? alcance
         : pestana === "PLAZO"
         ? alcance.filter(enPlazo)
+        : pestana === "CONTRATO"
+        ? alcance.filter((r) => r.tiene_contrato)
         : alcance.filter((r) => r.estado_control === pestana);
 
     return [...lista].sort((a, b) => {
-      if (pestana === "PLAZO") return num(a.dias_a_vencimiento) - num(b.dias_a_vencimiento);
+      if (pestana === "PLAZO" || pestana === "CONTRATO") return num(a.dias_a_vencimiento) - num(b.dias_a_vencimiento);
       if (pestana === "CRITICO") {
         const m = num(b.meses_seguidos_critico) - num(a.meses_seguidos_critico);
         if (m !== 0) return m;
@@ -363,14 +497,19 @@ export default function ControlComodatosPage() {
     });
   }, [alcance, pestana]);
 
+  const contratosSinCliente = useMemo(() => {
+    const ruts = new Set(filas.map((r) => r.rut_key));
+    return contratos.filter((c) => !c.rut_key || !ruts.has(c.rut_key));
+  }, [contratos, filas]);
+
   const totalVisible = useMemo(
     () => ({
       clientes: visibles.length,
       inversion: visibles.reduce((acc, r) => acc + num(r.inversion_neta), 0),
       venta3m: visibles.reduce((acc, r) => acc + num(r.venta_prom_3m), 0),
-      compromiso: visibles.reduce((acc, r) => acc + num(r.compromiso_mensual), 0),
+      compromiso: visibles.reduce((acc, r) => acc + num(compEfectivo(r)), 0),
     }),
-    [visibles]
+    [visibles, compEfectivo]
   );
 
   // Resumen por ejecutivo (responde a la búsqueda, no a la pestaña)
@@ -455,7 +594,7 @@ export default function ControlComodatosPage() {
         { header: "Inversión neta", key: "inversion", width: 18 },
         { header: "Venta prom. 3m", key: "v3", width: 17 },
         { header: "Venta prom. 12m", key: "v12", width: 17 },
-        { header: "Compromiso mensual", key: "comp", width: 19 },
+        { header: "Compromiso mensual (cierre)", key: "comp", width: 19 },
         { header: "Cumplimiento", key: "cump", width: 14 },
         { header: "Días sin compra", key: "dias", width: 15 },
         { header: "Meses seguidos crítico", key: "meses", width: 20 },
@@ -464,7 +603,13 @@ export default function ControlComodatosPage() {
         { header: "Recuperación inversión", key: "recup", width: 20 },
         { header: "Vencimiento", key: "venc", width: 14 },
         { header: "Días a vencimiento", key: "diasVenc", width: 17 },
-        { header: "Fuente del plazo", key: "fuente", width: 18 },
+        { header: "Condiciones", key: "fuente", width: 22 },
+        { header: "Fecha contrato", key: "fContrato", width: 15 },
+        { header: "Plazo inicial", key: "plazo", width: 13 },
+        { header: "Renovación automática", key: "renov", width: 20 },
+        { header: "Contrato (PDF)", key: "archivo", width: 48 },
+        { header: "Compromiso manual", key: "compMan", width: 18 },
+        { header: "Nota compromiso manual", key: "notaMan", width: 40 },
       ];
 
       visibles.forEach((r) =>
@@ -485,14 +630,21 @@ export default function ControlComodatosPage() {
           recup: recuperacionTexto(r.estado_recuperacion),
           venc: r.vencimiento ? dateCL(r.vencimiento) : "",
           diasVenc: r.dias_a_vencimiento,
-          fuente: r.fuente_plazo,
+          fuente: fuenteTexto(r),
+          fContrato: r.fecha_contrato ? dateCL(r.fecha_contrato) : "",
+          plazo: r.tiene_contrato ? mesesTexto(r.plazo_meses) : "",
+          renov: r.tiene_contrato ? mesesTexto(r.renovacion_meses) : "",
+          archivo: r.contrato_archivo || "",
+          compMan: manuales.get(r.rut_key)?.compromiso_mensual ?? null,
+          notaMan: manuales.get(r.rut_key)?.nota ?? "",
         })
       );
 
       hoja.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
       hoja.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A5F" } };
       hoja.getRow(1).height = 25;
-      hoja.autoFilter = { from: "A1", to: "Q1" };
+      hoja.autoFilter = { from: "A1", to: "W1" };
+      hoja.getColumn(22).numFmt = '"$"#,##0';
       [5, 6, 7, 8].forEach((c) => (hoja.getColumn(c).numFmt = '"$"#,##0'));
       hoja.getColumn(9).numFmt = "0%";
 
@@ -513,7 +665,7 @@ export default function ControlComodatosPage() {
     } finally {
       setExportando(false);
     }
-  }, [visibles, exportando, pestana, periodo]);
+  }, [visibles, exportando, pestana, periodo, manuales]);
 
   // ==========================================================
   // ESTADOS DE CARGA / ACCESO
@@ -814,9 +966,67 @@ export default function ControlComodatosPage() {
                 {cargandoMes ? (
                   <p className="px-6 py-12 text-center text-sm text-zinc-500">Cargando clientes...</p>
                 ) : (
-                  <TablaClientes filas={visibles} pestana={pestana} />
+                  <TablaClientes
+                    filas={visibles}
+                    pestana={pestana}
+                    onAbrir={abrirArchivo}
+                    compromisos={accionesCompromiso}
+                  />
                 )}
               </div>
+
+              {pestana === "CONTRATO" && contratosSinCliente.length > 0 && (
+                <div className="border-t border-zinc-200 px-5 py-4">
+                  <h3 className="text-sm font-semibold text-zinc-900">
+                    Contratos firmados sin comodato en SAP ({number(contratosSinCliente.length)})
+                  </h3>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Están en el registro de contratos, pero su RUT no tiene guías de comodato en
+                    este cierre (posible entrega a otro RUT, o no es comodato).
+                  </p>
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="w-full min-w-[900px] text-sm">
+                      <thead className="text-left text-xs uppercase tracking-wide text-zinc-500">
+                        <tr>
+                          <th className="py-2">Cliente según contrato</th>
+                          <th className="py-2">Tipo</th>
+                          <th className="py-2">Fecha</th>
+                          <th className="py-2">Plazo</th>
+                          <th className="py-2">Observaciones</th>
+                          <th className="py-2 text-right">PDF</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-100">
+                        {contratosSinCliente.map((c) => (
+                          <tr key={c.archivo} className="align-top">
+                            <td className="py-2 pr-4">
+                              <div className="font-medium">{c.cliente || c.archivo}</div>
+                              <div className="text-xs text-zinc-400">{c.rut || "—"}</div>
+                            </td>
+                            <td className="py-2 pr-4 text-xs">{c.tipo || "—"}</td>
+                            <td className="whitespace-nowrap py-2 pr-4">{dateCL(c.fecha_contrato)}</td>
+                            <td className="whitespace-nowrap py-2 pr-4">{mesesTexto(c.plazo_meses)}</td>
+                            <td className="max-w-[420px] py-2 pr-4 text-xs text-zinc-600">{c.observaciones || "—"}</td>
+                            <td className="py-2 text-right">
+                              {c.pdf ? (
+                                <button
+                                  type="button"
+                                  onClick={() => abrirArchivo(c.pdf)}
+                                  className="text-xs font-medium text-blue-600 hover:underline"
+                                >
+                                  Ver PDF
+                                </button>
+                              ) : (
+                                <span className="text-xs text-zinc-400">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </section>
 
             {/* POR EJECUTIVO */}
@@ -882,9 +1092,18 @@ export default function ControlComodatosPage() {
 // TABLA DE CLIENTES (columnas según pestaña)
 // ============================================================
 
-function TablaClientes({ filas, pestana }: { filas: ControlRow[]; pestana: Pestana }) {
-  const verPlazo = pestana === "PLAZO" || pestana === "TODOS";
-  const verMotivo = pestana !== "CUMPLE" && pestana !== "PLAZO";
+function TablaClientes({
+  filas,
+  pestana,
+  onAbrir,
+  compromisos,
+}: {
+  filas: ControlRow[];
+  pestana: Pestana;
+  onAbrir: (ruta: string | null) => void;
+  compromisos: AccionesCompromiso;
+}) {
+  const verMotivo = pestana !== "CUMPLE" && pestana !== "PLAZO" && pestana !== "CONTRATO";
 
   return (
     <table className="w-full min-w-[1850px] text-sm">
@@ -899,7 +1118,7 @@ function TablaClientes({ filas, pestana }: { filas: ControlRow[]; pestana: Pesta
           <th className="px-4 py-3 text-right">Cumplimiento</th>
           {pestana === "CRITICO" && <th className="px-4 py-3 text-right">Meses crítico</th>}
           <th className="px-4 py-3 text-center">Recuperación</th>
-          {verPlazo && <th className="px-4 py-3 text-center">Vencimiento</th>}
+          <th className="px-4 py-3">Contrato / plazo</th>
           {verMotivo && <th className="px-4 py-3">Motivo</th>}
           <th className="px-4 py-3">Acción sugerida</th>
         </tr>
@@ -924,10 +1143,20 @@ function TablaClientes({ filas, pestana }: { filas: ControlRow[]; pestana: Pesta
             </td>
             <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{money(r.venta_prom_3m)}</td>
             <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
-              {r.compromiso_mensual ? money(r.compromiso_mensual) : "—"}
+              <CompromisoCelda r={r} acciones={compromisos} />
             </td>
             <td className="whitespace-nowrap px-4 py-3 text-right">
-              <Cumplimiento valor={r.cumplimiento} />
+              {(() => {
+                const man = compromisos.manuales.get(r.rut_key);
+                if (!man) return <Cumplimiento valor={r.cumplimiento} />;
+                const prov = man.compromiso_mensual > 0 ? num(r.venta_prom_3m) / man.compromiso_mensual : null;
+                return (
+                  <div title="Calculado con el compromiso manual. La clasificación se actualiza en el próximo cierre.">
+                    <Cumplimiento valor={prov} />
+                    <div className="mt-0.5 text-[11px] text-violet-600">provisorio</div>
+                  </div>
+                );
+              })()}
             </td>
             {pestana === "CRITICO" && (
               <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
@@ -937,24 +1166,9 @@ function TablaClientes({ filas, pestana }: { filas: ControlRow[]; pestana: Pesta
             <td className="whitespace-nowrap px-4 py-3 text-center text-xs text-zinc-600">
               {recuperacionTexto(r.estado_recuperacion)}
             </td>
-            {verPlazo && (
-              <td className="whitespace-nowrap px-4 py-3 text-center">
-                {r.vencimiento ? (
-                  <>
-                    <div className="text-zinc-700">{dateCL(r.vencimiento)}</div>
-                    <div
-                      className={`text-xs ${num(r.dias_a_vencimiento) < 0 ? "text-red-600" : "text-amber-600"}`}
-                    >
-                      {num(r.dias_a_vencimiento) < 0
-                        ? `Vencido hace ${number(Math.abs(num(r.dias_a_vencimiento)))} días`
-                        : `Vence en ${number(r.dias_a_vencimiento)} días`}
-                    </div>
-                  </>
-                ) : (
-                  <span className="text-xs text-zinc-400">—</span>
-                )}
-              </td>
-            )}
+            <td className="whitespace-nowrap px-4 py-3">
+              <ContratoCelda r={r} onAbrir={onAbrir} />
+            </td>
             {verMotivo && (
               <td className="min-w-[340px] max-w-[460px] px-4 py-3 text-xs leading-5 text-zinc-600">{r.motivo || "—"}</td>
             )}
@@ -972,6 +1186,155 @@ function TablaClientes({ filas, pestana }: { filas: ControlRow[]; pestana: Pesta
         )}
       </tbody>
     </table>
+  );
+}
+
+function CompromisoCelda({ r, acciones }: { r: ControlRow; acciones: AccionesCompromiso }) {
+  const man = acciones.manuales.get(r.rut_key);
+  const [editando, setEditando] = useState(false);
+  const [monto, setMonto] = useState("");
+  const [nota, setNota] = useState("");
+  const [guardando, setGuardando] = useState(false);
+
+  const abrir = () => {
+    const base = man?.compromiso_mensual ?? r.compromiso_mensual;
+    setMonto(base ? String(Math.round(base)) : "");
+    setNota(man?.nota ?? "");
+    setEditando(true);
+  };
+
+  const valor = Number(String(monto).replace(/[^0-9]/g, ""));
+
+  if (editando) {
+    return (
+      <div className="w-[210px] space-y-1.5 text-left">
+        <input
+          autoFocus
+          inputMode="numeric"
+          value={monto ? `$${Number(String(monto).replace(/[^0-9]/g, "") || 0).toLocaleString("es-CL")}` : ""}
+          onChange={(e) => setMonto(e.target.value.replace(/[^0-9]/g, ""))}
+          placeholder="$ mensual"
+          className="h-8 w-full rounded-lg border border-zinc-300 px-2 text-right text-sm tabular-nums outline-none focus:border-blue-400"
+        />
+        <input
+          value={nota}
+          onChange={(e) => setNota(e.target.value)}
+          placeholder="Nota (motivo, acuerdo...)"
+          className="h-8 w-full rounded-lg border border-zinc-300 px-2 text-xs outline-none focus:border-blue-400"
+        />
+        <div className="flex items-center justify-end gap-2 text-xs">
+          {man && (
+            <button
+              type="button"
+              disabled={guardando}
+              onClick={async () => {
+                setGuardando(true);
+                if (await acciones.quitar(r)) setEditando(false);
+                setGuardando(false);
+              }}
+              className="mr-auto text-red-600 hover:underline disabled:opacity-50"
+            >
+              Quitar
+            </button>
+          )}
+          <button type="button" onClick={() => setEditando(false)} className="text-zinc-500 hover:underline">
+            Cancelar
+          </button>
+          <button
+            type="button"
+            disabled={guardando || !valor}
+            onClick={async () => {
+              setGuardando(true);
+              if (await acciones.guardar(r, valor, nota)) setEditando(false);
+              setGuardando(false);
+            }}
+            className="rounded-md bg-blue-600 px-2.5 py-1 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {guardando ? "Guardando..." : "Guardar"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="inline-flex flex-col items-end">
+      <div className="inline-flex items-center gap-1.5">
+        <span className="tabular-nums">
+          {man ? money(man.compromiso_mensual) : r.compromiso_mensual ? money(r.compromiso_mensual) : "—"}
+        </span>
+        {acciones.puedeEditar && (
+          <button
+            type="button"
+            onClick={abrir}
+            title={man ? "Editar compromiso manual" : "Fijar compromiso a mano"}
+            className="rounded p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-blue-600"
+          >
+            ✎
+          </button>
+        )}
+      </div>
+      {man && (
+        <span
+          className="mt-0.5 rounded-full border border-violet-200 bg-violet-50 px-1.5 text-[10px] font-semibold text-violet-700"
+          title={[
+            man.nota,
+            r.compromiso_mensual ? `Compromiso de evaluación: ${money(r.compromiso_mensual)}` : "Sin compromiso de evaluación",
+            man.editado_por ? `Editado por ${man.editado_por} el ${dateCL(man.editado_en)}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n")}
+        >
+          Manual
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ContratoCelda({ r, onAbrir }: { r: ControlRow; onAbrir: (ruta: string | null) => void }) {
+  const dias = r.dias_a_vencimiento;
+  const color =
+    dias === null ? "text-zinc-400" : dias < 0 ? "text-red-600" : dias <= 90 ? "text-amber-600" : "text-zinc-500";
+
+  return (
+    <div className="space-y-0.5">
+      <div className="flex items-center gap-2">
+        <span
+          className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+            r.tiene_contrato
+              ? "border-blue-200 bg-blue-50 text-blue-700"
+              : "border-zinc-200 bg-zinc-50 text-zinc-500"
+          }`}
+        >
+          {fuenteTexto(r)}
+        </span>
+        {r.contrato_pdf && (
+          <button
+            type="button"
+            onClick={() => onAbrir(r.contrato_pdf)}
+            className="text-xs font-medium text-blue-600 hover:underline"
+          >
+            PDF
+          </button>
+        )}
+      </div>
+      {r.tiene_contrato && (
+        <div className="text-xs text-zinc-600">
+          Firmado {dateCL(r.fecha_contrato)} · {mesesTexto(r.plazo_meses)}
+          {r.renovacion_meses ? ` + renov. ${mesesTexto(r.renovacion_meses)}` : ""}
+        </div>
+      )}
+      {r.vencimiento ? (
+        <div className={`text-xs ${color}`}>
+          Vence {dateCL(r.vencimiento)}
+          {dias !== null &&
+            (dias < 0 ? ` · vencido hace ${number(Math.abs(dias))} días` : ` · en ${number(dias)} días`)}
+        </div>
+      ) : (
+        <div className="text-xs text-zinc-400">Sin vencimiento</div>
+      )}
+    </div>
   );
 }
 
