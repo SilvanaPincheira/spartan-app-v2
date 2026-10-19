@@ -690,68 +690,98 @@ export default function ControlComodatosPage() {
       });
 
       hoja.columns = [
-        { header: "Control", key: "control", width: 14 },
-        { header: "Nota estado", key: "notaEstado", width: 30 },
+        { header: "Estado cierre", key: "control", width: 14 },
+        { header: "Estado gestión", key: "gestion", width: 15 },
+        { header: "Fecha estado", key: "fechaEstado", width: 13 },
+        { header: "Nota estado", key: "notaEstado", width: 34 },
         { header: "Cliente", key: "cliente", width: 44 },
-        { header: "RUT", key: "rut", width: 14 },
-        { header: "Ejecutivo", key: "ejecutivo", width: 28 },
-        { header: "Inversión neta", key: "inversion", width: 18 },
-        { header: "Venta prom. 3m", key: "v3", width: 17 },
-        { header: "Venta prom. 12m", key: "v12", width: 17 },
-        { header: "Compromiso mensual (cierre)", key: "comp", width: 19 },
-        { header: "Cumplimiento", key: "cump", width: 14 },
-        { header: "Días sin compra", key: "dias", width: 15 },
-        { header: "Meses seguidos crítico", key: "meses", width: 20 },
+        { header: "RUT", key: "rut", width: 13 },
+        { header: "Ejecutivo", key: "ejecutivo", width: 26 },
+        { header: "Inversión neta", key: "inversion", width: 16 },
+        { header: "Falta entrada SAP", key: "faltaSap", width: 16 },
+        { header: "Venta prom. 3m", key: "v3", width: 16 },
+        { header: "Venta prom. 12m", key: "v12", width: 16 },
+        { header: "Compromiso evaluación", key: "comp", width: 18 },
+        { header: "Compromiso manual", key: "compMan", width: 18 },
+        { header: "Compromiso vigente", key: "compVig", width: 18 },
+        { header: "Cumplimiento (cierre)", key: "cump", width: 15 },
+        { header: "Cumplimiento con compromiso vigente", key: "cumpVig", width: 18 },
+        { header: "Nota compromiso manual", key: "notaMan", width: 34 },
+        { header: "Editado por", key: "editor", width: 30 },
+        { header: "Días sin compra", key: "dias", width: 14 },
+        { header: "Meses seguidos crítico", key: "meses", width: 14 },
         { header: "Motivo", key: "motivo", width: 70 },
         { header: "Acción sugerida", key: "accion", width: 42 },
-        { header: "Recuperación inversión", key: "recup", width: 20 },
-        { header: "Vencimiento", key: "venc", width: 14 },
-        { header: "Días a vencimiento", key: "diasVenc", width: 17 },
+        { header: "Recuperación inversión", key: "recup", width: 18 },
         { header: "Condiciones", key: "fuente", width: 22 },
-        { header: "Fecha contrato", key: "fContrato", width: 15 },
-        { header: "Plazo inicial", key: "plazo", width: 13 },
-        { header: "Renovación automática", key: "renov", width: 20 },
+        { header: "Fecha contrato", key: "fContrato", width: 14 },
+        { header: "Plazo inicial", key: "plazo", width: 12 },
+        { header: "Renovación automática", key: "renov", width: 14 },
+        { header: "Vencimiento", key: "venc", width: 13 },
+        { header: "Días a vencimiento", key: "diasVenc", width: 14 },
         { header: "Contrato (PDF)", key: "archivo", width: 48 },
-        { header: "Compromiso manual", key: "compMan", width: 18 },
-        { header: "Nota compromiso manual", key: "notaMan", width: 40 },
       ];
 
-      visibles.forEach((r) =>
+      visibles.forEach((r) => {
+        const est = estados.get(r.rut_key);
+        const man = manuales.get(r.rut_key);
+        const gestion = est?.estado ?? (r.estado_control === "RETIRADO" || r.estado_control === "INACTIVO" ? r.estado_control : "ACTIVO");
+        const vigente = man?.compromiso_mensual ?? r.compromiso_mensual ?? null;
         hoja.addRow({
-          control: controlTexto(estados.get(r.rut_key)?.estado ?? r.estado_control),
-          notaEstado: estados.get(r.rut_key)?.nota ?? "",
+          control: controlTexto(r.estado_control),
+          gestion: gestion === "ACTIVO" ? "Activo" : controlTexto(gestion),
+          fechaEstado: est?.fecha ? dateCL(est.fecha) : "",
+          notaEstado: est?.nota ?? "",
           cliente: r.cliente,
           rut: r.rut,
           ejecutivo: ejecutivoLimpio(r.ejecutivo),
           inversion: r.inversion_neta,
+          faltaSap: gestion !== "ACTIVO" && num(r.inversion_neta) > 0 ? "SÍ" : "",
           v3: r.venta_prom_3m,
           v12: r.venta_prom_12m,
           comp: r.compromiso_mensual,
+          compMan: man?.compromiso_mensual ?? null,
+          compVig: vigente,
           cump: r.cumplimiento,
+          cumpVig: vigente ? num(r.venta_prom_3m) / vigente : null,
+          notaMan: man?.nota ?? "",
+          editor: [
+            man?.editado_por ? `Compromiso: ${man.editado_por} ${dateCL(man.editado_en)}` : "",
+            est?.editado_por ? `Estado: ${est.editado_por} ${dateCL(est.editado_en)}` : "",
+          ]
+            .filter(Boolean)
+            .join(" · "),
           dias: r.dias_sin_compra,
           meses: r.meses_seguidos_critico,
           motivo: r.motivo,
           accion: r.accion_sugerida || r.accion_vencimiento,
           recup: recuperacionTexto(r.estado_recuperacion),
-          venc: r.vencimiento ? dateCL(r.vencimiento) : "",
-          diasVenc: r.dias_a_vencimiento,
           fuente: fuenteTexto(r),
           fContrato: r.fecha_contrato ? dateCL(r.fecha_contrato) : "",
           plazo: r.tiene_contrato ? mesesTexto(r.plazo_meses) : "",
           renov: r.tiene_contrato ? mesesTexto(r.renovacion_meses) : "",
+          venc: r.vencimiento ? dateCL(r.vencimiento) : "",
+          diasVenc: r.dias_a_vencimiento,
           archivo: r.contrato_archivo || "",
-          compMan: manuales.get(r.rut_key)?.compromiso_mensual ?? null,
-          notaMan: manuales.get(r.rut_key)?.nota ?? "",
-        })
-      );
+        });
+      });
 
       hoja.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
       hoja.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A5F" } };
-      hoja.getRow(1).height = 25;
-      hoja.autoFilter = { from: "A1", to: "X1" };
-      hoja.getColumn(23).numFmt = '"$"#,##0';
-      [6, 7, 8, 9].forEach((c) => (hoja.getColumn(c).numFmt = '"$"#,##0'));
-      hoja.getColumn(10).numFmt = "0%";
+      hoja.getRow(1).height = 32;
+      hoja.getRow(1).alignment = { wrapText: true, vertical: "middle" };
+      hoja.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: hoja.columns.length } };
+      ["inversion", "v3", "v12", "comp", "compMan", "compVig"].forEach(
+        (k) => (hoja.getColumn(k).numFmt = '"$"#,##0')
+      );
+      ["cump", "cumpVig"].forEach((k) => (hoja.getColumn(k).numFmt = "0%"));
+      // Resaltar columnas editadas en SpartanOne
+      ["gestion", "fechaEstado", "notaEstado", "compMan", "notaMan"].forEach((k) => {
+        const col = hoja.getColumn(k);
+        col.eachCell({ includeEmpty: false }, (cell, fila) => {
+          if (fila > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3E8FF" } };
+        });
+      });
 
       const buffer = await libro.xlsx.writeBuffer();
       const blob = new Blob([new Uint8Array(buffer)], {
