@@ -16,7 +16,7 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 // TIPOS
 // ============================================================
 
-type EstadoControl = "CRITICO" | "ALERTA" | "CUMPLE" | "SIN CLASIFICAR";
+type EstadoControl = "CRITICO" | "ALERTA" | "CUMPLE" | "SIN CLASIFICAR" | "RETIRADO" | "INACTIVO";
 
 type ControlRow = {
   rut_key: string;
@@ -99,6 +99,24 @@ type CompromisoManual = {
   editado_en: string | null;
 };
 
+type EstadoGestion = {
+  rut_key: string;
+  rut: string;
+  cliente: string | null;
+  estado: "RETIRADO" | "INACTIVO";
+  fecha: string | null;
+  nota: string | null;
+  editado_por: string | null;
+  editado_en: string | null;
+};
+
+type AccionesEstado = {
+  puedeEditar: boolean;
+  estados: Map<string, EstadoGestion>;
+  guardar: (r: ControlRow, estado: "RETIRADO" | "INACTIVO", fecha: string, nota: string) => Promise<boolean>;
+  quitar: (r: ControlRow) => Promise<boolean>;
+};
+
 type AccionesCompromiso = {
   puedeEditar: boolean;
   manuales: Map<string, CompromisoManual>;
@@ -108,7 +126,7 @@ type AccionesCompromiso = {
 
 type Perfil = { role?: string | null; department?: string | null; email?: string | null };
 
-type Pestana = "CRITICO" | "ALERTA" | "CUMPLE" | "PLAZO" | "CONTRATO" | "TODOS";
+type Pestana = "CRITICO" | "ALERTA" | "CUMPLE" | "PLAZO" | "CONTRATO" | "RETIRADO" | "TODOS";
 
 const BUCKET_REPORTES = "reportes-comodatos";
 
@@ -118,6 +136,7 @@ const PESTANAS: { id: Pestana; label: string }[] = [
   { id: "CUMPLE", label: "Cumplen" },
   { id: "PLAZO", label: "Plazos vencidos / por vencer" },
   { id: "CONTRATO", label: "Con contrato firmado" },
+  { id: "RETIRADO", label: "Retirados / inactivos" },
   { id: "TODOS", label: "Todos los clientes" },
 ];
 
@@ -193,6 +212,10 @@ function controlTexto(estado: string | undefined) {
       return "En alerta";
     case "CUMPLE":
       return "Cumple";
+    case "RETIRADO":
+      return "Retirado";
+    case "INACTIVO":
+      return "Inactivo";
     default:
       return "Sin clasificar";
   }
@@ -206,6 +229,10 @@ function controlBadge(estado: string | undefined) {
       return "border-amber-200 bg-amber-50 text-amber-700";
     case "CUMPLE":
       return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case "RETIRADO":
+      return "border-zinc-300 bg-zinc-100 text-zinc-600 line-through decoration-zinc-400";
+    case "INACTIVO":
+      return "border-slate-300 bg-slate-100 text-slate-600";
     default:
       return "border-zinc-200 bg-zinc-50 text-zinc-500";
   }
@@ -250,6 +277,7 @@ export default function ControlComodatosPage() {
   const [filas, setFilas] = useState<ControlRow[]>([]);
   const [contratos, setContratos] = useState<ContratoRow[]>([]);
   const [manuales, setManuales] = useState<Map<string, CompromisoManual>>(new Map());
+  const [estados, setEstados] = useState<Map<string, EstadoGestion>>(new Map());
   const [puedeEditar, setPuedeEditar] = useState(false);
   const [emailUsuario, setEmailUsuario] = useState("");
 
@@ -323,6 +351,13 @@ export default function ControlComodatosPage() {
         .select("*");
       if (cmError) console.warn("Compromisos manuales no disponibles:", cmError);
       setManuales(new Map(((cmData || []) as CompromisoManual[]).map((c) => [c.rut_key, c])));
+
+      // Clientes marcados como retirados / inactivos (si la tabla aún no existe, se omite)
+      const { data: esData, error: esError } = await supabase
+        .from("comodatos_estado_cliente")
+        .select("*");
+      if (esError) console.warn("Estados de clientes no disponibles:", esError);
+      setEstados(new Map(((esData || []) as EstadoGestion[]).map((e) => [e.rut_key, e])));
 
       const lista = (data || []) as KpiMensual[];
       setHistorial(lista);
@@ -411,16 +446,82 @@ export default function ControlComodatosPage() {
     });
   }, [filas, busqueda, ejecutivoFiltro]);
 
+  // Estado efectivo: lo marcado en SpartanOne manda sobre el cierre
+  const estadoDe = useCallback(
+    (r: ControlRow): EstadoControl => estados.get(r.rut_key)?.estado ?? r.estado_control,
+    [estados]
+  );
+  const esMarcado = useCallback(
+    (r: ControlRow) => {
+      const e = estadoDe(r);
+      return e === "RETIRADO" || e === "INACTIVO";
+    },
+    [estadoDe]
+  );
+
+  const alcanceActivo = useMemo(() => alcance.filter((r) => !esMarcado(r)), [alcance, esMarcado]);
+
   const conteos = useMemo(
     () => ({
-      CRITICO: alcance.filter((r) => r.estado_control === "CRITICO").length,
-      ALERTA: alcance.filter((r) => r.estado_control === "ALERTA").length,
-      CUMPLE: alcance.filter((r) => r.estado_control === "CUMPLE").length,
-      PLAZO: alcance.filter(enPlazo).length,
-      CONTRATO: alcance.filter((r) => r.tiene_contrato).length,
+      CRITICO: alcanceActivo.filter((r) => r.estado_control === "CRITICO").length,
+      ALERTA: alcanceActivo.filter((r) => r.estado_control === "ALERTA").length,
+      CUMPLE: alcanceActivo.filter((r) => r.estado_control === "CUMPLE").length,
+      PLAZO: alcanceActivo.filter(enPlazo).length,
+      CONTRATO: alcanceActivo.filter((r) => r.tiene_contrato).length,
+      RETIRADO: alcance.filter(esMarcado).length,
       TODOS: alcance.length,
     }),
-    [alcance]
+    [alcance, alcanceActivo, esMarcado]
+  );
+
+  const guardarEstado = useCallback(
+    async (r: ControlRow, estado: "RETIRADO" | "INACTIVO", fecha: string, nota: string) => {
+      const fila: EstadoGestion = {
+        rut_key: r.rut_key,
+        rut: r.rut,
+        cliente: r.cliente,
+        estado,
+        fecha: fecha || null,
+        nota: nota.trim() || null,
+        editado_por: emailUsuario,
+        editado_en: new Date().toISOString(),
+      };
+      const { error: e } = await supabase
+        .from("comodatos_estado_cliente")
+        .upsert(fila, { onConflict: "rut_key" });
+      if (e) {
+        setError(`No se pudo guardar el estado: ${e.message}`);
+        return false;
+      }
+      setEstados((prev) => new Map(prev).set(r.rut_key, fila));
+      return true;
+    },
+    [supabase, emailUsuario]
+  );
+
+  const quitarEstado = useCallback(
+    async (r: ControlRow) => {
+      const { error: e } = await supabase
+        .from("comodatos_estado_cliente")
+        .delete()
+        .eq("rut_key", r.rut_key);
+      if (e) {
+        setError(`No se pudo reactivar el cliente: ${e.message}`);
+        return false;
+      }
+      setEstados((prev) => {
+        const m = new Map(prev);
+        m.delete(r.rut_key);
+        return m;
+      });
+      return true;
+    },
+    [supabase]
+  );
+
+  const accionesEstado: AccionesEstado = useMemo(
+    () => ({ puedeEditar, estados, guardar: guardarEstado, quitar: quitarEstado }),
+    [puedeEditar, estados, guardarEstado, quitarEstado]
   );
 
   const compEfectivo = useCallback(
@@ -481,11 +582,13 @@ export default function ControlComodatosPage() {
     const lista =
       pestana === "TODOS"
         ? alcance
+        : pestana === "RETIRADO"
+        ? alcance.filter(esMarcado)
         : pestana === "PLAZO"
-        ? alcance.filter(enPlazo)
+        ? alcanceActivo.filter(enPlazo)
         : pestana === "CONTRATO"
-        ? alcance.filter((r) => r.tiene_contrato)
-        : alcance.filter((r) => r.estado_control === pestana);
+        ? alcanceActivo.filter((r) => r.tiene_contrato)
+        : alcanceActivo.filter((r) => r.estado_control === pestana);
 
     return [...lista].sort((a, b) => {
       if (pestana === "PLAZO" || pestana === "CONTRATO") return num(a.dias_a_vencimiento) - num(b.dias_a_vencimiento);
@@ -495,7 +598,7 @@ export default function ControlComodatosPage() {
       }
       return num(b.inversion_neta) - num(a.inversion_neta);
     });
-  }, [alcance, pestana]);
+  }, [alcance, alcanceActivo, esMarcado, pestana]);
 
   const contratosSinCliente = useMemo(() => {
     const ruts = new Set(filas.map((r) => r.rut_key));
@@ -518,7 +621,7 @@ export default function ControlComodatosPage() {
       string,
       { ejecutivo: string; clientes: number; inversion: number; criticos: number; invCriticos: number; alertas: number; cumplen: number; plazo: number }
     >();
-    alcance.forEach((r) => {
+    alcanceActivo.forEach((r) => {
       const k = ejecutivoLimpio(r.ejecutivo) || "Sin ejecutivo";
       const e =
         mapa.get(k) ||
@@ -535,7 +638,7 @@ export default function ControlComodatosPage() {
       mapa.set(k, e);
     });
     return [...mapa.values()].sort((a, b) => b.invCriticos - a.invCriticos);
-  }, [alcance]);
+  }, [alcanceActivo]);
 
   const cohortes = useMemo(() => {
     if (!kpiMes) return [];
@@ -588,6 +691,7 @@ export default function ControlComodatosPage() {
 
       hoja.columns = [
         { header: "Control", key: "control", width: 14 },
+        { header: "Nota estado", key: "notaEstado", width: 30 },
         { header: "Cliente", key: "cliente", width: 44 },
         { header: "RUT", key: "rut", width: 14 },
         { header: "Ejecutivo", key: "ejecutivo", width: 28 },
@@ -614,7 +718,8 @@ export default function ControlComodatosPage() {
 
       visibles.forEach((r) =>
         hoja.addRow({
-          control: controlTexto(r.estado_control),
+          control: controlTexto(estados.get(r.rut_key)?.estado ?? r.estado_control),
+          notaEstado: estados.get(r.rut_key)?.nota ?? "",
           cliente: r.cliente,
           rut: r.rut,
           ejecutivo: ejecutivoLimpio(r.ejecutivo),
@@ -643,10 +748,10 @@ export default function ControlComodatosPage() {
       hoja.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
       hoja.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A5F" } };
       hoja.getRow(1).height = 25;
-      hoja.autoFilter = { from: "A1", to: "W1" };
-      hoja.getColumn(22).numFmt = '"$"#,##0';
-      [5, 6, 7, 8].forEach((c) => (hoja.getColumn(c).numFmt = '"$"#,##0'));
-      hoja.getColumn(9).numFmt = "0%";
+      hoja.autoFilter = { from: "A1", to: "X1" };
+      hoja.getColumn(23).numFmt = '"$"#,##0';
+      [6, 7, 8, 9].forEach((c) => (hoja.getColumn(c).numFmt = '"$"#,##0'));
+      hoja.getColumn(10).numFmt = "0%";
 
       const buffer = await libro.xlsx.writeBuffer();
       const blob = new Blob([new Uint8Array(buffer)], {
@@ -665,7 +770,7 @@ export default function ControlComodatosPage() {
     } finally {
       setExportando(false);
     }
-  }, [visibles, exportando, pestana, periodo, manuales]);
+  }, [visibles, exportando, pestana, periodo, manuales, estados]);
 
   // ==========================================================
   // ESTADOS DE CARGA / ACCESO
@@ -971,6 +1076,7 @@ export default function ControlComodatosPage() {
                     pestana={pestana}
                     onAbrir={abrirArchivo}
                     compromisos={accionesCompromiso}
+                    estados={accionesEstado}
                   />
                 )}
               </div>
@@ -1097,13 +1203,15 @@ function TablaClientes({
   pestana,
   onAbrir,
   compromisos,
+  estados,
 }: {
   filas: ControlRow[];
   pestana: Pestana;
   onAbrir: (ruta: string | null) => void;
   compromisos: AccionesCompromiso;
+  estados: AccionesEstado;
 }) {
-  const verMotivo = pestana !== "CUMPLE" && pestana !== "PLAZO" && pestana !== "CONTRATO";
+  const verMotivo = pestana !== "CUMPLE" && pestana !== "PLAZO" && pestana !== "CONTRATO" && pestana !== "RETIRADO";
 
   return (
     <table className="w-full min-w-[1850px] text-sm">
@@ -1127,11 +1235,7 @@ function TablaClientes({
         {filas.map((r) => (
           <tr key={r.rut_key} className="align-top transition hover:bg-zinc-50/80">
             <td className="px-4 py-3">
-              <span
-                className={`inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${controlBadge(r.estado_control)}`}
-              >
-                {controlTexto(r.estado_control)}
-              </span>
+              <EstadoCelda r={r} acciones={estados} />
             </td>
             <td className="max-w-[300px] px-4 py-3">
               <div className="font-medium text-zinc-900">{r.cliente || "—"}</div>
@@ -1173,7 +1277,17 @@ function TablaClientes({
               <td className="min-w-[340px] max-w-[460px] px-4 py-3 text-xs leading-5 text-zinc-600">{r.motivo || "—"}</td>
             )}
             <td className="min-w-[220px] max-w-[300px] px-4 py-3 text-xs leading-5 text-zinc-700">
-              {(pestana === "PLAZO" ? r.accion_vencimiento : r.accion_sugerida || r.accion_vencimiento) || "—"}
+              {pestana === "RETIRADO" ? (
+                num(r.inversion_neta) > 0 ? (
+                  <span className="font-medium text-red-700">
+                    Falta registrar la entrada de comodato en SAP ({money(r.inversion_neta)} aún figura como inversión)
+                  </span>
+                ) : (
+                  <span className="text-emerald-700">Regularizado en SAP</span>
+                )
+              ) : (
+                (pestana === "PLAZO" ? r.accion_vencimiento : r.accion_sugerida || r.accion_vencimiento) || "—"
+              )}
             </td>
           </tr>
         ))}
@@ -1186,6 +1300,115 @@ function TablaClientes({
         )}
       </tbody>
     </table>
+  );
+}
+
+function EstadoCelda({ r, acciones }: { r: ControlRow; acciones: AccionesEstado }) {
+  const marca = acciones.estados.get(r.rut_key);
+  const estado: EstadoControl = marca?.estado ?? r.estado_control;
+  const [editando, setEditando] = useState(false);
+  const [nuevo, setNuevo] = useState<"ACTIVO" | "RETIRADO" | "INACTIVO">("RETIRADO");
+  const [fecha, setFecha] = useState("");
+  const [nota, setNota] = useState("");
+  const [guardando, setGuardando] = useState(false);
+
+  const abrir = () => {
+    setNuevo(marca?.estado ?? "RETIRADO");
+    setFecha(marca?.fecha ?? new Date().toISOString().slice(0, 10));
+    setNota(marca?.nota ?? "");
+    setEditando(true);
+  };
+
+  if (editando) {
+    return (
+      <div className="w-[220px] space-y-1.5">
+        <select
+          value={nuevo}
+          onChange={(e) => setNuevo(e.target.value as typeof nuevo)}
+          className="h-8 w-full rounded-lg border border-zinc-300 bg-white px-2 text-sm outline-none focus:border-blue-400"
+        >
+          <option value="RETIRADO">Retirado (equipos retirados)</option>
+          <option value="INACTIVO">Inactivo (cliente sin operación)</option>
+          {marca && <option value="ACTIVO">Activo (volver al control)</option>}
+        </select>
+        {nuevo !== "ACTIVO" && (
+          <>
+            <input
+              type="date"
+              value={fecha}
+              onChange={(e) => setFecha(e.target.value)}
+              className="h-8 w-full rounded-lg border border-zinc-300 px-2 text-sm outline-none focus:border-blue-400"
+            />
+            <input
+              value={nota}
+              onChange={(e) => setNota(e.target.value)}
+              placeholder="Nota (quién retiró, guía, motivo...)"
+              className="h-8 w-full rounded-lg border border-zinc-300 px-2 text-xs outline-none focus:border-blue-400"
+            />
+          </>
+        )}
+        <div className="flex items-center justify-end gap-2 text-xs">
+          <button type="button" onClick={() => setEditando(false)} className="text-zinc-500 hover:underline">
+            Cancelar
+          </button>
+          <button
+            type="button"
+            disabled={guardando}
+            onClick={async () => {
+              setGuardando(true);
+              const ok =
+                nuevo === "ACTIVO" ? await acciones.quitar(r) : await acciones.guardar(r, nuevo, fecha, nota);
+              if (ok) setEditando(false);
+              setGuardando(false);
+            }}
+            className="rounded-md bg-blue-600 px-2.5 py-1 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {guardando ? "Guardando..." : "Guardar"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-0.5">
+      <div className="inline-flex items-center gap-1">
+        <span
+          className={`inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${controlBadge(estado)}`}
+          title={
+            marca
+              ? [marca.nota, marca.editado_por ? `Marcado por ${marca.editado_por} el ${dateCL(marca.editado_en)}` : ""]
+                  .filter(Boolean)
+                  .join("\n")
+              : undefined
+          }
+        >
+          {controlTexto(estado)}
+        </span>
+        {acciones.puedeEditar && (
+          <button
+            type="button"
+            onClick={abrir}
+            title="Marcar como retirado / inactivo"
+            className="rounded p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-blue-600"
+          >
+            ✎
+          </button>
+        )}
+      </div>
+      {marca?.fecha && <div className="text-[11px] text-zinc-500">desde {dateCL(marca.fecha)}</div>}
+      {(estado === "RETIRADO" || estado === "INACTIVO") && num(r.inversion_neta) > 0 && (
+        <div
+          className="text-[11px] font-medium text-red-600"
+          title="El cliente sigue con inversión neta en SAP: falta registrar la Entrada de comodato."
+        >
+          Sin entrada en SAP
+        </div>
+      )}
+      {marca && r.estado_control !== marca.estado && !["RETIRADO", "INACTIVO"].includes(r.estado_control) && (
+        <div className="text-[11px] text-zinc-400">cierre: {controlTexto(r.estado_control)}</div>
+      )}
+    </div>
   );
 }
 
