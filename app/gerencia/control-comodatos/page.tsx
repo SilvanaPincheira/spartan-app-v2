@@ -9,7 +9,7 @@
 //   Storage reportes-comodatos -> Excel y dashboard del mes
 // ============================================================
 
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 // ============================================================
@@ -1211,95 +1211,247 @@ function TablaClientes({
   compromisos: AccionesCompromiso;
   estados: AccionesEstado;
 }) {
-  const verMotivo = pestana !== "CUMPLE" && pestana !== "PLAZO" && pestana !== "CONTRATO" && pestana !== "RETIRADO";
+  const [abierto, setAbierto] = useState<string | null>(null);
+  const alternar = (k: string) => setAbierto((a) => (a === k ? null : k));
+  const parar = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
   return (
-    <table className="w-full min-w-[1850px] text-sm">
-      <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wide text-zinc-500">
+    <table className="w-full table-fixed text-sm">
+      <colgroup>
+        <col className="w-[34px]" />
+        <col className="w-[128px]" />
+        <col />
+        <col className="w-[130px]" />
+        <col className="w-[120px]" />
+        <col className="w-[150px]" />
+        <col className="w-[140px]" />
+        <col className="w-[190px]" />
+      </colgroup>
+      <thead className="bg-zinc-50 text-left text-[11px] uppercase tracking-wide text-zinc-500">
         <tr>
-          <th className="px-4 py-3">Control</th>
-          <th className="px-4 py-3">Cliente</th>
-          <th className="px-4 py-3">Ejecutivo</th>
-          <th className="px-4 py-3 text-right">Inversión neta</th>
-          <th className="px-4 py-3 text-right">Venta prom. 3m</th>
-          <th className="px-4 py-3 text-right">Compromiso</th>
-          <th className="px-4 py-3 text-right">Cumplimiento</th>
-          {pestana === "CRITICO" && <th className="px-4 py-3 text-right">Meses crítico</th>}
-          <th className="px-4 py-3 text-center">Recuperación</th>
-          <th className="px-4 py-3">Contrato / plazo</th>
-          {verMotivo && <th className="px-4 py-3">Motivo</th>}
-          <th className="px-4 py-3">Acción sugerida</th>
+          <th className="py-3 pl-3" />
+          <th className="px-2 py-3">Control</th>
+          <th className="px-2 py-3">Cliente · ejecutivo</th>
+          <th className="px-2 py-3 text-right">Inversión neta</th>
+          <th className="px-2 py-3 text-right">Venta prom. 3m</th>
+          <th className="px-2 py-3 text-right">Compromiso</th>
+          <th className="px-2 py-3">Cumplimiento</th>
+          <th className="px-2 py-3">Contrato / plazo</th>
         </tr>
       </thead>
-      <tbody className="divide-y divide-zinc-100">
-        {filas.map((r) => (
-          <tr key={r.rut_key} className="align-top transition hover:bg-zinc-50/80">
-            <td className="px-4 py-3">
-              <EstadoCelda r={r} acciones={estados} />
-            </td>
-            <td className="max-w-[300px] px-4 py-3">
-              <div className="font-medium text-zinc-900">{r.cliente || "—"}</div>
-              <div className="text-xs text-zinc-400">{r.rut}</div>
-            </td>
-            <td className="whitespace-nowrap px-4 py-3 text-zinc-600">{ejecutivoLimpio(r.ejecutivo) || "—"}</td>
-            <td className="whitespace-nowrap px-4 py-3 text-right font-medium tabular-nums">
-              {money(r.inversion_neta)}
-            </td>
-            <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{money(r.venta_prom_3m)}</td>
-            <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
-              <CompromisoCelda r={r} acciones={compromisos} />
-            </td>
-            <td className="whitespace-nowrap px-4 py-3 text-right">
-              {(() => {
-                const man = compromisos.manuales.get(r.rut_key);
-                if (!man) return <Cumplimiento valor={r.cumplimiento} />;
-                const prov = man.compromiso_mensual > 0 ? num(r.venta_prom_3m) / man.compromiso_mensual : null;
-                return (
-                  <div title="Calculado con el compromiso manual. La clasificación se actualiza en el próximo cierre.">
-                    <Cumplimiento valor={prov} />
-                    <div className="mt-0.5 text-[11px] text-violet-600">provisorio</div>
-                  </div>
-                );
-              })()}
-            </td>
-            {pestana === "CRITICO" && (
-              <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
-                {r.meses_seguidos_critico ? number(r.meses_seguidos_critico) : "—"}
-              </td>
-            )}
-            <td className="whitespace-nowrap px-4 py-3 text-center text-xs text-zinc-600">
-              {recuperacionTexto(r.estado_recuperacion)}
-            </td>
-            <td className="whitespace-nowrap px-4 py-3">
-              <ContratoCelda r={r} onAbrir={onAbrir} />
-            </td>
-            {verMotivo && (
-              <td className="min-w-[340px] max-w-[460px] px-4 py-3 text-xs leading-5 text-zinc-600">{r.motivo || "—"}</td>
-            )}
-            <td className="min-w-[220px] max-w-[300px] px-4 py-3 text-xs leading-5 text-zinc-700">
-              {pestana === "RETIRADO" ? (
-                num(r.inversion_neta) > 0 ? (
-                  <span className="font-medium text-red-700">
-                    Falta registrar la entrada de comodato en SAP ({money(r.inversion_neta)} aún figura como inversión)
+      <tbody>
+        {filas.map((r) => {
+          const open = abierto === r.rut_key;
+          const man = compromisos.manuales.get(r.rut_key);
+          const prov =
+            man && man.compromiso_mensual > 0 ? num(r.venta_prom_3m) / man.compromiso_mensual : null;
+          return (
+            <Fragment key={r.rut_key}>
+              <tr
+                onClick={() => alternar(r.rut_key)}
+                className={`cursor-pointer border-t border-zinc-100 align-top transition ${
+                  open ? "bg-blue-50/40" : "hover:bg-zinc-50/80"
+                }`}
+              >
+                <td className="py-3 pl-3 text-zinc-400">
+                  <span className={`inline-block transition-transform ${open ? "rotate-90 text-blue-600" : ""}`}>
+                    ▸
                   </span>
-                ) : (
-                  <span className="text-emerald-700">Regularizado en SAP</span>
-                )
-              ) : (
-                (pestana === "PLAZO" ? r.accion_vencimiento : r.accion_sugerida || r.accion_vencimiento) || "—"
+                </td>
+                <td className="px-2 py-3" onClick={parar}>
+                  <EstadoCelda r={r} acciones={estados} />
+                </td>
+                <td className="px-2 py-3">
+                  <div className="line-clamp-2 font-medium leading-5 text-zinc-900" title={r.cliente || ""}>
+                    {r.cliente || "—"}
+                  </div>
+                  <div className="truncate text-xs text-zinc-400">
+                    {r.rut} · {ejecutivoLimpio(r.ejecutivo) || "Sin ejecutivo"}
+                  </div>
+                </td>
+                <td className="whitespace-nowrap px-2 py-3 text-right font-medium tabular-nums">
+                  {money(r.inversion_neta)}
+                </td>
+                <td className="whitespace-nowrap px-2 py-3 text-right tabular-nums">{money(r.venta_prom_3m)}</td>
+                <td className="px-2 py-3 text-right" onClick={parar}>
+                  <CompromisoCelda r={r} acciones={compromisos} />
+                </td>
+                <td className="px-2 py-3">
+                  {man ? (
+                    <div title="Calculado con el compromiso manual. La clasificación se actualiza en el próximo cierre.">
+                      <Cumplimiento valor={prov} />
+                      <div className="text-[11px] text-violet-600">provisorio</div>
+                    </div>
+                  ) : (
+                    <Cumplimiento valor={r.cumplimiento} />
+                  )}
+                </td>
+                <td className="px-2 py-3">
+                  <ContratoCompacto r={r} />
+                </td>
+              </tr>
+              {open && (
+                <tr className="bg-blue-50/40">
+                  <td />
+                  <td colSpan={7} className="px-2 pb-4">
+                    <DetalleCliente r={r} pestana={pestana} onAbrir={onAbrir} compromiso={man} estado={estados.estados.get(r.rut_key)} />
+                  </td>
+                </tr>
               )}
-            </td>
-          </tr>
-        ))}
+            </Fragment>
+          );
+        })}
         {filas.length === 0 && (
           <tr>
-            <td colSpan={12} className="px-6 py-12 text-center text-sm text-zinc-500">
+            <td colSpan={8} className="px-6 py-12 text-center text-sm text-zinc-500">
               No hay clientes para los filtros seleccionados.
             </td>
           </tr>
         )}
       </tbody>
     </table>
+  );
+}
+
+function ContratoCompacto({ r }: { r: ControlRow }) {
+  const dias = r.dias_a_vencimiento;
+  const color =
+    dias === null ? "text-zinc-400" : dias < 0 ? "text-red-600" : dias <= 90 ? "text-amber-600" : "text-zinc-500";
+  return (
+    <div className="space-y-0.5">
+      <span
+        className={`inline-flex max-w-full truncate rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+          r.tiene_contrato ? "border-blue-200 bg-blue-50 text-blue-700" : "border-zinc-200 bg-zinc-50 text-zinc-500"
+        }`}
+      >
+        {fuenteTexto(r)}
+      </span>
+      <div className={`truncate text-xs ${color}`}>
+        {dias === null
+          ? "Sin vencimiento"
+          : dias < 0
+          ? `Vencido hace ${number(Math.abs(dias))} d`
+          : `Vence en ${number(dias)} d`}
+      </div>
+    </div>
+  );
+}
+
+function Dato({ label, children, ancho }: { label: string; children: ReactNode; ancho?: boolean }) {
+  return (
+    <div className={ancho ? "sm:col-span-2 lg:col-span-4" : ""}>
+      <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">{label}</p>
+      <div className="mt-0.5 text-sm text-zinc-800">{children}</div>
+    </div>
+  );
+}
+
+function DetalleCliente({
+  r,
+  pestana,
+  onAbrir,
+  compromiso,
+  estado,
+}: {
+  r: ControlRow;
+  pestana: Pestana;
+  onAbrir: (ruta: string | null) => void;
+  compromiso?: CompromisoManual;
+  estado?: EstadoGestion;
+}) {
+  const accion = pestana === "PLAZO" ? r.accion_vencimiento : r.accion_sugerida || r.accion_vencimiento;
+  const marcado = estado || r.estado_control === "RETIRADO" || r.estado_control === "INACTIVO";
+
+  return (
+    <div className="rounded-xl border border-blue-100 bg-white p-4 shadow-sm">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {(r.motivo || accion) && (
+          <>
+            <Dato label="Motivo" ancho={!accion}>
+              {r.motivo || "—"}
+            </Dato>
+            {accion && (
+              <div className="sm:col-span-1 lg:col-span-2">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Acción sugerida</p>
+                <p className="mt-0.5 text-sm font-medium text-blue-800">{accion}</p>
+              </div>
+            )}
+          </>
+        )}
+
+        {marcado && (
+          <Dato label="Estado de gestión" ancho>
+            {controlTexto(estado?.estado ?? r.estado_control)}
+            {estado?.fecha && ` desde ${dateCL(estado.fecha)}`}
+            {estado?.nota && ` · ${estado.nota}`}
+            {num(r.inversion_neta) > 0 && (
+              <span className="ml-2 font-medium text-red-700">
+                · Falta registrar la entrada de comodato en SAP ({money(r.inversion_neta)} aún figura como inversión)
+              </span>
+            )}
+          </Dato>
+        )}
+
+        <Dato label="Venta prom. 12m">{money(r.venta_prom_12m)}</Dato>
+        <Dato label="Días sin compra">{r.dias_sin_compra === null ? "—" : number(r.dias_sin_compra)}</Dato>
+        <Dato label="Meses seguidos crítico">
+          {r.meses_seguidos_critico ? number(r.meses_seguidos_critico) : "—"}
+        </Dato>
+        <Dato label="Recuperación de la inversión">
+          {recuperacionTexto(r.estado_recuperacion)}
+          {r.recuperacion !== null && r.recuperacion !== undefined && r.estado_recuperacion !== "PAGADO"
+            ? ` (${pct(r.recuperacion)})`
+            : ""}
+        </Dato>
+
+        <Dato label="Inversión a costo">{money(r.inversion_costo)}</Dato>
+        <Dato label="Primera guía">{dateCL(r.primera_guia)}</Dato>
+        <Dato label="Compromiso de evaluación">
+          {r.compromiso_mensual ? money(r.compromiso_mensual) : "Sin evaluación"}
+        </Dato>
+        <Dato label="Compromiso manual">
+          {compromiso ? (
+            <>
+              {money(compromiso.compromiso_mensual)}
+              {compromiso.nota && <span className="text-zinc-500"> · {compromiso.nota}</span>}
+            </>
+          ) : (
+            "—"
+          )}
+        </Dato>
+
+        <Dato label="Condiciones">{fuenteTexto(r)}</Dato>
+        <Dato label="Contrato">
+          {r.tiene_contrato ? (
+            <>
+              Firmado {dateCL(r.fecha_contrato)} · {mesesTexto(r.plazo_meses)}
+              {r.renovacion_meses ? ` + renov. ${mesesTexto(r.renovacion_meses)}` : ""}
+            </>
+          ) : (
+            "Sin contrato firmado"
+          )}
+        </Dato>
+        <Dato label="Vigencia">
+          {dateCL(r.inicio_vigencia)} → {dateCL(r.vencimiento)}
+        </Dato>
+        <Dato label="Documento">
+          {r.contrato_pdf ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAbrir(r.contrato_pdf);
+              }}
+              className="font-medium text-blue-600 hover:underline"
+            >
+              Ver contrato PDF
+            </button>
+          ) : (
+            "—"
+          )}
+        </Dato>
+      </div>
+    </div>
   );
 }
 
@@ -1321,7 +1473,8 @@ function EstadoCelda({ r, acciones }: { r: ControlRow; acciones: AccionesEstado 
 
   if (editando) {
     return (
-      <div className="w-[220px] space-y-1.5">
+      <div className="relative" onClick={(e) => e.stopPropagation()}>
+      <div className="absolute left-0 top-0 z-30 w-[250px] space-y-1.5 rounded-xl border border-zinc-200 bg-white p-3 shadow-xl">
         <select
           value={nuevo}
           onChange={(e) => setNuevo(e.target.value as typeof nuevo)}
@@ -1366,6 +1519,7 @@ function EstadoCelda({ r, acciones }: { r: ControlRow; acciones: AccionesEstado 
             {guardando ? "Guardando..." : "Guardar"}
           </button>
         </div>
+      </div>
       </div>
     );
   }
@@ -1430,7 +1584,8 @@ function CompromisoCelda({ r, acciones }: { r: ControlRow; acciones: AccionesCom
 
   if (editando) {
     return (
-      <div className="w-[210px] space-y-1.5 text-left">
+      <div className="relative" onClick={(e) => e.stopPropagation()}>
+      <div className="absolute right-0 top-0 z-30 w-[240px] space-y-1.5 rounded-xl border border-zinc-200 bg-white p-3 text-left shadow-xl">
         <input
           autoFocus
           inputMode="numeric"
@@ -1477,6 +1632,7 @@ function CompromisoCelda({ r, acciones }: { r: ControlRow; acciones: AccionesCom
           </button>
         </div>
       </div>
+      </div>
     );
   }
 
@@ -1510,52 +1666,6 @@ function CompromisoCelda({ r, acciones }: { r: ControlRow; acciones: AccionesCom
         >
           Manual
         </span>
-      )}
-    </div>
-  );
-}
-
-function ContratoCelda({ r, onAbrir }: { r: ControlRow; onAbrir: (ruta: string | null) => void }) {
-  const dias = r.dias_a_vencimiento;
-  const color =
-    dias === null ? "text-zinc-400" : dias < 0 ? "text-red-600" : dias <= 90 ? "text-amber-600" : "text-zinc-500";
-
-  return (
-    <div className="space-y-0.5">
-      <div className="flex items-center gap-2">
-        <span
-          className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-            r.tiene_contrato
-              ? "border-blue-200 bg-blue-50 text-blue-700"
-              : "border-zinc-200 bg-zinc-50 text-zinc-500"
-          }`}
-        >
-          {fuenteTexto(r)}
-        </span>
-        {r.contrato_pdf && (
-          <button
-            type="button"
-            onClick={() => onAbrir(r.contrato_pdf)}
-            className="text-xs font-medium text-blue-600 hover:underline"
-          >
-            PDF
-          </button>
-        )}
-      </div>
-      {r.tiene_contrato && (
-        <div className="text-xs text-zinc-600">
-          Firmado {dateCL(r.fecha_contrato)} · {mesesTexto(r.plazo_meses)}
-          {r.renovacion_meses ? ` + renov. ${mesesTexto(r.renovacion_meses)}` : ""}
-        </div>
-      )}
-      {r.vencimiento ? (
-        <div className={`text-xs ${color}`}>
-          Vence {dateCL(r.vencimiento)}
-          {dias !== null &&
-            (dias < 0 ? ` · vencido hace ${number(Math.abs(dias))} días` : ` · en ${number(dias)} días`)}
-        </div>
-      ) : (
-        <div className="text-xs text-zinc-400">Sin vencimiento</div>
       )}
     </div>
   );
@@ -1612,7 +1722,7 @@ function Cumplimiento({ valor }: { valor: number | null }) {
   const color = v >= 1 ? "bg-emerald-500" : v >= 0.5 ? "bg-amber-500" : "bg-red-500";
   return (
     <div className="inline-flex items-center gap-2">
-      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-zinc-100">
+      <div className="h-1.5 w-14 overflow-hidden rounded-full bg-zinc-100">
         <div className={`h-full ${color}`} style={{ width: `${Math.min(100, v * 100)}%` }} />
       </div>
       <span className="tabular-nums text-zinc-700">{pct(v)}</span>
