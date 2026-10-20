@@ -16,7 +16,7 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 // TIPOS
 // ============================================================
 
-type EstadoControl = "CRITICO" | "ALERTA" | "CUMPLE" | "SIN CLASIFICAR" | "RETIRADO" | "INACTIVO";
+type EstadoControl = "CRITICO" | "ALERTA" | "CUMPLE" | "ACTIVO" | "SIN CLASIFICAR" | "RETIRADO" | "INACTIVO";
 
 type ControlRow = {
   rut_key: string;
@@ -126,14 +126,15 @@ type AccionesCompromiso = {
 
 type Perfil = { role?: string | null; department?: string | null; email?: string | null };
 
-type Pestana = "CRITICO" | "ALERTA" | "CUMPLE" | "PLAZO" | "CONTRATO" | "RETIRADO" | "TODOS";
+type Pestana = "CRITICO" | "ALERTA" | "CUMPLE" | "ACTIVO" | "PLAZO" | "CONTRATO" | "RETIRADO" | "TODOS";
 
 const BUCKET_REPORTES = "reportes-comodatos";
 
 const PESTANAS: { id: Pestana; label: string }[] = [
   { id: "CRITICO", label: "Críticos" },
   { id: "ALERTA", label: "En alerta" },
-  { id: "CUMPLE", label: "Cumplen" },
+  { id: "CUMPLE", label: "Cumplen compromiso" },
+  { id: "ACTIVO", label: "Activos" },
   { id: "PLAZO", label: "Plazos vencidos / por vencer" },
   { id: "CONTRATO", label: "Con contrato firmado" },
   { id: "RETIRADO", label: "Retirados / inactivos" },
@@ -212,6 +213,8 @@ function controlTexto(estado: string | undefined) {
       return "En alerta";
     case "CUMPLE":
       return "Cumple";
+    case "ACTIVO":
+      return "Activo";
     case "RETIRADO":
       return "Retirado";
     case "INACTIVO":
@@ -229,6 +232,8 @@ function controlBadge(estado: string | undefined) {
       return "border-amber-200 bg-amber-50 text-amber-700";
     case "CUMPLE":
       return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case "ACTIVO":
+      return "border-sky-200 bg-sky-50 text-sky-700";
     case "RETIRADO":
       return "border-zinc-300 bg-zinc-100 text-zinc-600 line-through decoration-zinc-400";
     case "INACTIVO":
@@ -284,6 +289,8 @@ export default function ControlComodatosPage() {
   const [pestana, setPestana] = useState<Pestana>("CRITICO");
   const [busqueda, setBusqueda] = useState("");
   const [ejecutivoFiltro, setEjecutivoFiltro] = useState("TODOS");
+  const [divisionFiltro, setDivisionFiltro] = useState("TODAS");
+  const [divisionPorRut, setDivisionPorRut] = useState<Map<string, string>>(new Map());
   const [exportando, setExportando] = useState(false);
 
   // ==========================================================
@@ -351,6 +358,43 @@ export default function ControlComodatosPage() {
         .select("*");
       if (cmError) console.warn("Compromisos manuales no disponibles:", cmError);
       setManuales(new Map(((cmData || []) as CompromisoManual[]).map((c) => [c.rut_key, c])));
+
+      // División por RUT: la misma de "Gestión de Clientes y Comodatos" (ejecutivo asignado en SAP).
+      // Si un RUT tiene códigos en varias divisiones, se usa la de mayor comodato instalado.
+      try {
+        const peso = new Map<string, Map<string, number>>();
+        for (let desde = 0; ; desde += 1000) {
+          const { data: dv, error: dvError } = await supabase
+            .from("gerencia_clientes_kpi_ui")
+            .select("rut_key, rut, division, valor_comodato_codigo")
+            .range(desde, desde + 999);
+          if (dvError) throw dvError;
+          (dv || []).forEach((x: any) => {
+            const k = String(x.rut_key || x.rut || "").toUpperCase().replace(/[^0-9K]/g, "");
+            if (!k) return;
+            const d = String(x.division || "Sin División").trim() || "Sin División";
+            const m = peso.get(k) || new Map<string, number>();
+            m.set(d, (m.get(d) || 0) + Math.max(1, num(x.valor_comodato_codigo)));
+            peso.set(k, m);
+          });
+          if (!dv || dv.length < 1000) break;
+        }
+        const mapa = new Map<string, string>();
+        peso.forEach((m, k) => {
+          let mejor = "Sin División";
+          let max = -1;
+          m.forEach((v, d) => {
+            if (v > max) {
+              max = v;
+              mejor = d;
+            }
+          });
+          mapa.set(k, mejor);
+        });
+        setDivisionPorRut(mapa);
+      } catch (e) {
+        console.warn("Divisiones no disponibles:", e);
+      }
 
       // Clientes marcados como retirados / inactivos (si la tabla aún no existe, se omite)
       const { data: esData, error: esError } = await supabase
@@ -423,18 +467,35 @@ export default function ControlComodatosPage() {
     return i > 0 ? historial[i - 1] : null;
   }, [historial, periodo]);
 
+  const divisionDe = useCallback(
+    (r: ControlRow) => divisionPorRut.get(String(r.rut_key || "").toUpperCase()) || "Sin División",
+    [divisionPorRut]
+  );
+
+  const divisiones = useMemo(
+    () => [...new Set(filas.map((r) => divisionDe(r)))].sort((a, b) => a.localeCompare(b, "es")),
+    [filas, divisionDe]
+  );
+
   const ejecutivos = useMemo(
     () =>
-      [...new Set(filas.map((r) => ejecutivoLimpio(r.ejecutivo)).filter(Boolean))].sort((a, b) =>
-        a.localeCompare(b, "es")
-      ),
-    [filas]
+      [
+        ...new Set(
+          filas
+            .filter((r) => divisionFiltro === "TODAS" || divisionDe(r) === divisionFiltro)
+            .map((r) => ejecutivoLimpio(r.ejecutivo))
+            .filter(Boolean)
+        ),
+      ].sort((a, b) => a.localeCompare(b, "es")),
+    [filas, divisionFiltro, divisionDe]
   );
+
 
   // Ejecutivo + búsqueda (base para pestañas y resumen)
   const alcance = useMemo(() => {
     const q = normalize(busqueda);
     return filas.filter((r) => {
+      if (divisionFiltro !== "TODAS" && divisionDe(r) !== divisionFiltro) return false;
       if (ejecutivoFiltro !== "TODOS" && ejecutivoLimpio(r.ejecutivo) !== ejecutivoFiltro) {
         return false;
       }
@@ -444,7 +505,7 @@ export default function ControlComodatosPage() {
         .toLowerCase()
         .includes(q);
     });
-  }, [filas, busqueda, ejecutivoFiltro]);
+  }, [filas, busqueda, ejecutivoFiltro, divisionFiltro, divisionDe]);
 
   // Estado efectivo: lo marcado en SpartanOne manda sobre el cierre
   const estadoDe = useCallback(
@@ -466,6 +527,7 @@ export default function ControlComodatosPage() {
       CRITICO: alcanceActivo.filter((r) => r.estado_control === "CRITICO").length,
       ALERTA: alcanceActivo.filter((r) => r.estado_control === "ALERTA").length,
       CUMPLE: alcanceActivo.filter((r) => r.estado_control === "CUMPLE").length,
+      ACTIVO: alcanceActivo.filter((r) => r.estado_control === "ACTIVO").length,
       PLAZO: alcanceActivo.filter(enPlazo).length,
       CONTRATO: alcanceActivo.filter((r) => r.tiene_contrato).length,
       RETIRADO: alcance.filter(esMarcado).length,
@@ -619,13 +681,13 @@ export default function ControlComodatosPage() {
   const porEjecutivo = useMemo(() => {
     const mapa = new Map<
       string,
-      { ejecutivo: string; clientes: number; inversion: number; criticos: number; invCriticos: number; alertas: number; cumplen: number; plazo: number }
+      { ejecutivo: string; clientes: number; inversion: number; criticos: number; invCriticos: number; alertas: number; cumplen: number; activos: number; plazo: number }
     >();
     alcanceActivo.forEach((r) => {
       const k = ejecutivoLimpio(r.ejecutivo) || "Sin ejecutivo";
       const e =
         mapa.get(k) ||
-        { ejecutivo: k, clientes: 0, inversion: 0, criticos: 0, invCriticos: 0, alertas: 0, cumplen: 0, plazo: 0 };
+        { ejecutivo: k, clientes: 0, inversion: 0, criticos: 0, invCriticos: 0, alertas: 0, cumplen: 0, activos: 0, plazo: 0 };
       e.clientes += 1;
       e.inversion += num(r.inversion_neta);
       if (r.estado_control === "CRITICO") {
@@ -634,6 +696,7 @@ export default function ControlComodatosPage() {
       }
       if (r.estado_control === "ALERTA") e.alertas += 1;
       if (r.estado_control === "CUMPLE") e.cumplen += 1;
+      if (r.estado_control === "ACTIVO") e.activos += 1;
       if (enPlazo(r)) e.plazo += 1;
       mapa.set(k, e);
     });
@@ -697,6 +760,7 @@ export default function ControlComodatosPage() {
         { header: "Cliente", key: "cliente", width: 44 },
         { header: "RUT", key: "rut", width: 13 },
         { header: "Ejecutivo", key: "ejecutivo", width: 26 },
+        { header: "División", key: "division", width: 22 },
         { header: "Inversión neta", key: "inversion", width: 16 },
         { header: "Falta entrada SAP", key: "faltaSap", width: 16 },
         { header: "Venta prom. 3m", key: "v3", width: 16 },
@@ -735,6 +799,7 @@ export default function ControlComodatosPage() {
           cliente: r.cliente,
           rut: r.rut,
           ejecutivo: ejecutivoLimpio(r.ejecutivo),
+          division: divisionDe(r),
           inversion: r.inversion_neta,
           faltaSap: gestion !== "ACTIVO" && num(r.inversion_neta) > 0 ? "SÍ" : "",
           v3: r.venta_prom_3m,
@@ -800,7 +865,7 @@ export default function ControlComodatosPage() {
     } finally {
       setExportando(false);
     }
-  }, [visibles, exportando, pestana, periodo, manuales, estados]);
+  }, [visibles, exportando, pestana, periodo, manuales, estados, divisionDe]);
 
   // ==========================================================
   // ESTADOS DE CARGA / ACCESO
@@ -904,10 +969,15 @@ export default function ControlComodatosPage() {
             {/* KPI PRINCIPALES */}
             <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
               <KpiCard
-                label="Clientes que cumplen"
+                label="Cumplen compromiso"
                 value={`${number(kpiMes.cumplen)} / ${number(kpiMes.clientes)}`}
-                detail={`${pct(num(kpiMes.cumplen) / Math.max(1, num(kpiMes.clientes)))} de los clientes con comodato`}
-                delta={kpiAnterior ? num(kpiMes.cumplen) - num(kpiAnterior.cumplen) : null}
+                detail={`+ ${number(filas.filter((r) => r.estado_control === "ACTIVO").length)} activos (compran sin cumplir o sin compromiso)`}
+                delta={
+                  // Desde 2026-09 "cumple" exige llegar al compromiso; antes era "compró en el mes"
+                  kpiAnterior && kpiAnterior.periodo >= "2026-09"
+                    ? num(kpiMes.cumplen) - num(kpiAnterior.cumplen)
+                    : null
+                }
                 mejorSiSube
                 tone="green"
               />
@@ -1022,7 +1092,7 @@ export default function ControlComodatosPage() {
 
             {/* FILTROS */}
             <section className="mt-6 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-              <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_280px_auto]">
+              <div className="grid gap-3 lg:grid-cols-[minmax(240px,1fr)_220px_260px_auto]">
                 <div>
                   <FilterLabel>Buscar</FilterLabel>
                   <input
@@ -1031,6 +1101,24 @@ export default function ControlComodatosPage() {
                     placeholder="Cliente, RUT, ejecutivo o motivo..."
                     className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                   />
+                </div>
+                <div>
+                  <FilterLabel>División</FilterLabel>
+                  <select
+                    value={divisionFiltro}
+                    onChange={(e) => {
+                      setDivisionFiltro(e.target.value);
+                      setEjecutivoFiltro("TODOS");
+                    }}
+                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm outline-none focus:border-blue-400"
+                  >
+                    <option value="TODAS">Todas</option>
+                    {divisiones.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <FilterLabel>Ejecutivo</FilterLabel>
@@ -1052,6 +1140,7 @@ export default function ControlComodatosPage() {
                     onClick={() => {
                       setBusqueda("");
                       setEjecutivoFiltro("TODOS");
+                      setDivisionFiltro("TODAS");
                     }}
                   >
                     Limpiar
@@ -1180,6 +1269,7 @@ export default function ControlComodatosPage() {
                         <th className="py-2 text-right">Clientes</th>
                         <th className="py-2 text-right">Inversión neta</th>
                         <th className="py-2 text-right">Cumplen</th>
+                        <th className="py-2 text-right">Activos</th>
                         <th className="py-2 text-right">Críticos</th>
                         <th className="py-2 text-right">Inv. en críticos</th>
                         <th className="py-2 text-right">En alerta</th>
@@ -1197,6 +1287,7 @@ export default function ControlComodatosPage() {
                           <td className="py-2 text-right tabular-nums">{number(e.clientes)}</td>
                           <td className="py-2 text-right tabular-nums">{money(e.inversion)}</td>
                           <td className="py-2 text-right tabular-nums text-emerald-700">{number(e.cumplen)}</td>
+                          <td className="py-2 text-right tabular-nums text-sky-700">{number(e.activos)}</td>
                           <td className="py-2 text-right tabular-nums text-red-700">{number(e.criticos)}</td>
                           <td className="py-2 text-right tabular-nums">{money(e.invCriticos)}</td>
                           <td className="py-2 text-right tabular-nums text-amber-700">{number(e.alertas)}</td>
@@ -1214,8 +1305,11 @@ export default function ControlComodatosPage() {
               días (o nunca), o bajo 50% del compromiso de la evaluación.{" "}
               <strong className="font-semibold text-zinc-700">En alerta:</strong> no es crítico,
               pero no compró en el mes cerrado.{" "}
-              <strong className="font-semibold text-zinc-700">Cumple:</strong> compró en el mes y
-              no es crítico. Las cifras vienen del cierre mensual y se evalúan por RUT empresa.
+              <strong className="font-semibold text-zinc-700">Cumple:</strong> compró en el mes y su
+              venta 3m llega al 80% del compromiso.{" "}
+              <strong className="font-semibold text-zinc-700">Activo:</strong> compró en el mes, pero
+              no tiene compromiso o está bajo ese 80%. Las cifras vienen del cierre mensual y se evalúan
+              por RUT empresa. La división es la del ejecutivo asignado en SAP.
             </div>
           </>
         )}
