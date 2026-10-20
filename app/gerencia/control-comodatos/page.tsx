@@ -126,15 +126,36 @@ type AccionesCompromiso = {
 
 type Perfil = { role?: string | null; department?: string | null; email?: string | null };
 
-type Pestana = "CRITICO" | "ALERTA" | "CUMPLE" | "ACTIVO" | "PLAZO" | "CONTRATO" | "RETIRADO" | "TODOS";
+type Pestana = "CRITICO" | "ALERTA" | "ACTIVO" | "CUMPLE" | "NOCUMPLE" | "PLAZO" | "CONTRATO" | "RETIRADO" | "TODOS";
 
 const BUCKET_REPORTES = "reportes-comodatos";
+
+// Cumple el compromiso si la venta promedio 3m llega a este % del compromiso vigente
+// (mismo umbral que el maestro, hoja Léeme B8).
+const UMBRAL_CUMPLE = 0.8;
+
+type Cumplimiento3m = { vigente: number | null; ratio: number | null; cumple: boolean | null; manual: boolean };
+
+// Compromiso vigente = el fijado a mano en SpartanOne o, si no hay, el de la evaluación.
+function evaluarCompromiso(r: ControlRow, manuales: Map<string, CompromisoManual>): Cumplimiento3m {
+  const man = manuales.get(r.rut_key);
+  const vigente = man?.compromiso_mensual ?? r.compromiso_mensual ?? null;
+  if (!vigente || vigente <= 0) return { vigente: null, ratio: null, cumple: null, manual: !!man };
+  const ratio = num(r.venta_prom_3m) / vigente;
+  return { vigente, ratio, cumple: ratio >= UMBRAL_CUMPLE, manual: !!man };
+}
+
+// En el cierre, CUMPLE y ACTIVO significan lo mismo en actividad: compró en el mes y no es crítico.
+function esActivo(r: ControlRow) {
+  return r.estado_control === "CUMPLE" || r.estado_control === "ACTIVO";
+}
 
 const PESTANAS: { id: Pestana; label: string }[] = [
   { id: "CRITICO", label: "Críticos" },
   { id: "ALERTA", label: "En alerta" },
-  { id: "CUMPLE", label: "Cumplen compromiso" },
   { id: "ACTIVO", label: "Activos" },
+  { id: "CUMPLE", label: "Cumplen compromiso" },
+  { id: "NOCUMPLE", label: "No cumplen compromiso" },
   { id: "PLAZO", label: "Plazos vencidos / por vencer" },
   { id: "CONTRATO", label: "Con contrato firmado" },
   { id: "RETIRADO", label: "Retirados / inactivos" },
@@ -212,13 +233,14 @@ function controlTexto(estado: string | undefined) {
     case "ALERTA":
       return "En alerta";
     case "CUMPLE":
-      return "Cumple";
     case "ACTIVO":
       return "Activo";
     case "RETIRADO":
       return "Retirado";
     case "INACTIVO":
       return "Inactivo";
+    case "SIN CLASIFICAR":
+      return "En instalación";
     default:
       return "Sin clasificar";
   }
@@ -231,7 +253,6 @@ function controlBadge(estado: string | undefined) {
     case "ALERTA":
       return "border-amber-200 bg-amber-50 text-amber-700";
     case "CUMPLE":
-      return "border-emerald-200 bg-emerald-50 text-emerald-700";
     case "ACTIVO":
       return "border-sky-200 bg-sky-50 text-sky-700";
     case "RETIRADO":
@@ -526,14 +547,15 @@ export default function ControlComodatosPage() {
     () => ({
       CRITICO: alcanceActivo.filter((r) => r.estado_control === "CRITICO").length,
       ALERTA: alcanceActivo.filter((r) => r.estado_control === "ALERTA").length,
-      CUMPLE: alcanceActivo.filter((r) => r.estado_control === "CUMPLE").length,
-      ACTIVO: alcanceActivo.filter((r) => r.estado_control === "ACTIVO").length,
+      ACTIVO: alcanceActivo.filter(esActivo).length,
+      CUMPLE: alcanceActivo.filter((r) => evaluarCompromiso(r, manuales).cumple === true).length,
+      NOCUMPLE: alcanceActivo.filter((r) => evaluarCompromiso(r, manuales).cumple === false).length,
       PLAZO: alcanceActivo.filter(enPlazo).length,
       CONTRATO: alcanceActivo.filter((r) => r.tiene_contrato).length,
       RETIRADO: alcance.filter(esMarcado).length,
       TODOS: alcance.length,
     }),
-    [alcance, alcanceActivo, esMarcado]
+    [alcance, alcanceActivo, esMarcado, manuales]
   );
 
   const guardarEstado = useCallback(
@@ -650,6 +672,12 @@ export default function ControlComodatosPage() {
         ? alcanceActivo.filter(enPlazo)
         : pestana === "CONTRATO"
         ? alcanceActivo.filter((r) => r.tiene_contrato)
+        : pestana === "ACTIVO"
+        ? alcanceActivo.filter(esActivo)
+        : pestana === "CUMPLE"
+        ? alcanceActivo.filter((r) => evaluarCompromiso(r, manuales).cumple === true)
+        : pestana === "NOCUMPLE"
+        ? alcanceActivo.filter((r) => evaluarCompromiso(r, manuales).cumple === false)
         : alcanceActivo.filter((r) => r.estado_control === pestana);
 
     return [...lista].sort((a, b) => {
@@ -660,7 +688,7 @@ export default function ControlComodatosPage() {
       }
       return num(b.inversion_neta) - num(a.inversion_neta);
     });
-  }, [alcance, alcanceActivo, esMarcado, pestana]);
+  }, [alcance, alcanceActivo, esMarcado, pestana, manuales]);
 
   const contratosSinCliente = useMemo(() => {
     const ruts = new Set(filas.map((r) => r.rut_key));
@@ -695,13 +723,13 @@ export default function ControlComodatosPage() {
         e.invCriticos += num(r.inversion_neta);
       }
       if (r.estado_control === "ALERTA") e.alertas += 1;
-      if (r.estado_control === "CUMPLE") e.cumplen += 1;
-      if (r.estado_control === "ACTIVO") e.activos += 1;
+      if (evaluarCompromiso(r, manuales).cumple === true) e.cumplen += 1;
+      if (esActivo(r)) e.activos += 1;
       if (enPlazo(r)) e.plazo += 1;
       mapa.set(k, e);
     });
     return [...mapa.values()].sort((a, b) => b.invCriticos - a.invCriticos);
-  }, [alcanceActivo]);
+  }, [alcanceActivo, manuales]);
 
   const cohortes = useMemo(() => {
     if (!kpiMes) return [];
@@ -770,6 +798,7 @@ export default function ControlComodatosPage() {
         { header: "Compromiso vigente", key: "compVig", width: 18 },
         { header: "Cumplimiento (cierre)", key: "cump", width: 15 },
         { header: "Cumplimiento con compromiso vigente", key: "cumpVig", width: 18 },
+        { header: "¿Cumple compromiso?", key: "cumpleComp", width: 16 },
         { header: "Nota compromiso manual", key: "notaMan", width: 34 },
         { header: "Editado por", key: "editor", width: 30 },
         { header: "Días sin compra", key: "dias", width: 14 },
@@ -809,6 +838,10 @@ export default function ControlComodatosPage() {
           compVig: vigente,
           cump: r.cumplimiento,
           cumpVig: vigente ? num(r.venta_prom_3m) / vigente : null,
+          cumpleComp: (() => {
+            const ev = evaluarCompromiso(r, manuales);
+            return ev.cumple === null ? "Sin compromiso" : ev.cumple ? "Cumple" : "No cumple";
+          })(),
           notaMan: man?.nota ?? "",
           editor: [
             man?.editado_por ? `Compromiso: ${man.editado_por} ${dateCL(man.editado_en)}` : "",
@@ -969,15 +1002,10 @@ export default function ControlComodatosPage() {
             {/* KPI PRINCIPALES */}
             <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
               <KpiCard
-                label="Cumplen compromiso"
-                value={`${number(kpiMes.cumplen)} / ${number(kpiMes.clientes)}`}
-                detail={`+ ${number(filas.filter((r) => r.estado_control === "ACTIVO").length)} activos (compran sin cumplir o sin compromiso)`}
-                delta={
-                  // Desde 2026-09 "cumple" exige llegar al compromiso; antes era "compró en el mes"
-                  kpiAnterior && kpiAnterior.periodo >= "2026-09"
-                    ? num(kpiMes.cumplen) - num(kpiAnterior.cumplen)
-                    : null
-                }
+                label="Activos · cumplen compromiso"
+                value={`${number(conteos.ACTIVO)} · ${number(conteos.CUMPLE)}`}
+                detail={`${number(conteos.ACTIVO)} compran en el mes; ${number(conteos.CUMPLE)} llegan al ${Math.round(UMBRAL_CUMPLE * 100)}% de su compromiso y ${number(conteos.NOCUMPLE)} no`}
+                delta={null}
                 mejorSiSube
                 tone="green"
               />
@@ -1305,11 +1333,13 @@ export default function ControlComodatosPage() {
               días (o nunca), o bajo 50% del compromiso de la evaluación.{" "}
               <strong className="font-semibold text-zinc-700">En alerta:</strong> no es crítico,
               pero no compró en el mes cerrado.{" "}
-              <strong className="font-semibold text-zinc-700">Cumple:</strong> compró en el mes y su
-              venta 3m llega al 80% del compromiso.{" "}
-              <strong className="font-semibold text-zinc-700">Activo:</strong> compró en el mes, pero
-              no tiene compromiso o está bajo ese 80%. Las cifras vienen del cierre mensual y se evalúan
-              por RUT empresa. La división es la del ejecutivo asignado en SAP.
+              <strong className="font-semibold text-zinc-700">Activo:</strong> compró en el mes y no es
+              crítico.{" "}
+              <strong className="font-semibold text-zinc-700">Cumple / No cumple:</strong> se mide
+              aparte, al lado del %: la venta promedio 3m llega (o no) al 80% del compromiso vigente
+              (el manual o, si no hay, el de la evaluación). Sin compromiso no se mide. Las cifras
+              vienen del cierre mensual y se evalúan por RUT empresa. La división es la del ejecutivo
+              asignado en SAP.
             </div>
           </>
         )}
@@ -1401,14 +1431,8 @@ function TablaClientes({
                   <CompromisoCelda r={r} acciones={compromisos} />
                 </td>
                 <td className="px-2 py-3">
-                  {man ? (
-                    <div title="Calculado con el compromiso manual. La clasificación se actualiza en el próximo cierre.">
-                      <Cumplimiento valor={prov} />
-                      <div className="text-[11px] text-violet-600">provisorio</div>
-                    </div>
-                  ) : (
-                    <Cumplimiento valor={r.cumplimiento} />
-                  )}
+                  <Cumplimiento valor={man ? prov : r.cumplimiento ?? evaluarCompromiso(r, compromisos.manuales).ratio} />
+                  <CumpleBadge ev={evaluarCompromiso(r, compromisos.manuales)} />
                 </td>
                 <td className="px-2 py-3">
                   <ContratoCompacto r={r} />
@@ -1434,6 +1458,30 @@ function TablaClientes({
         )}
       </tbody>
     </table>
+  );
+}
+
+function CumpleBadge({ ev }: { ev: Cumplimiento3m }) {
+  if (ev.cumple === null) {
+    return <div className="mt-1 text-[11px] text-zinc-400">Sin compromiso</div>;
+  }
+  return (
+    <div className="mt-1 flex items-center gap-1.5">
+      <span
+        className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+          ev.cumple
+            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+            : "border-red-200 bg-red-50 text-red-700"
+        }`}
+      >
+        {ev.cumple ? "Cumple" : "No cumple"}
+      </span>
+      {ev.manual && (
+        <span className="text-[10px] text-violet-600" title="Medido con el compromiso manual">
+          manual
+        </span>
+      )}
+    </div>
   );
 }
 
