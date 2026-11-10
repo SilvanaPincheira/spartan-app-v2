@@ -14,7 +14,7 @@ const DEFAULT_CATALOG_URL =
 const DEFAULT_SN_URL =
   "https://docs.google.com/spreadsheets/d/1kF0INEtwYDXhQCBPTVhU8NQI2URKoi99Hs43DTSO02I/edit?gid=161671364#gid=161671364";
 
-const VIABILITY_THRESHOLD = 0.5; // 50%
+const VIABILITY_THRESHOLD = 0.58; // 58%
 const SUGGEST_ID = "catalog-suggest";
 
 /* ===================== HELPERS ===================== */
