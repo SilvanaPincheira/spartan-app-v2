@@ -317,6 +317,11 @@ export default function NotaVentaPage() {
   const [clientRut, setClientRut] = useState("");
   const [ejecutivo, setEjecutivo] = useState("");
   const [clientCode, setClientCode] = useState("");
+  // Estado informativo. La API de guardado decide el estado definitivo.
+  const [estadoCredito, setEstadoCredito] = useState<"CONSULTANDO" | "LIBRE" | "RETENIDA" | "PENDIENTE_VALIDACION">("PENDIENTE_VALIDACION");
+  const [resumenCredito, setResumenCredito] = useState<{ facturasVencidas: number; diasMaximoAtraso: number; saldosPorMoneda?: Record<string, number> } | null>(null);
+  const [creditoConfirmado, setCreditoConfirmado] = useState(false);
+
   const [direccion, setDireccion] = useState("");
   const [comuna, setComuna] = useState("");
   const [ordenCompraCliente, setOrdenCompraCliente] = useState("");
@@ -478,6 +483,42 @@ useEffect(() => {
 
   window.localStorage.setItem("nv.region", region);
 }, [region]);
+
+  // Consultar morosidad al seleccionar el código SAP del cliente.
+  // Requiere GET /api/cobranzas/morosidad?codigoCliente=...
+  useEffect(() => {
+    setCreditoConfirmado(false);
+    setResumenCredito(null);
+    if (!clientCode.trim()) {
+      setEstadoCredito("PENDIENTE_VALIDACION");
+      return;
+    }
+    const controller = new AbortController();
+    setEstadoCredito("CONSULTANDO");
+    (async () => {
+      try {
+        const res = await fetch(`/api/cobranzas/morosidad?codigoCliente=${encodeURIComponent(clientCode.trim())}`, {
+          cache: "no-store", signal: controller.signal,
+        });
+        const json = await res.json();
+        if (!res.ok || json?.ok !== true || typeof json?.moroso !== "boolean") {
+          throw new Error(json?.error || "No se pudo validar la morosidad");
+        }
+        if (controller.signal.aborted) return;
+        setResumenCredito({
+          facturasVencidas: Number(json.facturasVencidas || 0),
+          diasMaximoAtraso: Number(json.diasMaximoAtraso || 0),
+          saldosPorMoneda: json.saldosPorMoneda || {},
+        });
+        setEstadoCredito(json.moroso ? "RETENIDA" : "LIBRE");
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        console.error("Error verificando morosidad:", error);
+        setEstadoCredito("PENDIENTE_VALIDACION");
+      }
+    })();
+    return () => controller.abort();
+  }, [clientCode]);
 
   // Clientes (desde backend, filtrados por ejecutivo logueado)
 useEffect(() => {
@@ -1206,6 +1247,9 @@ useEffect(() => {
       totalItem: Number((item.total || 0).toFixed(2)),
       especialVigente: !!item.isEspecial,
       especialBloqueado: !!item.isBloqueado,
+      // Valores informativos: /api/save-to-sheets DEBE recalcularlos en el servidor.
+      integrarSAP: estadoCredito === "LIBRE" ? "SI" : "NO",
+      estadoCobranza: estadoCredito === "LIBRE" ? "LIBRE" : estadoCredito === "RETENIDA" ? "RETENIDA" : "PENDIENTE_VALIDACION",
     }));
   }
 
@@ -1227,6 +1271,20 @@ useEffect(() => {
     if (saveRequestRef.current) {
       console.log("⏳ Ya existe un guardado en curso. Esperando el mismo POST...");
       return await saveRequestRef.current;
+    }
+
+    if (estadoCredito === "CONSULTANDO") {
+      throw new Error("Espera a que termine la consulta de morosidad del cliente.");
+    }
+    if (estadoCredito === "RETENIDA" && !creditoConfirmado) {
+      const continuar = window.confirm(
+        `CLIENTE CON FACTURAS VENCIDAS\n\n` +
+        `Cuotas vencidas: ${resumenCredito?.facturasVencidas ?? "—"}\n` +
+        `Máximo atraso: ${resumenCredito?.diasMaximoAtraso ?? "—"} días\n\n` +
+        `La Nota de Venta se guardará RETENIDA y NO se integrará a SAP hasta autorización de Cobranzas.\n\n¿Desea continuar?`
+      );
+      if (!continuar) throw new Error("Guardado cancelado por el usuario.");
+      setCreditoConfirmado(true);
     }
 
     const payload = construirPayloadNV();
@@ -1776,6 +1834,25 @@ const resMail = await fetch("/api/send-notaventa", {
 </label>
           </div>
         </section>
+
+        {/* Estado de integración visible, no editable por el ejecutivo */}
+        {clientCode && (
+          <section className="mb-4 rounded border border-zinc-300 p-3 text-sm print:hidden">
+            <div className="font-semibold">Control de Cobranzas</div>
+            <div>Código SAP: <b>{clientCode}</b></div>
+            <div>Integrar SAP: <b>{estadoCredito === "LIBRE" ? "SI" : "NO"}</b></div>
+            <div>Estado: <b>{estadoCredito === "CONSULTANDO" ? "CONSULTANDO..." : estadoCredito}</b></div>
+            {estadoCredito === "RETENIDA" && (
+              <div className="mt-1 text-red-700">
+                Cliente con deuda vencida. La NV se guardará retenida para revisión de Cobranzas.
+                {resumenCredito && ` Cuotas vencidas: ${resumenCredito.facturasVencidas}. Atraso máximo: ${resumenCredito.diasMaximoAtraso} días.`}
+              </div>
+            )}
+            {estadoCredito === "PENDIENTE_VALIDACION" && (
+              <div className="mt-1 text-amber-700">No se pudo confirmar el estado de deuda. La NV no debe integrarse automáticamente.</div>
+            )}
+          </section>
+        )}
 
         {/* ===== PRODUCTOS ===== */}
         {/* ===== REGIÓN DE PRECIOS ===== */}
