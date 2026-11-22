@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
 
     // Solo una sincronización exitosa y reciente permite declarar un cliente LIBRE.
     const { data: sync, error: syncError } = await db
-      .from("sincronizaciones")
+    .from("control_sincronizaciones")
       .select("ultima_ejecucion_exitosa, estado")
       .eq("proceso", "facturas_vencidas")
       .maybeSingle();
