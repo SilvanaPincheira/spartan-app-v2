@@ -1,3 +1,4 @@
+
 import { NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
@@ -6,6 +7,17 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const PAGE_SIZE = 1000;
+
+// Equivalencias entre nombres registrados
+// en ejecutivos y nombres provenientes de SAP.
+const EQUIVALENCIAS_SAP: Record<
+  string,
+  Record<string, string>
+> = {
+  "juan.prieto@spartan.cl": {
+    "HC JUAN PRIET": "HC JUAN PRIETO",
+  },
+};
 
 export async function GET(req: Request) {
   try {
@@ -47,11 +59,11 @@ export async function GET(req: Request) {
     }
 
     // ============================================================
-    // 2. IDENTIFICAR EJECUTIVO
+    // 2. IDENTIFICAR TODOS LOS REGISTROS DEL EJECUTIVO
     // ============================================================
 
     const {
-      data: ejecutivo,
+      data: ejecutivos,
       error: ejecutivoError,
     } = await supabase
       .from("ejecutivos")
@@ -60,10 +72,12 @@ export async function GET(req: Request) {
         nombre,
         email,
         zona,
-        gerencia
+        gerencia,
+        activo
       `)
       .ilike("email", emailUsuario)
-      .maybeSingle();
+      .eq("activo", true)
+      .order("nombre", { ascending: true });
 
     if (ejecutivoError) {
       console.error(
@@ -75,27 +89,44 @@ export async function GET(req: Request) {
         {
           ok: false,
           error: "No se pudo identificar al ejecutivo",
-          detalle: ejecutivoError.message,
         },
         { status: 500 }
       );
     }
 
-    if (!ejecutivo) {
+    // Confirmar coincidencia exacta del correo.
+    const ejecutivosAutorizados = (ejecutivos || [])
+      .filter(
+        (e) =>
+          String(e.email || "")
+            .trim()
+            .toLowerCase() === emailUsuario
+      );
+
+    if (ejecutivosAutorizados.length === 0) {
       return NextResponse.json(
         {
           ok: false,
           error:
-            `El usuario ${emailUsuario} no está registrado en ejecutivos.`,
+            "El usuario no tiene registros activos en ejecutivos.",
         },
         { status: 404 }
       );
     }
 
-    const nombreEjecutivo =
-      String(ejecutivo.nombre || "").trim();
+    // ============================================================
+    // 3. OBTENER TODOS LOS NOMBRES COMERCIALES
+    // ============================================================
 
-    if (!nombreEjecutivo) {
+    const nombresEjecutivos = Array.from(
+      new Set(
+        ejecutivosAutorizados
+          .map((e) => String(e.nombre || "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    if (nombresEjecutivos.length === 0) {
       return NextResponse.json(
         {
           ok: false,
@@ -106,8 +137,46 @@ export async function GET(req: Request) {
       );
     }
 
+    // Incorporar equivalencias SAP verificadas.
+    const equivalencias =
+      EQUIVALENCIAS_SAP[emailUsuario] || {};
+
+    const nombresSAP = Array.from(
+      new Set(
+        nombresEjecutivos.flatMap((nombre) => {
+          const equivalente =
+            equivalencias[nombre.toUpperCase()];
+
+          return equivalente
+            ? [nombre, equivalente]
+            : [nombre];
+        })
+      )
+    );
+
+    const zonas = Array.from(
+      new Set(
+        ejecutivosAutorizados
+          .map((e) => String(e.zona || "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    const gerencias = Array.from(
+      new Set(
+        ejecutivosAutorizados
+          .map((e) => String(e.gerencia || "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    const nombrePrincipal =
+      nombresEjecutivos.find(
+        (nombre) => !nombre.toUpperCase().startsWith("HC ")
+      ) || nombresEjecutivos[0];
+
     // ============================================================
-    // 3. FILTROS
+    // 4. FILTROS
     // ============================================================
 
     const { searchParams } = new URL(req.url);
@@ -167,7 +236,7 @@ export async function GET(req: Request) {
     `;
 
     // ============================================================
-    // 4. LEER TODAS LAS FILAS POR BLOQUES DE 1000
+    // 5. LEER TODAS LAS FILAS POR BLOQUES DE 1000
     // ============================================================
 
     const todasLasFilas: any[] = [];
@@ -179,10 +248,7 @@ export async function GET(req: Request) {
         .from("seguimiento_pedidos")
         .select(columnas)
         .eq("activo", true)
-        .eq(
-          "empleado_ventas",
-          nombreEjecutivo
-        )
+        .in("empleado_ventas", nombresSAP)
         .order("fecha", {
           ascending: false,
         })
@@ -191,6 +257,9 @@ export async function GET(req: Request) {
         })
         .order("linea_num", {
           ascending: true,
+        })
+        .order("clave_seguimiento", {
+          ascending: true,
         });
 
       // ----------------------------------------------------------
@@ -198,8 +267,7 @@ export async function GET(req: Request) {
       // ----------------------------------------------------------
 
       if (pedido) {
-        const numeroPedido =
-          Number(pedido);
+        const numeroPedido = Number(pedido);
 
         if (Number.isFinite(numeroPedido)) {
           query = query.eq(
@@ -230,8 +298,7 @@ export async function GET(req: Request) {
         );
       }
 
-      const hasta =
-        desde + PAGE_SIZE - 1;
+      const hasta = desde + PAGE_SIZE - 1;
 
       const {
         data,
@@ -252,21 +319,15 @@ export async function GET(req: Request) {
             ok: false,
             error:
               "No se pudo obtener el seguimiento de pedidos",
-            detalle: error.message,
           },
           { status: 500 }
         );
       }
 
-      const bloque =
-        data || [];
+      const bloque = data || [];
 
-      todasLasFilas.push(
-        ...bloque
-      );
+      todasLasFilas.push(...bloque);
 
-      // Si llegaron menos de 1000,
-      // ya no existe otra página.
       if (bloque.length < PAGE_SIZE) {
         break;
       }
@@ -275,7 +336,7 @@ export async function GET(req: Request) {
     }
 
     // ============================================================
-    // 5. RESPUESTA
+    // 6. RESPUESTA
     // ============================================================
 
     return NextResponse.json(
@@ -284,16 +345,15 @@ export async function GET(req: Request) {
 
         usuario: {
           email: emailUsuario,
-          nombre: nombreEjecutivo,
-          zona: ejecutivo.zona || "",
-          gerencia: ejecutivo.gerencia || "",
+          nombre: nombrePrincipal,
+          zona: zonas.join(" / "),
+          gerencia: gerencias.join(" / "),
+          nombresSAP: nombresSAP,
         },
 
-        totalLineas:
-          todasLasFilas.length,
+        totalLineas: todasLasFilas.length,
 
-        data:
-          todasLasFilas,
+        data: todasLasFilas,
       },
       {
         headers: {
@@ -312,7 +372,6 @@ export async function GET(req: Request) {
       {
         ok: false,
         error:
-          error?.message ||
           "Error interno obteniendo seguimiento",
       },
       {
